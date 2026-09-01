@@ -693,7 +693,8 @@ function setCurrentRun(run) {
   const title = run ? run.topic : '尚未选择';
   if (els.title.textContent !== title) els.title.textContent = title;
   const status = run ? run.status : 'idle';
-  if (els.status.textContent !== status) els.status.textContent = status;
+  const statusLabel = status + (run?.template_only ? ' · 模板空转（0 LLM 调用）' : '');
+  if (els.status.textContent !== statusLabel) els.status.textContent = statusLabel;
   els.status.className = `status-pill ${statusClass(status)}`;
   renderStages(run ? run.stage : 'started', run?.workflow);
   updateActionButtons();
@@ -842,6 +843,7 @@ function renderRunList() {
         <div class="run-card-title run-item-title">${escapeHtml(run.topic)}</div>
         <div class="run-card-tags run-item-meta">
           <span class="status-badge ${statusClass(run.status)}">${escapeHtml(run.status)}</span>
+          ${run.template_only ? '<span class="status-badge cancelled">模板空转</span>' : ''}
           <span>${escapeHtml(run.stage)}</span>
           ${retrievalGate ? `<span>${escapeHtml(retrievalGate)}</span>` : ''}
           ${evidenceContract ? `<span>${escapeHtml(evidenceContract)}</span>` : ''}

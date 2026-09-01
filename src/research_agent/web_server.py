@@ -1250,6 +1250,8 @@ class RunStore:
         record["agent_trajectory"] = _read_public_agent_trajectory(out_dir)
         record["agent_observability"] = _read_public_agent_observability(out_dir)
         record["workflow"] = read_workflow_status(out_dir)
+        record["llm_ledger_calls"] = _llm_ledger_call_count(out_dir)
+        record["template_only"] = record.get("stage") == "completed" and record["llm_ledger_calls"] == 0
         record["human_gate_audit"] = _read_public_human_gate_audit(out_dir)
         record["llm_runtime_contract"] = _read_public_llm_runtime_contract(out_dir)
         record["llm_observability"] = _read_public_llm_observability_summary(out_dir)
@@ -1274,6 +1276,7 @@ class RunStore:
             record["stage"] = state.get("stage", record.get("stage", "unknown"))
             record["updated_at"] = state.get("updated_at", record.get("updated_at"))
             record["created_at"] = state.get("created_at", record.get("created_at"))
+        record["template_only"] = record.get("stage") == "completed" and _llm_ledger_call_count(out_dir) == 0
 
         approval = _read_json_object(out_dir / APPROVAL_FILENAME)
         record["approval"] = _public_approval_record(approval) if approval is not None else None
@@ -7228,6 +7231,16 @@ def _write_resume_preflight_or_raise(topic: str, config: AgentConfig, out_dir: P
     write_preflight_artifacts(preflight, out_dir)
     if preflight.status == "fail":
         raise PreflightGateError(preflight)
+
+
+def _llm_ledger_call_count(out_dir: Path) -> int:
+    data = _read_json_object(out_dir / "run-llm-ledger.json")
+    if not isinstance(data, dict):
+        return 0
+    try:
+        return int(data.get("total_calls") or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _preflight_error_payload(report: Any) -> dict[str, Any]:

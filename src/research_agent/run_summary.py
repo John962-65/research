@@ -164,6 +164,8 @@ class RunSummary:
     llm_estimated_cost_usd: float | None
     llm_budget_call_utilization: float
     llm_budget_prompt_utilization: float
+    llm_ledger_calls: int
+    template_only: bool
     run_economics_manual_tasks: int
     run_economics_blocking_issues: int
     artifact_count: int
@@ -405,6 +407,12 @@ def _summarize_run(run_dir: Path) -> RunSummary | None:
 
     stage = str(state.get("stage") or "unknown")
     status = _status(stage, diagnostic, cancel, manifest)
+    # A completed run whose ledger is absent or empty never attempted a single
+    # LLM call: it is a template-only pipeline pass, not a real research run.
+    # The economics audit (derived from the ledger) must agree before labeling.
+    llm_ledger = _read_json(run_dir / "run-llm-ledger.json")
+    llm_ledger = llm_ledger if isinstance(llm_ledger, dict) else {}
+    llm_ledger_calls = _safe_int(llm_ledger.get("total_calls"))
     comparisons = [item for item in statistics.get("comparisons", []) if isinstance(item, dict)]
     candidate_better = sum(1 for item in comparisons if item.get("direction") == "candidate_better")
     top_idea_score = _top_idea_score(ideas)
@@ -452,6 +460,8 @@ def _summarize_run(run_dir: Path) -> RunSummary | None:
     agent_observability_budget = agent_observability.get("budget") if isinstance(agent_observability.get("budget"), dict) else {}
     economics_summary = run_economics.get("summary") if isinstance(run_economics.get("summary"), dict) else {}
     economics_budget = run_economics.get("budget") if isinstance(run_economics.get("budget"), dict) else {}
+    economics_llm_calls = _safe_int(economics_summary.get("total_calls"))
+    template_only = status == "completed" and llm_ledger_calls == 0 and economics_llm_calls == 0
     preflight_checks = [item for item in preflight.get("checks", []) if isinstance(item, dict)]
     recovery_blocking_issues = len(recovery.get("blocking_issues", [])) if isinstance(recovery.get("blocking_issues"), list) else 0
     recovery_actions = len(recovery.get("recommended_actions", [])) if isinstance(recovery.get("recommended_actions"), list) else 0
@@ -614,6 +624,8 @@ def _summarize_run(run_dir: Path) -> RunSummary | None:
         llm_estimated_cost_usd=_safe_float_or_none(economics_summary.get("estimated_cost_usd")),
         llm_budget_call_utilization=_safe_float(economics_budget.get("call_utilization")),
         llm_budget_prompt_utilization=_safe_float(economics_budget.get("prompt_utilization")),
+        llm_ledger_calls=llm_ledger_calls,
+        template_only=template_only,
         run_economics_manual_tasks=len(run_economics.get("manual_tasks", [])) if isinstance(run_economics.get("manual_tasks"), list) else 0,
         run_economics_blocking_issues=len(run_economics.get("blocking_issues", [])) if isinstance(run_economics.get("blocking_issues"), list) else 0,
         artifact_count=artifact_count,
@@ -791,6 +803,8 @@ def _failure_analysis_cell(run: RunSummary) -> str:
 
 
 def _run_economics_cell(run: RunSummary) -> str:
+    if run.template_only:
+        return f"模板空转（0 LLM 调用，{run.artifact_count} 个产物）"
     if not run.run_economics_status:
         return "-"
     tokens = run.llm_input_tokens_estimated + run.llm_output_tokens_estimated

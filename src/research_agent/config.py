@@ -60,6 +60,9 @@ class ExecutionConfig:
     benchmark_manifest_paths: list[str] = field(default_factory=list)
     max_output_bytes: int = 1_048_576
     external_runner_controlled: bool = False
+    # Simulated-mode per-command-mode "advantage" offsets; empty by default so
+    # the deterministic jitter alone decides which command wins.
+    simulated_offsets: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

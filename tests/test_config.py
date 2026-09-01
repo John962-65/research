@@ -6,11 +6,13 @@ import unittest
 
 from research_agent.config import (
     AgentRoleConfig,
+    ExecutionConfig,
     LLMConfig,
     MCPServerConfig,
     config_from_dict,
     load_config,
 )
+from research_agent.experiments import _simulated_metrics
 
 
 CONFIG_TOML = """
@@ -20,6 +22,13 @@ base_url = "http://127.0.0.1:9/v1"
 model = "default-model"
 temperature = 0.2
 max_tokens = 512
+
+[execution]
+mode = "simulated"
+
+[execution.simulated_offsets]
+candidate = 0.05
+baseline = -0.02
 
 [multi_agent]
 enabled = true
@@ -73,6 +82,29 @@ class LoadConfigTest(unittest.TestCase):
             config = load_config(path)
         self.assertEqual(config.llm.temperature, 0.2)
         self.assertEqual(config.llm.max_tokens, 512)
+
+    def test_simulated_offsets_parsed(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            path.write_text(CONFIG_TOML, encoding="utf-8")
+            config = load_config(path)
+        self.assertEqual(config.execution.simulated_offsets, {"candidate": 0.05, "baseline": -0.02})
+        self.assertEqual(ExecutionConfig().simulated_offsets, {})
+
+    def test_simulated_metrics_neutral_without_offsets(self) -> None:
+        names = ["success_rate", "planning_time"]
+        neutral_candidate = _simulated_metrics(names, 0.5, "candidate", "generic")
+        neutral_baseline = _simulated_metrics(names, 0.5, "baseline", "generic")
+        self.assertEqual(neutral_candidate, neutral_baseline)
+
+    def test_simulated_metrics_apply_offset_in_favorable_direction(self) -> None:
+        names = ["success_rate", "planning_time"]
+        offsets = {"candidate": 0.05}
+        with_offset = _simulated_metrics(names, 0.5, "candidate", "generic", offsets)
+        neutral = _simulated_metrics(names, 0.5, "candidate", "generic")
+        self.assertAlmostEqual(with_offset["success_rate"], neutral["success_rate"] + 0.05, places=6)
+        # planning_time is lower-is-better: the advantage lowers the value.
+        self.assertAlmostEqual(with_offset["planning_time"], neutral["planning_time"] - 0.05, places=6)
 
     def test_defaults_when_sections_missing(self) -> None:
         config = config_from_dict({})

@@ -289,7 +289,11 @@ def run_experiments(
             raise ValueError("Benchmark adapter configuration is blocked: " + "；".join(adapter_report.blocking_issues))
     repeats = max(1, int(config.repeats))
     if config.mode == "simulated":
-        results = [_simulate_result(execution_plan, command, experiment_dir, repeat_index) for command in execution_plan.commands for repeat_index in range(repeats)]
+        results = [
+            _simulate_result(execution_plan, command, experiment_dir, repeat_index, simulated_offsets=config.simulated_offsets)
+            for command in execution_plan.commands
+            for repeat_index in range(repeats)
+        ]
     elif config.mode in {"local", "benchmark"}:
         _ensure_local_simulator(experiment_dir, plan.template_profile)
         results = [
@@ -304,13 +308,19 @@ def run_experiments(
     return results
 
 
-def _simulate_result(plan: ExperimentPlan, command: ExperimentCommand, experiment_dir: Path, repeat_index: int) -> ExperimentResult:
+def _simulate_result(
+    plan: ExperimentPlan,
+    command: ExperimentCommand,
+    experiment_dir: Path,
+    repeat_index: int,
+    simulated_offsets: dict[str, float] | None = None,
+) -> ExperimentResult:
     started = time.monotonic()
     seed = _repeat_seed(plan.idea_title, repeat_index)
     command_entropy = hashlib.sha256(f"{command.name}:{seed}".encode("utf-8")).hexdigest()
     base = int(command_entropy[:8], 16) / 0xFFFFFFFF
     mode = _command_mode(command.name)
-    metrics = _simulated_metrics(plan.metrics, base, mode, plan.template_profile)
+    metrics = _simulated_metrics(plan.metrics, base, mode, plan.template_profile, simulated_offsets)
     artifact_path = experiment_dir / f"{command.name}_repeat_{repeat_index + 1:02d}_metrics.txt"
     artifact_path.write_text(str(metrics) + "\n", encoding="utf-8")
     return ExperimentResult(
@@ -1232,18 +1242,27 @@ def _metric_name(text: str) -> str:
     return _short_text(text, 24)
 
 
-def _simulated_metrics(metric_names: list[str], base: float, mode: str, template_profile: str = "generic") -> dict[str, float]:
+def _simulated_metrics(
+    metric_names: list[str],
+    base: float,
+    mode: str,
+    template_profile: str = "generic",
+    offsets: dict[str, float] | None = None,
+) -> dict[str, float]:
     names = _domain_metric_names(metric_names, template_profile)
+    # Neutral by default: the deterministic jitter alone decides which command
+    # wins. Configured offsets express a per-mode "advantage" applied in the
+    # favorable direction for both metric polarities.
+    mode_offsets = offsets or {}
+    advantage = float(mode_offsets.get(mode, 0.0))
     metrics: dict[str, float] = {}
-    high_offset = {"candidate": 0.08, "ablation": 0.025, "baseline": -0.04}.get(mode, -0.04)
-    low_offset = {"candidate": -5, "ablation": -1, "baseline": 3}.get(mode, 3)
     for index, metric in enumerate(names):
         local = (base + index * 0.173) % 1.0
         lower_is_better = _lower_is_better(metric)
         if lower_is_better:
-            value = (34 - local * 8) + low_offset
+            value = (34 - local * 8) - advantage
         else:
-            value = (0.68 + local * 0.16) + high_offset
+            value = (0.68 + local * 0.16) + advantage
         metrics[metric] = round(max(0.0, value), 3)
     return metrics
 
