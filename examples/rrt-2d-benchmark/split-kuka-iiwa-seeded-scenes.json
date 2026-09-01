@@ -1,0 +1,9 @@
+{
+  "name": "seeded-jointspace-scenes-repeat-index",
+  "scene_generator": "run_arm_benchmark.py",
+  "seed_env": "RESEARCH_AGENT_SEED",
+  "repeat_env": "RESEARCH_AGENT_REPEAT_INDEX",
+  "scene_count_per_repeat": 40,
+  "robot": "KUKA iiwa 7-DOF",
+  "variants": ["greedy", "conservative"]
+}

@@ -1,0 +1,8 @@
+{
+  "name": "seeded-scenes-repeat-index",
+  "scene_generator": "run_benchmark.py",
+  "seed_env": "RESEARCH_AGENT_SEED",
+  "repeat_env": "RESEARCH_AGENT_REPEAT_INDEX",
+  "scene_count_per_repeat": 40,
+  "variants": ["greedy", "conservative", "step-ablation"]
+}

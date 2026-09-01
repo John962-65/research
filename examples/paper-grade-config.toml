@@ -1,0 +1,62 @@
+[llm]
+provider = "openai-compatible"
+base_url = "http://127.0.0.1:9/v1"
+model = "paper-grade-preflight-only"
+api_key = "replace-for-real-run"
+
+[literature]
+provider = "online"
+max_papers = 12
+sources = ["semantic_scholar", "openalex", "arxiv", "crossref"]
+timeout_seconds = 12
+max_search_queries = 6
+seed_papers = [
+  "10.1177/0278364911406761 Sampling-based Algorithms for Optimal Motion Planning survey algorithm baseline method",
+  "10.1109/MRA.2012.2205651 The Open Motion Planning Library OMPL benchmark dataset evaluation suite",
+  "https://doi.org/10.1109/MRA.2022.3147415 recent robot manipulation review benchmark baseline 2022"
+]
+
+[ideation]
+max_ideas = 5
+
+[execution]
+mode = "benchmark"
+timeout_seconds = 300
+allowed_commands = ["python3"]
+repeats = 3
+benchmark_manifest_paths = [
+  "examples/rrt-2d-benchmark/manifest-candidate.json",
+  "examples/rrt-2d-benchmark/manifest-baseline.json",
+  "examples/rrt-2d-benchmark/manifest-ablation.json"
+]
+
+[paper]
+target_venue = "workshop"
+style = "concise"
+
+[paper_grade]
+enabled = true
+min_literature_sources = 3
+min_successful_literature_sources = 2
+min_seed_papers = 3
+min_doi_url_seed_papers = 3
+min_curated_seed_roles = 3
+min_benchmark_roles = 3
+min_execution_repeats = 3
+
+[human]
+constraints = [
+  "Treat examples/rrt-2d-benchmark as a structural paper-grade fixture only; replace it with an accepted external benchmark before formal paper claims."
+]
+success_criteria = [
+  "Preflight paper-grade checks pass for online literature and DOI/URL seed coverage, while benchmark manifests remain a structural fixture until replaced by an external public benchmark."
+]
+
+[release]
+code_repository_url = "https://github.com/example/research-agent-paper-grade-fixture"
+code_license = "MIT"
+code_version = "paper-grade-fixture"
+data_repository_url = "https://github.com/example/research-agent-paper-grade-fixture/tree/main/examples/rrt-2d-benchmark"
+data_access_statement = "The bundled fixture uses deterministic procedural scenes controlled by RESEARCH_AGENT_SEED and RESEARCH_AGENT_REPEAT_INDEX; replace with a public external benchmark for formal publication claims."
+environment_url = "https://github.com/example/research-agent-paper-grade-fixture/blob/main/pyproject.toml"
+release_notes = "Preflight scaffold only. Replace LLM credentials, repository URLs, and benchmark manifests before a real paper submission."

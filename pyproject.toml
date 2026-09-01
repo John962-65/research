@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "research-agent"
+version = "0.1.0"
+description = "Auditable research automation pipeline: literature review, ideation, experiments, analysis, and paper drafting."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Local Research Agent" }]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+research-agent = "research_agent.cli:main"
+research-agent-web = "research_agent.web_server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+

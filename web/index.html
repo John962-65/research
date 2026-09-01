@@ -1,0 +1,767 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Research Agent — Scientific Workbench & Preprint Explorer</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400&family=JetBrains+Mono:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="/styles.css?v=multiview-v4">
+</head>
+<body>
+  <!-- Header Top Navigation -->
+  <header class="app-header">
+    <div class="brand-section">
+      <div class="brand-crest" aria-hidden="true">RA</div>
+      <div class="brand-title-group">
+        <h1>Research Agent <span class="brand-badge">Paper-Grade</span></h1>
+        <p>Auditable Autonomous Science Workbench</p>
+      </div>
+    </div>
+
+    <!-- Top View Navigation (Paging / Routing) -->
+    <nav class="nav-tabs" aria-label="View Navigation" role="tablist">
+      <button id="tab-view-workbench" class="nav-tab-btn active" type="button" role="tab" data-view="view-workbench" aria-controls="view-workbench" aria-selected="true">
+        <span>📑 课题工作台</span>
+      </button>
+      <button id="tab-view-launchpad" class="nav-tab-btn" type="button" role="tab" data-view="view-launchpad" aria-controls="view-launchpad" aria-selected="false" tabindex="-1">
+        <span>🚀 发起新研究</span>
+      </button>
+      <button id="tab-view-archives" class="nav-tab-btn" type="button" role="tab" data-view="view-archives" aria-controls="view-archives" aria-selected="false" tabindex="-1">
+        <span>📚 历史成果库</span>
+        <span id="runs-count-badge" class="nav-tab-badge">0</span>
+      </button>
+      <button id="tab-view-readiness" class="nav-tab-btn" type="button" role="tab" data-view="view-readiness" aria-controls="view-readiness" aria-selected="false" tabindex="-1">
+        <span>🛡️ 平台就绪度</span>
+      </button>
+    </nav>
+
+    <div class="header-status-area">
+      <div class="active-run-pill">
+        <span class="pulse-dot"></span>
+        <span id="header-current-topic" style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">尚未选择课题</span>
+      </div>
+      <button id="refresh-runs" class="icon-button" type="button" title="刷新数据" aria-label="刷新">↻</button>
+    </div>
+  </header>
+
+  <div class="app-container">
+    <!-- ====================================================================
+         VIEW 1: Active Research Workbench & Manuscript Reader (工作台)
+         ==================================================================== -->
+    <section id="view-workbench" class="view-section active-view" role="tabpanel" aria-labelledby="tab-view-workbench">
+      <div class="workbench-layout">
+        <!-- Status & Gate Approvals Bar -->
+        <section class="status-band">
+          <div>
+            <p class="eyebrow">Current Research Session</p>
+            <h2 id="current-title">尚未选择课题</h2>
+          </div>
+          <div class="status-actions">
+            <button id="approve-run" class="approval-button" type="button" hidden>批准继续</button>
+            <button id="revision-run" class="revision-button" type="button" hidden>退回</button>
+            <button id="repair-resume-preview" class="secondary-button" type="button" hidden>预览修复</button>
+            <button id="apply-repair-resume" class="secondary-button" type="button" hidden>应用修复建议</button>
+            <button id="resume-run" class="resume-button" type="button" hidden>恢复</button>
+            <button id="apply-literature-feedback" class="secondary-button" type="button" hidden>应用检索建议</button>
+            <button id="cancel-run" class="cancel-button" type="button" hidden>停止</button>
+            <div id="status-pill" class="status-pill idle" role="status" aria-live="polite">idle</div>
+          </div>
+        </section>
+
+        <!-- Stepper Progress Compass -->
+        <section class="progress-band" aria-label="Pipeline progress">
+          <div id="stage-track" class="stage-track"></div>
+        </section>
+
+        <!-- Artifact Navigation & Manuscript Explorer -->
+        <section class="artifact-layout">
+          <div class="artifact-nav-wrapper">
+            <!-- Category Filter Bar -->
+            <div class="artifact-category-filter" aria-label="Artifact categories" role="group">
+              <button class="cat-filter-btn active" type="button" data-cat="all" aria-pressed="true">全部</button>
+              <button class="cat-filter-btn" type="button" data-cat="paper" aria-pressed="false">论文</button>
+              <button class="cat-filter-btn" type="button" data-cat="lit" aria-pressed="false">文献</button>
+              <button class="cat-filter-btn" type="button" data-cat="exp" aria-pressed="false">实验</button>
+              <button class="cat-filter-btn" type="button" data-cat="review" aria-pressed="false">审稿</button>
+              <button class="cat-filter-btn" type="button" data-cat="audit" aria-pressed="false">审计</button>
+              <button class="cat-filter-btn" type="button" data-cat="json" aria-pressed="false">JSON</button>
+            </div>
+            
+            <nav class="artifact-nav" aria-label="Artifacts">
+              <button class="artifact-tab active" type="button" data-file="06-paper.md" data-cat="paper">论文初稿</button>
+              <button class="artifact-tab" type="button" data-file="run-manifest.md" data-cat="audit">执行轨迹</button>
+              <button class="artifact-tab" type="button" data-file="run-llm-ledger.md" data-cat="audit">LLM 账本</button>
+              <button class="artifact-tab" type="button" data-file="run-recovery-plan.md" data-cat="audit">恢复计划</button>
+              <button class="artifact-tab" type="button" data-file="00-preflight.md" data-cat="audit">预检快照</button>
+              <button class="artifact-tab" type="button" data-file="00-gold-run-doctor.md" data-cat="audit">Gold Doctor</button>
+              <button class="artifact-tab" type="button" data-file="00-gold-launch-bundle.md" data-cat="audit">Gold Bundle</button>
+              <button class="artifact-tab" type="button" data-file="00-gold-launch-manifest.md" data-cat="audit">Gold 启动清单</button>
+              <button class="artifact-tab" type="button" data-file="00-human-brief.md" data-cat="paper">人工 Brief</button>
+              <button class="artifact-tab" type="button" data-file="00-prior-run-lessons.md" data-cat="paper">历史经验</button>
+              <button class="artifact-tab" type="button" data-file="00-prior-run-library.md" data-cat="paper">历史成果</button>
+              <button class="artifact-tab" type="button" data-file="00-open-source-lessons.md" data-cat="paper">开源经验</button>
+              <button class="artifact-tab" type="button" data-file="07-paper-review.md" data-cat="review">同行复核</button>
+              <button class="artifact-tab" type="button" data-file="07-paper-review-calibration.md" data-cat="review">复核校准</button>
+              <button class="artifact-tab" type="button" data-file="08-revision-plan.md" data-cat="review">修订计划</button>
+              <button class="artifact-tab" type="button" data-file="09-revised-paper.md" data-cat="paper">修订终稿</button>
+              <button class="artifact-tab" type="button" data-file="09-revised-paper.tex" data-cat="paper">修订稿 TeX</button>
+              <button class="artifact-tab" type="button" data-file="09-revision-report.md" data-cat="review">修订报告</button>
+              <button class="artifact-tab" type="button" data-file="09-revision-response-audit.md" data-cat="review">修订响应审计</button>
+              <button class="artifact-tab" type="button" data-file="10-revised-paper-review.md" data-cat="review">修订后复核</button>
+              <button class="artifact-tab" type="button" data-file="10-claim-traceability.md" data-cat="audit">Claim 逐句溯源</button>
+              <button class="artifact-tab" type="button" data-file="10-citation-grounding.md" data-cat="audit">引用 Grounding</button>
+              <button class="artifact-tab" type="button" data-file="10-citation-coverage.md" data-cat="audit">引用覆盖</button>
+              <button class="artifact-tab" type="button" data-file="10-results-presentation.md" data-cat="exp">结果呈现</button>
+              <button class="artifact-tab" type="button" data-file="10-claim-consistency.md" data-cat="audit">Claim 一致性</button>
+              <button class="artifact-tab" type="button" data-file="10-release-metadata.md" data-cat="audit">Release 元数据</button>
+              <button class="artifact-tab" type="button" data-file="10-code-data-availability.md" data-cat="audit">代码/数据声明</button>
+              <button class="artifact-tab" type="button" data-file="10-ai-disclosure.md" data-cat="audit">AI 披露说明</button>
+              <button class="artifact-tab" type="button" data-file="10-submission-check.md" data-cat="audit">投稿检查</button>
+              <button class="artifact-tab" type="button" data-file="11-submission-package.md" data-cat="paper">投稿包说明</button>
+              <button class="artifact-tab" type="button" data-file="11-submission-package.zip" data-cat="paper">投稿包 ZIP</button>
+              <button class="artifact-tab" type="button" data-file="12-next-iteration-plan.md" data-cat="paper">下一轮迭代</button>
+              <button class="artifact-tab" type="button" data-file="12-repair-queue.md" data-cat="audit">修复队列</button>
+              <button class="artifact-tab" type="button" data-file="12-repair-resume-plan.md" data-cat="audit">修复恢复预案</button>
+              <button class="artifact-tab" type="button" data-file="12-repair-resolution-audit.md" data-cat="audit">修复闭环审计</button>
+              <button class="artifact-tab" type="button" data-file="13-human-gate-audit.md" data-cat="audit">人工 Gate 审计</button>
+              <button class="artifact-tab" type="button" data-file="13-agent-stage-contract.md" data-cat="audit">阶段契约</button>
+              <button class="artifact-tab" type="button" data-file="13-llm-trace-audit.md" data-cat="audit">LLM 阶段审计</button>
+              <button class="artifact-tab" type="button" data-file="13-llm-runtime-contract.md" data-cat="audit">LLM 运行契约</button>
+              <button class="artifact-tab" type="button" data-file="13-run-economics-audit.md" data-cat="audit">运行成本审计</button>
+              <button class="artifact-tab" type="button" data-file="13-agent-observability-audit.md" data-cat="audit">可观测性审计</button>
+              <button class="artifact-tab" type="button" data-file="13-research-scorecard.md" data-cat="audit">科研分数卡</button>
+              <button class="artifact-tab" type="button" data-file="14-run-integrity-audit.md" data-cat="audit">完整性审计</button>
+              <button class="artifact-tab" type="button" data-file="14-final-handoff.md" data-cat="audit">最终交付</button>
+              <button class="artifact-tab" type="button" data-file="15-gold-run-verification.md" data-cat="audit">Gold Verify</button>
+              <button class="artifact-tab" type="button" data-file="10-final-readiness.md" data-cat="audit">最终就绪</button>
+              <button class="artifact-tab" type="button" data-file="run-diagnostics.md" data-cat="audit">诊断报告</button>
+              <button class="artifact-tab" type="button" data-file="05-analysis.md" data-cat="exp">统计分析</button>
+              <button class="artifact-tab" type="button" data-file="04-statistics.md" data-cat="exp">实验统计</button>
+              <button class="artifact-tab" type="button" data-file="04-benchmark-pack-run.md" data-cat="exp">Benchmark Pack</button>
+              <button class="artifact-tab" type="button" data-file="02-ideas.md" data-cat="exp">Idea 方案集</button>
+              <button class="artifact-tab" type="button" data-file="02-novelty-audit.md" data-cat="exp">新颖性审计</button>
+              <button class="artifact-tab" type="button" data-file="02-idea-audit.md" data-cat="exp">Idea 审计</button>
+              <button class="artifact-tab" type="button" data-file="02-exploration-map.md" data-cat="exp">探索路线图</button>
+              <button class="artifact-tab" type="button" data-file="02-exploration-map.svg" data-cat="exp">探索图 SVG</button>
+              <button class="artifact-tab" type="button" data-file="02-experiment-manager.md" data-cat="exp">实验管理</button>
+              <button class="artifact-tab" type="button" data-file="00-research-plan.md" data-cat="paper">领域研究计划</button>
+              <button class="artifact-tab" type="button" data-file="01-literature.md" data-cat="lit">文献库</button>
+              <button class="artifact-tab" type="button" data-file="01-literature-rerank.md" data-cat="lit">候选重排</button>
+              <button class="artifact-tab" type="button" data-file="01-literature-search-strategy.md" data-cat="lit">检索策略</button>
+              <button class="artifact-tab" type="button" data-file="01-literature-source-health.md" data-cat="lit">源健康</button>
+              <button class="artifact-tab" type="button" data-file="01-query-execution-audit.md" data-cat="lit">Query 执行</button>
+              <button class="artifact-tab" type="button" data-file="01-literature-snowball.md" data-cat="lit">文献滚雪球</button>
+              <button class="artifact-tab" type="button" data-file="01-literature-coverage.md" data-cat="lit">覆盖审计</button>
+              <button class="artifact-tab" type="button" data-file="01-literature-evidence-mix.md" data-cat="lit">证据组合</button>
+              <button class="artifact-tab" type="button" data-file="01-literature-evidence-contract.md" data-cat="lit">证据契约</button>
+              <button class="artifact-tab" type="button" data-file="01-literature-rescue-plan.md" data-cat="lit">补检索计划</button>
+              <button class="artifact-tab" type="button" data-file="01-literature-rescue-execution.md" data-cat="lit">补检索执行</button>
+              <button class="artifact-tab" type="button" data-file="01-literature-search-feedback.md" data-cat="lit">检索反馈</button>
+              <button class="artifact-tab" type="button" data-file="01-seed-paper-intake.md" data-cat="lit">Seed Intake</button>
+              <button class="artifact-tab" type="button" data-file="01-literature-quality.md" data-cat="lit">文献质量</button>
+              <button class="artifact-tab" type="button" data-file="01-literature-metadata-audit.md" data-cat="lit">Metadata 审计</button>
+              <button class="artifact-tab" type="button" data-file="01-literature-curated.md" data-cat="lit">筛选文献</button>
+              <button class="artifact-tab" type="button" data-file="01-fulltext-corpus.md" data-cat="lit">全文语料</button>
+              <button class="artifact-tab" type="button" data-file="01-context.md" data-cat="lit">文献上下文</button>
+              <button class="artifact-tab" type="button" data-file="01-review-gate.md" data-cat="review">文献审核门禁</button>
+              <button class="artifact-tab" type="button" data-file="01-citation-audit.md" data-cat="lit">引用审计</button>
+              <button class="artifact-tab" type="button" data-file="approval.json" data-cat="json">批准记录 JSON</button>
+              <button class="artifact-tab" type="button" data-file="01-review-feedback.md" data-cat="review">审核反馈</button>
+              <button class="artifact-tab" type="button" data-file="01-review-revision-plan.md" data-cat="review">退回修复计划</button>
+              <button class="artifact-tab" type="button" data-file="01-review-feedback.json" data-cat="json">审核反馈 JSON</button>
+              <button class="artifact-tab" type="button" data-file="01-review-revision-plan.json" data-cat="json">退回修复计划 JSON</button>
+              <button class="artifact-tab" type="button" data-file="01-review-constraints.md" data-cat="review">审核约束</button>
+              <button class="artifact-tab" type="button" data-file="01-review-constraints.json" data-cat="json">审核约束 JSON</button>
+              <button class="artifact-tab" type="button" data-file="cancel.json" data-cat="json">取消记录 JSON</button>
+              <button class="artifact-tab" type="button" data-file="01-references.bib" data-cat="lit">BibTeX</button>
+              <button class="artifact-tab" type="button" data-file="04-results.csv" data-cat="exp">结果 CSV</button>
+              <button class="artifact-tab" type="button" data-file="04-experiment-runbook.md" data-cat="exp">实验 Runbook</button>
+              <button class="artifact-tab" type="button" data-file="04-environment-snapshot.md" data-cat="exp">环境快照</button>
+              <button class="artifact-tab" type="button" data-file="04-result-validation.md" data-cat="exp">结果验证</button>
+              <button class="artifact-tab" type="button" data-file="04-failure-analysis.md" data-cat="exp">失败分析</button>
+              <button class="artifact-tab" type="button" data-file="04-benchmark-result-schema-audit.md" data-cat="exp">Benchmark Schema</button>
+              <button class="artifact-tab" type="button" data-file="04-benchmark-evidence-audit.md" data-cat="exp">Benchmark 证据</button>
+              <button class="artifact-tab" type="button" data-file="04-experiment-decision.md" data-cat="exp">实验决策</button>
+              <button class="artifact-tab" type="button" data-file="04-hypothesis-outcome.md" data-cat="exp">假设结果</button>
+              <button class="artifact-tab" type="button" data-file="04-claim-boundary-preflight.md" data-cat="exp">Claim 预检</button>
+              <button class="artifact-tab" type="button" data-file="04-statistics-figure.svg" data-cat="exp">统计图 SVG</button>
+              <button class="artifact-tab" type="button" data-file="04-statistics.json" data-cat="json">统计 JSON</button>
+              <button class="artifact-tab" type="button" data-file="03-experiment-plan.md" data-cat="exp">实验计划</button>
+              <button class="artifact-tab" type="button" data-file="03-review-constraint-compliance.md" data-cat="exp">约束落实</button>
+              <button class="artifact-tab" type="button" data-file="03-experiment-audit.md" data-cat="exp">实验审计</button>
+              <button class="artifact-tab" type="button" data-file="03-idea-experiment-contract.md" data-cat="exp">Idea-实验契约</button>
+              <button class="artifact-tab" type="button" data-file="03-execution-safety-audit.md" data-cat="exp">执行安全</button>
+              <button class="artifact-tab" type="button" data-file="03-execution-approval.md" data-cat="exp">执行确认</button>
+              <button class="artifact-tab" type="button" data-file="03-ablation-plan.md" data-cat="exp">消融计划</button>
+              <button class="artifact-tab" type="button" data-file="03-preregistration.md" data-cat="exp">预注册</button>
+              <button class="artifact-tab" type="button" data-file="03-benchmark-plan.md" data-cat="exp">Benchmark 接入</button>
+              <button class="artifact-tab" type="button" data-file="03-benchmark-readiness.md" data-cat="exp">Benchmark Readiness</button>
+              <button class="artifact-tab" type="button" data-file="03-benchmark-adapters.md" data-cat="exp">Benchmark Adapter</button>
+              <button class="artifact-tab" type="button" data-file="03-experiment-plan.json" data-cat="json">计划 JSON</button>
+              <button class="artifact-tab" type="button" data-file="03-review-constraint-compliance.json" data-cat="json">约束落实 JSON</button>
+              <button class="artifact-tab" type="button" data-file="03-experiment-audit.json" data-cat="json">实验审计 JSON</button>
+              <button class="artifact-tab" type="button" data-file="03-idea-experiment-contract.json" data-cat="json">Idea-实验契约 JSON</button>
+              <button class="artifact-tab" type="button" data-file="03-execution-safety-audit.json" data-cat="json">执行安全 JSON</button>
+              <button class="artifact-tab" type="button" data-file="03-execution-approval.json" data-cat="json">执行确认 JSON</button>
+              <button class="artifact-tab" type="button" data-file="03-ablation-plan.json" data-cat="json">消融计划 JSON</button>
+              <button class="artifact-tab" type="button" data-file="03-preregistration.json" data-cat="json">预注册 JSON</button>
+              <button class="artifact-tab" type="button" data-file="02-novelty-audit.json" data-cat="json">新颖性审计 JSON</button>
+              <button class="artifact-tab" type="button" data-file="02-idea-audit.json" data-cat="json">Idea 审计 JSON</button>
+              <button class="artifact-tab" type="button" data-file="02-exploration-map.json" data-cat="json">探索图 JSON</button>
+              <button class="artifact-tab" type="button" data-file="02-experiment-manager.json" data-cat="json">实验管理 JSON</button>
+              <button class="artifact-tab" type="button" data-file="03-benchmark-plan.json" data-cat="json">Benchmark 接入 JSON</button>
+              <button class="artifact-tab" type="button" data-file="03-benchmark-readiness.json" data-cat="json">Benchmark Readiness JSON</button>
+              <button class="artifact-tab" type="button" data-file="03-benchmark-adapters.json" data-cat="json">Benchmark Adapter JSON</button>
+              <button class="artifact-tab" type="button" data-file="04-experiment-runbook.json" data-cat="json">实验 Runbook JSON</button>
+              <button class="artifact-tab" type="button" data-file="04-environment-snapshot.json" data-cat="json">环境快照 JSON</button>
+              <button class="artifact-tab" type="button" data-file="04-result-validation.json" data-cat="json">结果验证 JSON</button>
+              <button class="artifact-tab" type="button" data-file="04-failure-analysis.json" data-cat="json">失败分析 JSON</button>
+              <button class="artifact-tab" type="button" data-file="04-benchmark-result-schema-audit.json" data-cat="json">Benchmark Schema JSON</button>
+              <button class="artifact-tab" type="button" data-file="04-benchmark-evidence-audit.json" data-cat="json">Benchmark 证据 JSON</button>
+              <button class="artifact-tab" type="button" data-file="04-experiment-decision.json" data-cat="json">实验决策 JSON</button>
+              <button class="artifact-tab" type="button" data-file="04-hypothesis-outcome.json" data-cat="json">假设结果 JSON</button>
+              <button class="artifact-tab" type="button" data-file="04-claim-boundary-preflight.json" data-cat="json">Claim 预检 JSON</button>
+              <button class="artifact-tab" type="button" data-file="04-statistics-figure.json" data-cat="json">统计图 JSON</button>
+              <button class="artifact-tab" type="button" data-file="04-benchmark-pack-run.json" data-cat="json">Benchmark Pack JSON</button>
+              <button class="artifact-tab" type="button" data-file="run-manifest.json" data-cat="json">轨迹 JSON</button>
+              <button class="artifact-tab" type="button" data-file="run-llm-ledger.json" data-cat="json">LLM 账本 JSON</button>
+              <button class="artifact-tab" type="button" data-file="run-recovery-plan.json" data-cat="json">恢复计划 JSON</button>
+              <button class="artifact-tab" type="button" data-file="00-preflight.json" data-cat="json">预检快照 JSON</button>
+              <button class="artifact-tab" type="button" data-file="00-gold-launch-bundle.json" data-cat="json">Gold Bundle JSON</button>
+              <button class="artifact-tab" type="button" data-file="00-gold-launch-manifest.json" data-cat="json">Gold 启动清单 JSON</button>
+              <button class="artifact-tab" type="button" data-file="00-prior-run-lessons.json" data-cat="json">历史经验 JSON</button>
+              <button class="artifact-tab" type="button" data-file="00-prior-run-library.json" data-cat="json">历史成果 JSON</button>
+              <button class="artifact-tab" type="button" data-file="00-open-source-lessons.json" data-cat="json">开源经验 JSON</button>
+              <button class="artifact-tab" type="button" data-file="00-research-plan.json" data-cat="json">研究计划 JSON</button>
+              <button class="artifact-tab" type="button" data-file="01-literature-rerank.json" data-cat="json">候选重排 JSON</button>
+              <button class="artifact-tab" type="button" data-file="01-literature-search-strategy.json" data-cat="json">检索策略 JSON</button>
+              <button class="artifact-tab" type="button" data-file="01-literature-source-health.json" data-cat="json">源健康 JSON</button>
+              <button class="artifact-tab" type="button" data-file="01-query-execution-audit.json" data-cat="json">Query 执行 JSON</button>
+              <button class="artifact-tab" type="button" data-file="01-literature-snowball.json" data-cat="json">滚雪球 JSON</button>
+              <button class="artifact-tab" type="button" data-file="01-literature-coverage.json" data-cat="json">覆盖审计 JSON</button>
+              <button class="artifact-tab" type="button" data-file="01-literature-evidence-mix.json" data-cat="json">证据组合 JSON</button>
+              <button class="artifact-tab" type="button" data-file="01-literature-evidence-contract.json" data-cat="json">证据契约 JSON</button>
+              <button class="artifact-tab" type="button" data-file="01-literature-rescue-plan.json" data-cat="json">补检索 JSON</button>
+              <button class="artifact-tab" type="button" data-file="01-literature-rescue-execution.json" data-cat="json">补检索执行 JSON</button>
+              <button class="artifact-tab" type="button" data-file="01-literature-search-feedback.json" data-cat="json">检索反馈 JSON</button>
+              <button class="artifact-tab" type="button" data-file="01-seed-paper-intake.json" data-cat="json">Seed Intake JSON</button>
+              <button class="artifact-tab" type="button" data-file="01-literature-quality.json" data-cat="json">文献质量 JSON</button>
+              <button class="artifact-tab" type="button" data-file="01-literature-metadata-audit.json" data-cat="json">Metadata 审计 JSON</button>
+              <button class="artifact-tab" type="button" data-file="01-literature-curated.json" data-cat="json">筛选文献 JSON</button>
+              <button class="artifact-tab" type="button" data-file="01-fulltext-corpus.json" data-cat="json">全文语料 JSON</button>
+              <button class="artifact-tab" type="button" data-file="01-citation-audit.json" data-cat="json">引用审计 JSON</button>
+              <button class="artifact-tab" type="button" data-file="07-paper-review.json" data-cat="json">复核 JSON</button>
+              <button class="artifact-tab" type="button" data-file="07-paper-review-calibration.json" data-cat="json">复核校准 JSON</button>
+              <button class="artifact-tab" type="button" data-file="08-revision-plan.json" data-cat="json">修订计划 JSON</button>
+              <button class="artifact-tab" type="button" data-file="09-revision-report.json" data-cat="json">修订报告 JSON</button>
+              <button class="artifact-tab" type="button" data-file="09-revision-response-audit.json" data-cat="json">修订响应审计 JSON</button>
+              <button class="artifact-tab" type="button" data-file="10-revised-paper-review.json" data-cat="json">修订后复核 JSON</button>
+              <button class="artifact-tab" type="button" data-file="10-claim-traceability.json" data-cat="json">Claim 追踪 JSON</button>
+              <button class="artifact-tab" type="button" data-file="10-citation-grounding.json" data-cat="json">引用 Grounding JSON</button>
+              <button class="artifact-tab" type="button" data-file="10-citation-coverage.json" data-cat="json">引用覆盖 JSON</button>
+              <button class="artifact-tab" type="button" data-file="10-results-presentation.json" data-cat="json">结果呈现 JSON</button>
+              <button class="artifact-tab" type="button" data-file="10-claim-consistency.json" data-cat="json">Claim 一致性 JSON</button>
+              <button class="artifact-tab" type="button" data-file="10-release-metadata.json" data-cat="json">Release 元数据 JSON</button>
+              <button class="artifact-tab" type="button" data-file="10-code-data-availability.json" data-cat="json">代码/数据 JSON</button>
+              <button class="artifact-tab" type="button" data-file="10-ai-disclosure.json" data-cat="json">AI 披露 JSON</button>
+              <button class="artifact-tab" type="button" data-file="10-submission-check.json" data-cat="json">投稿检查 JSON</button>
+              <button class="artifact-tab" type="button" data-file="11-submission-package.json" data-cat="json">投稿包 JSON</button>
+              <button class="artifact-tab" type="button" data-file="12-next-iteration-plan.json" data-cat="json">下一轮 JSON</button>
+              <button class="artifact-tab" type="button" data-file="12-repair-queue.json" data-cat="json">修复队列 JSON</button>
+              <button class="artifact-tab" type="button" data-file="12-repair-resume-plan.json" data-cat="json">修复恢复 JSON</button>
+              <button class="artifact-tab" type="button" data-file="12-repair-resolution-audit.json" data-cat="json">修复闭环 JSON</button>
+              <button class="artifact-tab" type="button" data-file="13-human-gate-audit.json" data-cat="json">人工 Gate JSON</button>
+              <button class="artifact-tab" type="button" data-file="13-agent-stage-contract.json" data-cat="json">阶段契约 JSON</button>
+              <button class="artifact-tab" type="button" data-file="13-llm-trace-audit.json" data-cat="json">LLM 阶段审计 JSON</button>
+              <button class="artifact-tab" type="button" data-file="13-llm-runtime-contract.json" data-cat="json">LLM 运行契约 JSON</button>
+              <button class="artifact-tab" type="button" data-file="13-run-economics-audit.json" data-cat="json">运行成本审计 JSON</button>
+              <button class="artifact-tab" type="button" data-file="13-agent-observability-audit.json" data-cat="json">可观测性审计 JSON</button>
+              <button class="artifact-tab" type="button" data-file="13-research-scorecard.json" data-cat="json">分数卡 JSON</button>
+              <button class="artifact-tab" type="button" data-file="14-run-integrity-audit.json" data-cat="json">完整性审计 JSON</button>
+              <button class="artifact-tab" type="button" data-file="14-final-handoff.json" data-cat="json">最终交付 JSON</button>
+              <button class="artifact-tab" type="button" data-file="15-gold-run-verification.json" data-cat="json">Gold Verify JSON</button>
+              <button class="artifact-tab" type="button" data-file="10-final-readiness.json" data-cat="json">最终就绪 JSON</button>
+              <button class="artifact-tab" type="button" data-file="run-diagnostics.json" data-cat="json">诊断 JSON</button>
+            </nav>
+          </div>
+
+          <!-- Main Viewer Surface -->
+          <section class="artifact-viewer">
+            <div class="viewer-toolbar">
+              <div>
+                <p class="eyebrow">Manuscript & Evidence Viewer</p>
+                <h3 id="artifact-title">06-paper.md</h3>
+              </div>
+              <div class="viewer-actions">
+                <div class="view-mode-toggle" role="group" aria-label="产物查看模式">
+                  <button id="btn-view-academic" class="mode-tab active" type="button" aria-controls="artifact-rendered" aria-pressed="true">📖 学术排版</button>
+                  <button id="btn-view-raw" class="mode-tab" type="button" aria-controls="artifact-content" aria-pressed="false">💻 源码</button>
+                </div>
+                <a id="download-link" class="secondary-button" href="#" download>下载文件</a>
+              </div>
+            </div>
+            
+            <section id="gold-launch-command-panel" class="launch-command-panel" aria-label="Safe launch commands" hidden>
+              <div class="launch-command-header">
+                <div>
+                  <p class="eyebrow">Gold Launch</p>
+                  <h4>Safe Launch Commands</h4>
+                </div>
+                <button id="copy-gold-launch-commands" class="mini-button" type="button" disabled>复制命令</button>
+              </div>
+              <div id="gold-launch-checklist" class="launch-checklist" hidden></div>
+              <pre id="gold-launch-command-text" class="launch-command-text"></pre>
+            </section>
+            
+            <div id="artifact-rendered" class="artifact-rendered academic-paper"></div>
+            <pre id="artifact-content" class="artifact-content" hidden>提交一个课题后，这里会显示论文、分析和实验结果。</pre>
+          </section>
+        </section>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         VIEW 2: Launchpad (新建研究课题向导与发起)
+         ==================================================================== -->
+    <section id="view-launchpad" class="view-section" role="tabpanel" aria-labelledby="tab-view-launchpad" hidden>
+      <div class="launchpad-card">
+        <div class="launchpad-header">
+          <h2>🚀 发起全新自主科研探索 (Launch New Run)</h2>
+          <p>配置研究课题、人工边界、模型算力、文献语料库与 Benchmark 执行沙箱</p>
+        </div>
+
+        <form id="run-form" class="wizard-steps-container">
+          <!-- Step 1: Research Topic & Human Brief -->
+          <div class="wizard-card-section">
+            <div class="wizard-section-title">
+              <span class="wizard-section-number">1</span>
+              <span>研究问题与人工先验 (Research Topic & Human Prior)</span>
+            </div>
+
+            <label class="field" style="margin-bottom:12px;">
+              <span>核心研究课题 (Topic) *</span>
+              <textarea id="topic" name="topic" rows="3" required>自动科研 agent 如何减少机器学习实验迭代成本</textarea>
+            </label>
+
+            <label class="field" style="margin-bottom:12px;">
+              <span>人工 Brief 说明 (Human Notes)</span>
+              <textarea id="human-notes" name="human_notes" rows="2" placeholder="研究偏好、已有观察、必须关注的核心问题；每行一条"></textarea>
+            </label>
+
+            <label class="field" style="margin-bottom:12px;">
+              <span>人工先验约束 (Human Constraints)</span>
+              <textarea id="human-constraints" name="human_constraints" rows="2" placeholder="必须遵守的领域、方法、安全或复现约束；每行一条"></textarea>
+            </label>
+
+            <div class="form-grid">
+              <label class="field">
+                <span>成功标准 (Success Criteria)</span>
+                <textarea id="human-success-criteria" name="human_success_criteria" rows="2" placeholder="预期指标提升、消融标准；每行一条"></textarea>
+              </label>
+              <label class="field">
+                <span>资源限制 (Resource Limits)</span>
+                <textarea id="human-resource-limits" name="human_resource_limits" rows="2" placeholder="算力、时间、预算限制"></textarea>
+              </label>
+            </div>
+
+            <label class="field" style="margin-top:12px;">
+              <span>已知风险 (Known Risks)</span>
+              <textarea id="human-risks" name="human_risks" rows="2" placeholder="负结果、偏题风险或不可用数据；每行一条"></textarea>
+            </label>
+          </div>
+
+          <!-- Step 2: Model & Cost Budget -->
+          <div class="wizard-card-section">
+            <div class="wizard-section-title">
+              <span class="wizard-section-number">2</span>
+              <span>模型引擎与计算预算 (LLM Architecture & Budget)</span>
+            </div>
+
+            <div class="form-grid">
+              <label class="field">
+                <span>论文级硬门槛 (Paper-Grade Mode)</span>
+                <span class="checkbox-row">
+                  <input id="paper-grade-enabled" name="paper_grade_enabled" type="checkbox">
+                  <span>启用严格论文级准入门槛</span>
+                </span>
+              </label>
+
+              <label class="field">
+                <span>LLM 接口协议 (Provider)</span>
+                <select id="llm-provider" name="llm_provider">
+                  <option value="openai-compatible">OpenAI-Compatible (通用标准兼容协议)</option>
+                  <option value="deepseek">DeepSeek (深度求索官方)</option>
+                  <option value="dashscope">阿里百炼 DashScope (通义千问 Qwen)</option>
+                  <option value="zhipu">智谱清言 BigModel (GLM-4)</option>
+                  <option value="moonshot">月之暗面 Moonshot (Kimi)</option>
+                  <option value="siliconflow">硅基流动 SiliconFlow</option>
+                  <option value="openrouter">OpenRouter (全球模型智能路由)</option>
+                  <option value="google-gemini">Google Gemini (OpenAI 协议)</option>
+                  <option value="anthropic-compatible" disabled>Anthropic 原生协议 (当前未支持)</option>
+                  <option value="ollama">Ollama (本地私有化大模型)</option>
+                  <option value="vllm">vLLM / LocalAI (本地部署服务)</option>
+                  <option value="azure-openai" disabled>Azure OpenAI 原生协议 (当前未支持)</option>
+                  <option value="custom-http">自定义 OpenAI-Compatible 网关</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <div style="display:flex; align-items:center; justify-content:space-between;">
+                  <span>模型名称 (Model) *</span>
+                  <button id="btn-fetch-models" class="mini-button" type="button" style="height:24px; padding:0 8px; font-size:10.5px; background:var(--navy-50); border-color:#bfdbfe; color:var(--navy-900); font-weight:700;">
+                    查询接口模型
+                  </button>
+                </div>
+                <input id="llm-model" name="llm_model" list="llm-model-datalist" placeholder="输入或从下方快速选择模型...">
+                <datalist id="llm-model-datalist"></datalist>
+                <div id="llm-model-chips" style="display:flex; flex-wrap:wrap; gap:5px; margin-top:6px; max-height:100px; overflow-y:auto;" hidden></div>
+              </label>
+
+              <label class="field">
+                <span>Base URL</span>
+                <input id="llm-base-url" name="llm_base_url" type="url" value="https://api.openai.com/v1" placeholder="http://192.0.2.1:8080">
+              </label>
+
+              <label class="field">
+                <span>API Key (密钥)</span>
+                <input id="llm-api-key" name="llm_api_key" type="password" autocomplete="off" data-paper-grade-secret placeholder="普通模式可临时填写；留空读取 OPENAI_API_KEY">
+                <small id="llm-api-key-policy" class="field-note">普通模式可为本次请求临时提供 Key；配置快照不会保存密钥。</small>
+              </label>
+
+              <label class="field">
+                <span>LLM 调用上限 (Max Calls)</span>
+                <input id="llm-max-calls" name="llm_max_calls" type="number" min="0" value="0">
+              </label>
+
+              <label class="field">
+                <span>Prompt 字符上限</span>
+                <input id="llm-max-prompt-chars" name="llm_max_prompt_chars" type="number" min="0" value="0">
+              </label>
+
+              <label class="field">
+                <span>Input Token 单价 ($/M)</span>
+                <input id="llm-input-cost" name="llm_input_cost_per_million_tokens" type="number" min="0" step="0.0001" value="0">
+              </label>
+
+              <label class="field">
+                <span>Output Token 单价 ($/M)</span>
+                <input id="llm-output-cost" name="llm_output_cost_per_million_tokens" type="number" min="0" step="0.0001" value="0">
+              </label>
+
+              <label class="field">
+                <span>Idea 方案探索数</span>
+                <input id="max-ideas" name="max_ideas" type="number" min="1" max="10" value="5">
+              </label>
+            </div>
+
+            <div class="inline-actions" style="margin-top: 14px; align-items: center; gap: 10px;">
+              <button id="test-llm-connection" class="mini-button" type="button" style="height: 34px; padding: 0 14px; font-weight: 700; background: var(--navy-50); border-color: #bfdbfe; color: var(--navy-900);">
+                <span>🔌 测试模型与 Key 连通性 (Ping)</span>
+              </button>
+              <span id="llm-connection-status" role="status" aria-live="polite" style="font-size: 12px;"></span>
+            </div>
+          </div>
+
+          <!-- Step 3: Literature & Corpus -->
+          <div class="wizard-card-section">
+            <div class="wizard-section-title">
+              <span class="wizard-section-number">3</span>
+              <span>学术文献检索与全文语料 (Literature & Citation Corpus)</span>
+            </div>
+
+            <div class="form-grid">
+              <label class="field">
+                <span>文献检索模式</span>
+                <select id="literature-provider" name="literature_provider">
+                  <option value="offline">离线种子库 (Offline)</option>
+                  <option value="online">在线检索 (Online)</option>
+                  <option value="auto">在线优先 (Auto)</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>文献召回数量 (Max Papers)</span>
+                <input id="max-papers" name="max_papers" type="number" min="1" max="20" value="8">
+              </label>
+
+              <label class="field">
+                <span>检索式生成数 (Max Queries)</span>
+                <input id="max-search-queries" name="max_search_queries" type="number" min="1" max="12" value="4">
+              </label>
+
+              <label class="field">
+                <span>文献源联系邮箱 (Contact Email)</span>
+                <input id="literature-contact-email" name="literature_contact_email" type="email" autocomplete="email" placeholder="name@example.com">
+              </label>
+            </div>
+
+            <label class="field" style="margin-top:12px; margin-bottom:12px;">
+              <span>在线文献源 (Sources)</span>
+              <input id="literature-sources" name="literature_sources" value="semantic_scholar, openalex, arxiv, crossref">
+            </label>
+
+            <div class="form-grid">
+              <label class="field">
+                <span>Semantic Scholar API Key</span>
+                <input id="semantic-scholar-api-key" name="semantic_scholar_api_key" type="password" autocomplete="off" data-paper-grade-secret placeholder="可选，留空读环境变量">
+              </label>
+
+              <label class="field">
+                <span>OpenAlex API Key</span>
+                <input id="openalex-api-key" name="openalex_api_key" type="password" autocomplete="off" data-paper-grade-secret placeholder="可选，留空读环境变量">
+              </label>
+            </div>
+
+            <label class="field" style="margin-top:12px;">
+              <span>补充检索式 (Extra Search Queries)</span>
+              <textarea id="extra-search-queries" name="extra_search_queries" rows="2" placeholder="每行一个英文 scholarly query；可由历史检索反馈自动填入"></textarea>
+            </label>
+
+            <label class="field" style="margin-top:12px;">
+              <span>人工种子文献 (Seed Papers)</span>
+              <textarea id="seed-papers" name="seed_papers" rows="3" placeholder="每行一个 DOI / URL / 标题 (例如 10.1145/xxxx)"></textarea>
+            </label>
+
+            <label class="field" style="margin-top:12px;">
+              <span>本地全文语料文件 (Fulltext Corpus Paths)</span>
+              <textarea id="fulltext-paths" name="fulltext_paths" rows="2" placeholder="每行一个 .txt / .md / .pdf 路径"></textarea>
+            </label>
+
+            <label class="field" style="margin-top:12px;">
+              <span>审核意见/批注 (Review Notes)</span>
+              <textarea id="review-notes" name="review_notes" rows="2" placeholder="非 pass gate 批准必填：人工判断、修复说明或风险接受理由"></textarea>
+            </label>
+
+            <input id="benchmark-pack-run-dir" name="benchmark_pack_run_dir" type="hidden">
+            <input id="fulltext-grounding-run-dir" name="fulltext_grounding_run_dir" type="hidden">
+          </div>
+
+          <!-- Step 4: Benchmark Sandbox & Execution Safety -->
+          <div class="wizard-card-section">
+            <div class="wizard-section-title">
+              <span class="wizard-section-number">4</span>
+              <span>基准测试沙箱与执行安全 (Benchmark & Execution Sandbox)</span>
+            </div>
+
+            <div class="form-grid">
+              <label class="field">
+                <span>实验执行模式</span>
+                <select id="execution-mode" name="execution_mode">
+                  <option value="simulated">模拟实验 (Simulated)</option>
+                  <option value="local">本地白名单 (Local)</option>
+                  <option value="benchmark">Benchmark Manifest 模式</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>重复检验次数 (Repeats)</span>
+                <input id="execution-repeats" name="execution_repeats" type="number" min="1" max="20" value="5">
+              </label>
+
+              <label class="field">
+                <span>执行超时 (秒)</span>
+                <input id="timeout-seconds" name="timeout_seconds" type="number" min="1" max="86400" value="300">
+              </label>
+
+              <label class="field">
+                <span>命令白名单 (Allowed Commands)</span>
+                <input id="allowed-commands" name="allowed_commands" value="python3, pytest">
+              </label>
+            </div>
+
+            <label class="field" style="margin-top:12px;">
+              <span>Benchmark Manifest 路径</span>
+              <textarea id="benchmark-manifests" name="benchmark_manifests" rows="2" placeholder="每行一个 .json / .toml manifest 路径；Benchmark 模式必填"></textarea>
+            </label>
+
+            <div class="inline-actions">
+              <button id="benchmark-template" class="mini-button" type="button">生成模板</button>
+              <button id="benchmark-manifest-lint" class="mini-button" type="button">校验草稿</button>
+              <button id="benchmark-manifest-save" class="mini-button" type="button">保存草稿</button>
+              <button id="apply-benchmark-example" class="mini-button" type="button">示例 Manifest</button>
+            </div>
+
+            <label class="field" style="margin-top:12px;">
+              <span>Manifest 草稿保存路径</span>
+              <input id="benchmark-manifest-draft-path" name="benchmark_manifest_draft_path" placeholder="benchmarks/robot-motion-planning/manifest.json">
+            </label>
+
+            <label class="field" style="margin-top:12px;">
+              <span>Manifest 草稿内容 (JSON)</span>
+              <textarea id="benchmark-manifest-draft" class="manifest-draft" name="benchmark_manifest_draft" rows="6" placeholder="点击生成模板后在此编辑；保存仅允许写入 benchmarks/**/manifest.json"></textarea>
+            </label>
+          </div>
+
+          <!-- Step 5: Publication & Archival -->
+          <div class="wizard-card-section">
+            <div class="wizard-section-title">
+              <span class="wizard-section-number">5</span>
+              <span>成果发布与开源归档 (Publication & Open Source Archival)</span>
+            </div>
+
+            <label class="field" style="margin-bottom:12px;">
+              <span>代码仓库 URL (Code Repository)</span>
+              <input id="release-code-repository-url" name="release_code_repository_url" placeholder="https://github.com/org/repo">
+            </label>
+
+            <div class="form-grid">
+              <label class="field">
+                <span>代码归档 DOI</span>
+                <input id="release-code-archive-doi" name="release_code_archive_doi" placeholder="10.xxxx/zenodo.xxxxx">
+              </label>
+              <label class="field">
+                <span>开源许可证 (License)</span>
+                <input id="release-code-license" name="release_code_license" placeholder="MIT / Apache-2.0">
+              </label>
+              <label class="field">
+                <span>版本/Commit</span>
+                <input id="release-code-version" name="release_code_version" placeholder="v0.1.0 / commit SHA">
+              </label>
+              <label class="field">
+                <span>环境归档 URL</span>
+                <input id="release-environment-url" name="release_environment_url" placeholder="Docker / Conda / requirements URL">
+              </label>
+            </div>
+
+            <div class="form-grid" style="margin-top:12px;">
+              <label class="field">
+                <span>数据仓库 URL</span>
+                <input id="release-data-repository-url" name="release_data_repository_url" placeholder="https://zenodo.org/records/...">
+              </label>
+              <label class="field">
+                <span>数据归档 DOI</span>
+                <input id="release-data-archive-doi" name="release_data_archive_doi" placeholder="10.xxxx/zenodo.xxxxx">
+              </label>
+            </div>
+
+            <label class="field" style="margin-top:12px;">
+              <span>数据可用性声明 (Data Access Statement)</span>
+              <textarea id="release-data-access-statement" name="release_data_access_statement" rows="2" placeholder="数据来源、访问条件、限制，或说明未使用外部数据"></textarea>
+            </label>
+
+            <label class="field" style="margin-top:12px;">
+              <span>发布备注 (Release Notes)</span>
+              <textarea id="release-notes" name="release_notes" rows="2" placeholder="发布范围、限制、人工核验记录"></textarea>
+            </label>
+
+            <div class="inline-actions">
+              <button id="release-metadata-lint" class="mini-button" type="button">校验 Release 元数据</button>
+            </div>
+
+            <div class="form-grid" style="margin-top:12px;">
+              <label class="field">
+                <span>目标场景 (Target Venue)</span>
+                <input id="target-venue" name="target_venue" value="workshop">
+              </label>
+              <label class="field">
+                <span>写作风格 (Paper Style)</span>
+                <select id="paper-style" name="paper_style">
+                  <option value="concise">简洁 (Concise)</option>
+                  <option value="formal">正式 (Formal Academic)</option>
+                  <option value="technical">技术细节 (Technical Deep)</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <!-- Preflight Tools Grid -->
+          <div class="wizard-card-section">
+            <div class="wizard-section-title">
+              <span class="wizard-section-number">⚡</span>
+              <span>预检与辅助工具集 (Preflight & Diagnosis Tools)</span>
+            </div>
+            <div class="preflight-tools-grid">
+              <button id="preflight-run" class="preflight-button" type="button">预检配置</button>
+              <button id="env-llm-preflight" class="preflight-button" type="button">Env LLM</button>
+              <button id="gold-env-lint" class="preflight-button" type="button">Gold Env</button>
+              <button id="gold-env-launch-kit" class="preflight-button" type="button">Gold Env Kit</button>
+              <button id="gold-launch-bundle" class="preflight-button" type="button">Gold Bundle</button>
+              <button id="gold-run-launch" class="preflight-button" type="button">Gold Launch</button>
+              <button id="literature-preview" class="preflight-button" type="button">预览文献</button>
+              <button id="paper-grade-probe" class="preflight-button" type="button">Gold 文献 Probe</button>
+              <button id="apply-literature-preview-seeds" class="preflight-button" type="button" hidden disabled>应用预览 Seed</button>
+              <button id="apply-memory-defaults" class="preflight-button" type="button">应用历史推荐</button>
+              <button id="apply-gold-defaults" class="preflight-button" type="button">Gold Defaults</button>
+              <button id="gold-defaults-smoke" class="preflight-button" type="button">Gold Smoke</button>
+              <button id="benchmark-preview" class="preflight-button" type="button">校验 Benchmark</button>
+              <button id="gold-run-doctor" class="preflight-button" type="button">Gold Doctor</button>
+              <button id="gold-run-verify" class="preflight-button" type="button" disabled>Gold Verify</button>
+            </div>
+          </div>
+
+          <!-- Bottom Action Bar -->
+          <div class="launch-action-bar">
+            <div>
+              <p style="margin:0; font-size:12px; color:var(--muted);">配置完成后点击右侧按钮启动科研流水线</p>
+            </div>
+            <button id="submit-run" class="primary-button" type="submit">
+              <span class="button-icon" aria-hidden="true">▶</span>
+              <span>启动自主科研流水线 (Launch Run)</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         VIEW 3: Runs Archives & Library (历史成果库与分页列表)
+         ==================================================================== -->
+    <section id="view-archives" class="view-section" role="tabpanel" aria-labelledby="tab-view-archives" hidden>
+      <div class="archives-card">
+        <div class="archives-header-row">
+          <div>
+            <h2>📚 科研成果库与历史 Runs (Research Archives)</h2>
+            <p style="margin:4px 0 0; color:var(--muted); font-size:12px;">跨 Run 检索已产出论文、Benchmark 证据链与失败经验</p>
+          </div>
+          <div class="archives-search-bar">
+            <input id="library-query" type="search" placeholder="检索历史成果库 (DOI / 课题 / Baseline / Benchmark)">
+            <button id="library-search" class="mini-button" type="button">成果库检索</button>
+          </div>
+          <div class="history-actions">
+            <button id="summary-runs" class="mini-button" type="button">对比</button>
+            <button id="platform-audit" class="mini-button" type="button">平台审计</button>
+            <button id="perfect-readiness" class="mini-button" type="button">完美度</button>
+            <button id="open-source-backfill-preview" class="mini-button" type="button">预览回填</button>
+            <button id="open-source-backfill-run" class="mini-button" type="button">执行回填</button>
+            <button id="llm-backfill-preview" class="mini-button" type="button">预览 LLM</button>
+            <button id="llm-backfill-run" class="mini-button" type="button">回填 LLM审计</button>
+            <button id="repair-backlog" class="mini-button" type="button">修复 Backlog</button>
+            <button id="repair-backfill-preview" class="mini-button" type="button">预览修复回填</button>
+            <button id="repair-backfill-run" class="mini-button" type="button">回填修复预案</button>
+          </div>
+        </div>
+
+        <!-- Paged Runs Grid / List -->
+        <div id="run-list" class="archives-grid"></div>
+
+        <!-- Pagination Controls Bar (翻页) -->
+        <div class="pagination-bar">
+          <div id="pagination-info" style="font-size:12px; color:var(--muted);">共 0 条记录</div>
+          <div class="pagination-controls">
+            <button id="page-prev" class="page-btn" type="button" disabled>◀ 上一页</button>
+            <span id="page-numbers" style="display:flex; gap:4px;"></span>
+            <button id="page-next" class="page-btn" type="button" disabled>下一页 ▶</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         VIEW 4: Readiness Dashboard (平台就绪度大屏)
+         ==================================================================== -->
+    <section id="view-readiness" class="view-section" role="tabpanel" aria-labelledby="tab-view-readiness" hidden>
+      <div class="readiness-view-card">
+        <div class="launchpad-header">
+          <h2>🛡️ 平台就绪度与合规治理 (Readiness & Governance)</h2>
+          <p>Gold Standard Run 验收状态、能力矩阵评分与治理健康度</p>
+        </div>
+        <div id="readiness-details-content">
+          <p style="color:var(--muted);">点击上方【完美度】或【平台审计】按钮可刷新实时审计数据。</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script src="/app.js?v=multiview-v4"></script>
+</body>
+</html>

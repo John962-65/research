@@ -1,0 +1,86 @@
+[llm]
+provider = "openai-compatible"
+base_url_env = "OPENAI_BASE_URL"
+model_env = "OPENAI_MODEL"
+api_key_env = "OPENAI_API_KEY"
+
+[literature]
+provider = "online"
+max_papers = 18
+sources = ["semantic_scholar", "openalex", "arxiv", "crossref"]
+timeout_seconds = 12
+max_search_queries = 8
+extra_search_queries = [
+  "UCI Iris classification baseline logistic regression decision tree Gaussian Naive Bayes SVM k nearest neighbors",
+  "scikit-learn Iris DummyClassifier majority class stratified random classifier baseline",
+  "Fisher Iris linear discriminant analysis logistic regression classification baseline",
+  "UCI Iris classification benchmark reproducibility recent 2024 2025"
+]
+fulltext_paths = [
+  "benchmarks/uci-iris-classification/fulltext/iris.names.txt"
+]
+seed_papers = [
+  "10.24432/C56C76 benchmark dataset UCI Iris 2024 official dataset",
+  "10.1111/j.1469-1809.1936.tb02137.x Fisher Iris discriminant analysis baseline method algorithm",
+  "10.1109/TIT.1972.1054809 Gates reduced nearest neighbor rule Iris baseline method",
+  "https://archive.ics.uci.edu/dataset/53/iris review overview benchmark dataset 2024 official UCI repository page",
+  "https://scikit-learn.org/stable/modules/generated/sklearn.datasets.load_iris.html scikit-learn load_iris built-in Iris dataset provenance fallback",
+  "https://scikit-learn.org/stable/modules/generated/sklearn.dummy.DummyClassifier.html scikit-learn DummyClassifier majority class stratified random classifier sanity baseline",
+  "https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LogisticRegression.html scikit-learn Logistic Regression linear classifier baseline",
+  "https://scikit-learn.org/stable/modules/generated/sklearn.tree.DecisionTreeClassifier.html scikit-learn Decision Tree classifier interpretable nonlinear baseline",
+  "https://scikit-learn.org/stable/modules/generated/sklearn.naive_bayes.GaussianNB.html scikit-learn Gaussian Naive Bayes classifier small sample probability baseline",
+  "https://scikit-learn.org/stable/modules/generated/sklearn.svm.SVC.html scikit-learn Support Vector Machine RBF kernel Iris baseline",
+  "https://scikit-learn.org/stable/modules/generated/sklearn.neighbors.KNeighborsClassifier.html scikit-learn k-Nearest Neighbors Iris classification baseline"
+]
+
+[ideation]
+max_ideas = 5
+
+[execution]
+mode = "benchmark"
+timeout_seconds = 300
+allowed_commands = ["python3"]
+repeats = 3
+benchmark_manifest_paths = [
+  "benchmarks/uci-iris-classification/manifest-candidate.json",
+  "benchmarks/uci-iris-classification/manifest-baseline.json",
+  "benchmarks/uci-iris-classification/manifest-ablation.json",
+  "benchmarks/uci-iris-classification/manifest-reference-majority.json",
+  "benchmarks/uci-iris-classification/manifest-reference-dummy-stratified.json",
+  "benchmarks/uci-iris-classification/manifest-reference-gaussian-nb.json",
+  "benchmarks/uci-iris-classification/manifest-reference-decision-tree.json",
+  "benchmarks/uci-iris-classification/manifest-reference-linear-logistic.json"
+]
+
+[paper]
+target_venue = "workshop"
+style = "concise"
+
+[paper_grade]
+enabled = true
+min_literature_sources = 3
+min_successful_literature_sources = 2
+min_seed_papers = 3
+min_doi_url_seed_papers = 3
+min_curated_seed_roles = 3
+min_benchmark_roles = 3
+min_execution_repeats = 3
+
+[human]
+constraints = [
+  "This UCI Iris config is a paper-grade benchmark path scaffold. Set OPENAI_BASE_URL, OPENAI_MODEL, OPENAI_API_KEY, and RESEARCH_AGENT_CONTACT_EMAIL before treating it as a gold run.",
+  "Do not claim broad scientific novelty from Iris alone; use it to validate benchmark provenance, manifest contracts, repeated execution, statistics, and release flow."
+]
+success_criteria = [
+  "paper-grade preflight passes once a real LLM endpoint/key and contact email are configured.",
+  "paper-grade-benchmark-probe passes for all three UCI Iris role manifests."
+]
+
+[release]
+code_license = "MIT"
+code_version = "uci-iris-paper-grade-scaffold"
+data_repository_url = "https://archive.ics.uci.edu/dataset/53/iris"
+data_archive_doi = "10.24432/C56C76"
+data_access_statement = "The Iris data are from the UCI Machine Learning Repository. This repository stores a frozen local copy for reproducible benchmark gating with attribution to the official source."
+environment_url = "https://github.com/example/research-agent/blob/main/Dockerfile"
+release_notes = "Scaffold config. Replace repository URLs and LLM credentials before a formal gold run."

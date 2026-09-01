@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research Agent Benchmark Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "command", "metrics_path", "expected_artifacts", "expected_metrics", "metric_schema", "dataset_url", "dataset_version", "split_name", "split_sha256", "grader_version", "grader_sha256", "license", "baseline_version", "citation", "seed_policy", "min_repeats"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "role": {
+      "type": "string",
+      "enum": ["candidate", "baseline", "ablation", "other"],
+      "description": "Experimental role for paper-grade comparisons. Use candidate, baseline, and ablation across manifest sets."
+    },
+    "benchmark_kind": {
+      "type": "string",
+      "enum": ["external", "official", "public", "formal", "procedural", "local", "fixture", "other"],
+      "description": "Use external/official/public/formal for publication-grade public benchmarks; use procedural/local/fixture/other for smoke or repository examples."
+    },
+    "command": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "metrics_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Relative path under the adapter workdir where the command writes JSON metrics."
+    },
+    "expected_artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "expected_metrics": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Canonical metrics the benchmark/grader emits and the paper may report.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "metric_schema": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "Per-metric definitions keyed by expected metric name.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["direction", "unit", "description"],
+        "additionalProperties": false,
+        "properties": {
+          "direction": {
+            "type": "string",
+            "enum": ["higher_is_better", "lower_is_better", "target", "descriptive"]
+          },
+          "unit": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "grader": {
+      "type": "string",
+      "description": "Relative path to grading/evaluation script, if separate from the command."
+    },
+    "grader_path": {
+      "type": "string",
+      "description": "Relative path to the frozen local grader/evaluation wrapper file whose SHA256 must match grader_sha256 when provided."
+    },
+    "grader_version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Version, release tag, package version, or commit of the grader/evaluation protocol."
+    },
+    "grader_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{64}$",
+      "description": "SHA256 of the grader script, official evaluation wrapper, or frozen grading protocol file."
+    },
+    "submission_path": {
+      "type": "string",
+      "description": "Relative path to a generated submission CSV/JSON when the benchmark uses a submission-grade format."
+    },
+    "benchmark_url": {
+      "type": "string",
+      "description": "Official benchmark, task suite, or project page URL."
+    },
+    "dataset_url": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Official data/task source URL. May equal benchmark_url for generated or built-in task suites."
+    },
+    "dataset_version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable benchmark/data version, release tag, archive version, or task-suite version used by this adapter."
+    },
+    "split_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Named split, task subset, fold, or frozen task manifest used for all compared roles."
+    },
+    "split_path": {
+      "type": "string",
+      "description": "Relative path to a frozen local split/task manifest file whose SHA256 must match split_sha256 when provided."
+    },
+    "split_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{64}$",
+      "description": "SHA256 of the frozen split/task manifest, official split file, or exact task list used by this adapter."
+    },
+    "license": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Benchmark/data/code license string and any publication caveat."
+    },
+    "baseline": {
+      "type": "string",
+      "description": "Primary baseline used by this adapter."
+    },
+    "baseline_version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Baseline implementation version, package version, commit, or release tag."
+    },
+    "citation": {
+      "type": "string",
+      "minLength": 1,
+      "description": "DOI, BibTeX key, or canonical citation for the benchmark/data/baseline."
+    },
+    "seed_policy": {
+      "type": "string",
+      "minLength": 1,
+      "description": "How RESEARCH_AGENT_SEED / repeat_index fixes data split, task sampling, or stochastic solver state."
+    },
+    "min_repeats": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Minimum repeats required before results can support benchmark claims."
+    },
+    "source_files": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "name": "kuka-iiwa-7dof-jointspace",
+  "command": ["python3", "run_arm_benchmark.py", "--metrics", "metrics.json"],
+  "metrics_path": "metrics.json",
+  "expected_artifacts": ["metrics.json"],
+  "expected_metrics": [
+    "greedy_success_rate",
+    "conservative_success_rate",
+    "greedy_mean_iterations",
+    "conservative_mean_iterations",
+    "greedy_path_length_mutual_rad",
+    "conservative_path_length_mutual_rad"
+  ],
+  "metric_schema": {
+    "greedy_success_rate": {
+      "direction": "higher_is_better",
+      "unit": "ratio",
+      "description": "Fraction of generated KUKA iiwa joint-space scenes solved by the greedy RRT variant."
+    },
+    "conservative_success_rate": {
+      "direction": "higher_is_better",
+      "unit": "ratio",
+      "description": "Fraction of generated KUKA iiwa joint-space scenes solved by the conservative RRT variant."
+    },
+    "greedy_mean_iterations": {
+      "direction": "lower_is_better",
+      "unit": "iterations",
+      "description": "Mean planner iterations across all generated scenes for the greedy RRT variant."
+    },
+    "conservative_mean_iterations": {
+      "direction": "lower_is_better",
+      "unit": "iterations",
+      "description": "Mean planner iterations across all generated scenes for the conservative RRT variant."
+    },
+    "greedy_path_length_mutual_rad": {
+      "direction": "lower_is_better",
+      "unit": "radians",
+      "description": "Mean joint-space path length on mutually solved scenes for the greedy RRT variant."
+    },
+    "conservative_path_length_mutual_rad": {
+      "direction": "lower_is_better",
+      "unit": "radians",
+      "description": "Mean joint-space path length on mutually solved scenes for the conservative RRT variant."
+    }
+  },
+  "benchmark_kind": "fixture",
+  "source_files": ["run_arm_benchmark.py", "arm_planner.py"],
+  "baseline": "conservative RRT (goal_bias=0.05, step=0.25 rad)",
+  "baseline_version": "arm_planner.py VARIANTS, seed-reproducible",
+  "benchmark_url": "https://pybullet.org/wordpress/",
+  "dataset_url": "procedural://research-agent/examples/rrt-2d-benchmark/kuka-iiwa-seeded-scenes",
+  "dataset_version": "research-agent-kuka-iiwa-demo-v1",
+  "split_name": "seeded-jointspace-scenes-repeat-index",
+  "split_path": "split-kuka-iiwa-seeded-scenes.json",
+  "split_sha256": "8e2f1fa019d0c1d650623c5996a33873c499990e6fc21b01d8e87fc8c44c421f",
+  "grader": "run_arm_benchmark.py",
+  "grader_path": "run_arm_benchmark.py",
+  "grader_version": "research-agent-kuka-iiwa-demo-v1",
+  "grader_sha256": "ec9ac0f975fa99793dead4494cf2d5364d21aa641c1ab5b952f564f3bb66190b",
+  "submission_path": "metrics.json",
+  "license": "MIT for the planner code; pybullet provides the KUKA iiwa URDF and validated collision (Bullet, zlib-style license).",
+  "citation": "LaValle (1998) RRT TR 98-11; Coumans & Bai (2016-) PyBullet.",
+  "seed_policy": "RESEARCH_AGENT_SEED fixes scene+goal+planner seeds; RESEARCH_AGENT_REPEAT_INDEX shifts the scene batch so repeats differ.",
+  "min_repeats": 1,
+  "notes": [
+    "真实 7-DOF KUKA iiwa 关节空间规划；碰撞与机器人模型为真且经 pybullet（Bullet 引擎）验证。",
+    "碰撞检测器已独立自检（自由/碰撞/远离三态正确）；planner 预算敏感（max_iter=3 → 0% 成功，不能伪造）。",
+    "诚实边界：规划器仍是自写 RRT，不是 OMPL 验证规划器；场景为程序生成，非标准 benchmark。属演示级（真实+验证碰撞），非 publication 级。",
+    "定量结论（power_study.py, n=40 + Wilson CI + Fisher）：greedy/conservative 成功率无显著差异（Fisher p≥0.78），greedy 约 2× 更省迭代、路径短约 20%。键名中性，不预设 candidate。",
+    "未强制自碰撞（见 arm_planner.is_collision_free 注释）。"
+  ]
+}

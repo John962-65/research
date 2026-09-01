@@ -1,0 +1,43 @@
+{
+  "name": "toy benchmark adapter",
+  "role": "candidate",
+  "command": ["python3", "run_benchmark.py", "--metrics", "metrics.json"],
+  "metrics_path": "metrics.json",
+  "expected_artifacts": ["metrics.json"],
+  "expected_metrics": ["success_rate", "runtime_cost"],
+  "metric_schema": {
+    "success_rate": {
+      "direction": "higher_is_better",
+      "unit": "ratio",
+      "description": "Fraction of smoke benchmark tasks solved."
+    },
+    "runtime_cost": {
+      "direction": "lower_is_better",
+      "unit": "seconds",
+      "description": "Wall-clock runtime of the smoke adapter."
+    }
+  },
+  "benchmark_kind": "fixture",
+  "grader": "run_benchmark.py",
+  "grader_path": "run_benchmark.py",
+  "grader_version": "research-agent-smoke-adapter-v1",
+  "grader_sha256": "ed3583a9ea9ee08569c6d922de88a3d0fcd2e0357a5a090b128b8c5ba1155515",
+  "submission_path": "submission.csv",
+  "source_files": ["run_benchmark.py"],
+  "benchmark_url": "https://ompl.kavrakilab.org/benchmark.html",
+  "dataset_url": "https://ompl.kavrakilab.org/benchmark.html",
+  "dataset_version": "ompl-example-smoke",
+  "split_name": "single smoke task",
+  "split_path": "split-manifest.json",
+  "split_sha256": "11bc4217a0d62da0cc4079e3d4483be6ebda74479a81dee0e6fe80f5425b32ba",
+  "license": "BSD-3-Clause for OMPL; verify task/data license before publication",
+  "baseline": "RRT*",
+  "baseline_version": "ompl-example-smoke",
+  "citation": "Sucan, Moll, and Kavraki, IEEE Robotics & Automation Magazine 2012; DOI: 10.1109/MRA.2012.2205651",
+  "seed_policy": "RESEARCH_AGENT_SEED fixes planner seed; repeat_index selects the deterministic repeat.",
+  "min_repeats": 1,
+  "notes": [
+    "这是 smoke 示例，不代表真实科研 benchmark。",
+    "正式使用时替换为公开数据、固定划分和明确 baseline。"
+  ]
+}

@@ -1,0 +1,69 @@
+{
+  "name": "uci iris decision tree reference baseline",
+  "role": "other",
+  "command": [
+    "python3",
+    "grade_iris.py",
+    "--method",
+    "decision_tree",
+    "--data",
+    "data/iris.data",
+    "--split",
+    "split/iris-stratified-test-v1.json",
+    "--metrics",
+    "decision_tree_metrics.json"
+  ],
+  "source_files": [
+    "grade_iris.py",
+    "data/iris.data",
+    "split/iris-stratified-test-v1.json"
+  ],
+  "metrics_path": "decision_tree_metrics.json",
+  "expected_artifacts": [
+    "decision_tree_metrics.json"
+  ],
+  "expected_metrics": [
+    "accuracy",
+    "macro_f1",
+    "error_rate"
+  ],
+  "metric_schema": {
+    "accuracy": {
+      "direction": "higher_is_better",
+      "unit": "ratio",
+      "description": "Fraction of held-out Iris instances classified correctly."
+    },
+    "macro_f1": {
+      "direction": "higher_is_better",
+      "unit": "ratio",
+      "description": "Unweighted mean F1 over the three Iris classes."
+    },
+    "error_rate": {
+      "direction": "lower_is_better",
+      "unit": "ratio",
+      "description": "One minus classification accuracy."
+    }
+  },
+  "benchmark_kind": "external",
+  "benchmark_url": "https://archive.ics.uci.edu/dataset/53/iris",
+  "dataset_url": "https://archive.ics.uci.edu/dataset/53/iris",
+  "dataset_version": "UCI Iris dataset DOI 10.24432/C56C76, accessed 2026-07-05",
+  "split_name": "uci-iris-stratified-test-v1",
+  "split_path": "split/iris-stratified-test-v1.json",
+  "split_sha256": "89b38bc09de1c44e7aa0efc016103b5ddaa4032cfdc7ae674bff4371a2b78fef",
+  "license": "CC BY 4.0",
+  "baseline": "decision_tree",
+  "baseline_version": "uci-iris-methods-v3",
+  "citation": "10.24432/C56C76",
+  "grader": "grade_iris.py",
+  "grader_path": "grade_iris.py",
+  "grader_version": "uci-iris-grader-v3",
+  "grader_sha256": "2c4da3e50b622df2e0146879d96a06861003105f77c8683058c36911f11b2556",
+  "seed_policy": "Frozen split file defines train/test membership; decision_tree is deterministic and does not use randomness.",
+  "min_repeats": 3,
+  "notes": [
+    "Reference baseline uses a dependency-free depth-limited Gini decision tree implementation in the benchmark grader.",
+    "role=other keeps this broader baseline out of the primary candidate-vs-knn3 statistics while preserving executable result and artifact provenance.",
+    "Official source and license must be rechecked before formal manuscript submission."
+  ]
+}

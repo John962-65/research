@@ -1,0 +1,29 @@
+[llm]
+provider = "openai-compatible"
+# input_cost_per_million_tokens = 0.0
+# output_cost_per_million_tokens = 0.0
+
+[literature]
+provider = "offline"
+max_papers = 8
+sources = ["semantic_scholar", "arxiv", "crossref"]
+timeout_seconds = 12
+max_search_queries = 4
+min_relevance = 0.24
+
+[ideation]
+max_ideas = 5
+
+[execution]
+mode = "local"
+timeout_seconds = 300
+allowed_commands = ["python3"]
+repeats = 3
+
+[paper]
+target_venue = "workshop"
+style = "concise"
+
+[human]
+# constraints = ["Keep local execution smoke-first until benchmark readiness passes."]
+# resource_limits = ["Only run commands listed in allowed_commands."]

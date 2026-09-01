@@ -1,0 +1,48 @@
+{
+  "name": "rrt-2d-conservative",
+  "role": "baseline",
+  "command": ["python3", "run_benchmark.py", "--variant", "conservative", "--metrics", "metrics.json"],
+  "metrics_path": "metrics.json",
+  "expected_artifacts": ["metrics.json"],
+  "expected_metrics": ["success_rate", "mean_iterations", "mean_path_length_solved"],
+  "metric_schema": {
+    "success_rate": {
+      "direction": "higher_is_better",
+      "unit": "ratio",
+      "description": "Fraction of generated planning scenes solved."
+    },
+    "mean_iterations": {
+      "direction": "lower_is_better",
+      "unit": "iterations",
+      "description": "Mean planner iterations across all scenes."
+    },
+    "mean_path_length_solved": {
+      "direction": "lower_is_better",
+      "unit": "workspace units",
+      "description": "Mean path length over solved scenes."
+    }
+  },
+  "benchmark_kind": "fixture",
+  "source_files": ["run_benchmark.py", "rrt_planner.py"],
+  "benchmark_url": "https://lavalle.pl/rrtpubs.html",
+  "dataset_url": "procedural://research-agent/examples/rrt-2d-benchmark/seeded-scenes",
+  "dataset_version": "research-agent-rrt-2d-fixture-v1",
+  "split_name": "seeded-scenes-repeat-index",
+  "split_path": "split-seeded-scenes.json",
+  "split_sha256": "4edc71bbfa26bc0dc71534b15efe7d04f9f751dd126848db19d576eb38c76aaa",
+  "license": "MIT for research-agent example planner code; seeded procedural scenes have no external data license.",
+  "baseline": "conservative RRT (goal_bias=0.05, step=0.4)",
+  "baseline_version": "rrt_planner.py VARIANTS conservative=(0.05,0.4)",
+  "citation": "LaValle, S.M. (1998). Rapidly-exploring random trees: a new tool for path planning. TR 98-11. https://lavalle.pl/rrtpubs.html",
+  "grader": "run_benchmark.py",
+  "grader_path": "run_benchmark.py",
+  "grader_version": "research-agent-rrt-2d-fixture-v1",
+  "grader_sha256": "79b443544fcb1a6491d15ceb133bd475a4f2901e071332a21e5760154b76d14a",
+  "submission_path": "metrics.json",
+  "seed_policy": "RESEARCH_AGENT_SEED fixes scene+planner seeds; RESEARCH_AGENT_REPEAT_INDEX shifts the scene batch.",
+  "min_repeats": 3,
+  "notes": [
+    "Baseline role for the repository paper-grade fixture.",
+    "This is not a domain publication benchmark; replace with an accepted external benchmark before making formal paper claims."
+  ]
+}

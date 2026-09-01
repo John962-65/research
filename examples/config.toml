@@ -1,0 +1,65 @@
+[llm]
+provider = "openai-compatible"
+# Direct values are convenient for local demos. For shared machines, prefer env vars.
+# base_url = "https://api.openai.com/v1"
+# model = "gpt-4o-mini"
+# api_key = ""
+# base_url_env = "OPENAI_BASE_URL"
+# api_key_env = "OPENAI_API_KEY"
+# model_env = "OPENAI_MODEL"
+# max_calls = 0
+# max_prompt_chars = 0
+# input_cost_per_million_tokens = 0.0
+# output_cost_per_million_tokens = 0.0
+
+[literature]
+provider = "offline"
+# provider = "online"
+# provider = "auto"
+max_papers = 8
+sources = ["semantic_scholar", "arxiv", "crossref"]
+timeout_seconds = 12
+max_search_queries = 4
+min_relevance = 0.24
+# Optional env vars:
+# semantic_scholar_api_key_env = "SEMANTIC_SCHOLAR_API_KEY"
+# contact_email_env = "RESEARCH_AGENT_CONTACT_EMAIL"
+
+[ideation]
+max_ideas = 5
+
+[execution]
+mode = "simulated"
+# mode = "local"
+# mode = "benchmark"
+timeout_seconds = 300
+allowed_commands = ["python3", "pytest"]
+repeats = 5
+# benchmark_manifest_paths = ["path/to/manifest.json"]
+
+[paper]
+target_venue = "workshop"
+style = "concise"
+
+[paper_grade]
+# Set enabled=true for startup checks that require online/auto literature,
+# DOI/URL seed papers, and a candidate/baseline/ablation benchmark manifest set.
+enabled = false
+
+[human]
+# notes = ["Prior observations or user preferences."]
+# constraints = ["Must compare against a named baseline."]
+# success_criteria = ["What would count as a useful result."]
+# resource_limits = ["Compute, runtime, data, or budget limits."]
+# risks = ["Known failure modes or directions to avoid."]
+
+[release]
+# code_repository_url = "https://github.com/org/repo"
+# code_archive_doi = "10.xxxx/zenodo.xxxxx"
+# code_license = "MIT"
+# code_version = "v0.1.0"
+# data_repository_url = "https://zenodo.org/records/..."
+# data_archive_doi = "10.xxxx/zenodo.xxxxx"
+# data_access_statement = "Describe data sources, access conditions, and restrictions."
+# environment_url = "https://github.com/org/repo/blob/main/environment.yml"
+# release_notes = "Scope, limitations, and manual verification notes."

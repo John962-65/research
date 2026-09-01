@@ -1,0 +1,5 @@
+{
+  "name": "single smoke task",
+  "tasks": ["ompl-smoke-task-001"],
+  "seed_policy": "RESEARCH_AGENT_SEED fixes planner seed; repeat_index selects the deterministic repeat."
+}
