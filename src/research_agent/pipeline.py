@@ -10,7 +10,7 @@ import re
 import time
 
 from .analysis import analysis_matches_execution_mode, analyze_results, render_analysis_markdown
-from .agent_runtime import build_agent_runtime_llm
+from .agent_runtime import RoleModelRouter, build_agent_runtime_llm
 from .artifacts import read_json, write_json, write_text
 from .ablation_plan import ABLATION_PLAN_JSON, ABLATION_PLAN_MD, write_ablation_plan_artifacts
 from .agent_observability_audit import AGENT_OBSERVABILITY_AUDIT_JSON, AGENT_OBSERVABILITY_AUDIT_MD, write_agent_observability_audit_artifacts
@@ -1345,7 +1345,9 @@ def resume_pipeline_from_repair_queue(
             + " or update 10-release-metadata.json before deleting artifacts."
         )
     preflight_config = apply_repair_resume_recommendations(config, {**preflight_report, "applied": True})
-    build_llm(preflight_config.llm)
+    # Fail fast while no model is reachable for the resumed run, before any
+    # artifact cleanup makes the existing run unrecoverable.
+    RoleModelRouter(preflight_config).resolve(stage="research_planning")
     validate_execution_config(preflight_config.execution)
     report = prepare_repair_resume(out_dir, apply=True, doctor_report_path=doctor_report_path, gold_verification_report_path=gold_verification_report_path)
     if report.get("can_resume") is not True:

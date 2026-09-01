@@ -20,6 +20,8 @@ class LLMConfig:
     max_prompt_chars: int = 0
     input_cost_per_million_tokens: float = 0.0
     output_cost_per_million_tokens: float = 0.0
+    temperature: float | None = None
+    max_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -102,13 +104,22 @@ class HumanConfig:
 
 @dataclass(frozen=True)
 class AgentRoleConfig:
-    """Per-role runtime overrides; credentials always come from ``LLMConfig``."""
+    """Per-role runtime overrides; credentials always come from ``LLMConfig``.
+
+    ``base_url``/``base_url_env``/``api_key_env`` let a role target a different
+    OpenAI-compatible endpoint. Literal API keys stay global: a role may only
+    point at an env variable, and ``resolve_llm_api_key`` still refuses to send
+    an env credential to a URL that does not match its declared origin.
+    """
 
     agent_id: str
     model: str = ""
     enabled: bool = True
     skills: list[str] = field(default_factory=list)
     mcp_servers: list[str] = field(default_factory=list)
+    base_url: str = ""
+    base_url_env: str = ""
+    api_key_env: str = ""
 
 
 @dataclass(frozen=True)

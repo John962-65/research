@@ -224,7 +224,6 @@ class TracedLLM:
             purpose=_purpose(system, purpose),
             provider=self.config.provider,
             model=_route_value(route, "model") or _runtime_model(self.inner, self.config),
-            base_url=_redact_url(_runtime_base_url(self.inner, self.config)),
             status=status,
             started_at=started_at,
             completed_at=_utc_now(),
@@ -243,6 +242,7 @@ class TracedLLM:
             skills=_route_list(route, "skills"),
             mcp_servers=_route_list(route, "mcp_servers"),
             workflow_revision=_workflow_revision(self.run_dir),
+            base_url=_redact_url(_entry_base_url(route, self.inner, self.config)),
         )
         report = _report([*entries, entry])
         write_json(self.run_dir / LLM_TRACE_JSON, report)
@@ -261,10 +261,18 @@ def complete_with_purpose(
     stage: str,
     purpose: str,
     requires_validation: bool = False,
+    agent_id: str = "",
 ) -> str:
     complete = getattr(llm, "complete_with_purpose", None)
     if callable(complete):
-        return complete(system, user, stage=stage, purpose=purpose, requires_validation=requires_validation)
+        return complete(
+            system,
+            user,
+            stage=stage,
+            purpose=purpose,
+            requires_validation=requires_validation,
+            agent_id=agent_id,
+        )
     return llm.complete(system, user)
 
 
@@ -448,6 +456,13 @@ def _runtime_base_url(inner: LLM, config: LLMConfig) -> str:
         return config.base_url
     env_base_url = os.environ.get(config.base_url_env, "")
     return env_base_url or config.base_url_env
+
+
+def _entry_base_url(route: Any, inner: LLM, config: LLMConfig) -> str:
+    routed = _route_value(route, "base_url")
+    if routed:
+        return routed
+    return _runtime_base_url(inner, config)
 
 
 _LEDGER_LOCKS_GUARD = Lock()

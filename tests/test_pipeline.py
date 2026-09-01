@@ -9,7 +9,7 @@ import json
 import time
 import unittest
 
-from research_agent.config import AgentConfig, ExecutionConfig, LiteratureConfig
+from research_agent.config import AgentConfig, ExecutionConfig, LLMConfig, LiteratureConfig
 from research_agent.artifacts import write_json, write_text
 from research_agent.literature import render_literature_markdown, run_literature_review
 from research_agent.literature_context import (
@@ -22,6 +22,7 @@ from research_agent.literature_context import (
 from research_agent.research_plan import build_research_plan, render_research_plan_markdown
 from research_agent.models import ExperimentCommand, ExperimentPlan, LiteratureContext, PaperRevisionPlan, ResearchIdea, ReviewGate, RevisionTask
 import research_agent.pipeline as pipeline_module
+from research_agent.llm_trace import trace_llm
 
 class NoopLLM:
     model = "noop-test-model"
@@ -32,8 +33,8 @@ class NoopLLM:
 
 
 def _run_pipeline_with_noop_llm(topic, out_dir, config):
-    original = pipeline_module.build_llm
-    pipeline_module.build_llm = lambda _: NoopLLM()
+    original = pipeline_module.build_agent_runtime_llm
+    pipeline_module.build_agent_runtime_llm = lambda config, project_root, out_dir, *a, **k: trace_llm(NoopLLM(), out_dir, config.llm)
     errors = []
     results = []
 
@@ -72,7 +73,7 @@ def _run_pipeline_with_noop_llm(topic, out_dir, config):
             except (FileNotFoundError, RuntimeError):
                 pass
             thread.join(timeout=5)
-        pipeline_module.build_llm = original
+        pipeline_module.build_agent_runtime_llm = original
 
 
 def _wait_for_stage(out_dir: Path, expected: str, timeout: float = 10.0) -> dict:
@@ -587,12 +588,12 @@ class PipelineTest(unittest.TestCase):
             _prepare_run_at_review_gate("机械臂路径规划", out, config)
             self.assertFalse((out / "02-ideas.json").exists())
             pipeline_module.approve_review_gate(out, reviewer="resume-test", notes="人工确认文献风险，允许 resume 测试继续")
-            original = pipeline_module.build_llm
-            pipeline_module.build_llm = lambda _: NoopLLM()
+            original = pipeline_module.build_agent_runtime_llm
+            pipeline_module.build_agent_runtime_llm = lambda config, project_root, out_dir, *a, **k: trace_llm(NoopLLM(), out_dir, config.llm)
             try:
                 pipeline_module.resume_pipeline_after_review_approval("机械臂路径规划", out, config)
             finally:
-                pipeline_module.build_llm = original
+                pipeline_module.build_agent_runtime_llm = original
 
             self.assertIn("completed", (out / "state.json").read_text(encoding="utf-8"))
             self.assertTrue((out / "02-ideas.json").exists())
@@ -631,12 +632,12 @@ class PipelineTest(unittest.TestCase):
             _prepare_run_at_review_gate("机械臂路径规划", out, config)
             notes = "必须比较 RRT* 并补人工种子文献"
             pipeline_module.approve_review_gate(out, reviewer="feedback-test", notes=notes)
-            original = pipeline_module.build_llm
-            pipeline_module.build_llm = lambda _: NoopLLM()
+            original = pipeline_module.build_agent_runtime_llm
+            pipeline_module.build_agent_runtime_llm = lambda config, project_root, out_dir, *a, **k: trace_llm(NoopLLM(), out_dir, config.llm)
             try:
                 pipeline_module.resume_pipeline_after_review_approval("机械臂路径规划", out, config)
             finally:
-                pipeline_module.build_llm = original
+                pipeline_module.build_agent_runtime_llm = original
 
             feedback_md = (out / "01-review-feedback.md").read_text(encoding="utf-8")
             feedback_json = json.loads((out / "01-review-feedback.json").read_text(encoding="utf-8"))
@@ -673,7 +674,7 @@ class PipelineTest(unittest.TestCase):
             pipeline_module.approve_review_gate(out, reviewer="reviewer", notes="已补入 URL seed 并人工核对文献风险")
 
             captured: dict[str, Any] = {}
-            original_build_llm = pipeline_module.build_llm
+            original_build_llm = pipeline_module.build_agent_runtime_llm
             original_after = pipeline_module._run_after_review_approval
 
             def fake_after(run_topic, run_out, run_config, run_llm, research_plan, review, context, manifest, **kwargs):
@@ -682,7 +683,7 @@ class PipelineTest(unittest.TestCase):
                 captured["resume"] = kwargs.get("resume")
                 pipeline_module._write_state(run_out, run_topic, "completed")
 
-            pipeline_module.build_llm = lambda _: NoopLLM()
+            pipeline_module.build_agent_runtime_llm = lambda config, project_root, out_dir, *a, **k: trace_llm(NoopLLM(), out_dir, config.llm)
             pipeline_module._run_after_review_approval = fake_after
             errors: list[BaseException] = []
 
@@ -713,7 +714,7 @@ class PipelineTest(unittest.TestCase):
                 if errors:
                     raise errors[0]
             finally:
-                pipeline_module.build_llm = original_build_llm
+                pipeline_module.build_agent_runtime_llm = original_build_llm
                 pipeline_module._run_after_review_approval = original_after
 
             approval = json.loads((out / "approval.json").read_text(encoding="utf-8"))
@@ -993,8 +994,8 @@ class PipelineTest(unittest.TestCase):
             write_text(out / "02-ideas.md", "# Ideas\n\n- checkpoint idea")
             pipeline_module._write_state(out, "机械臂路径规划", "ideation_completed")
 
-            original = pipeline_module.build_llm
-            pipeline_module.build_llm = lambda _: NoopLLM()
+            original = pipeline_module.build_agent_runtime_llm
+            pipeline_module.build_agent_runtime_llm = lambda config, project_root, out_dir, *a, **k: trace_llm(NoopLLM(), out_dir, config.llm)
             errors: list[BaseException] = []
 
             def checkpoint_worker() -> None:
@@ -1020,7 +1021,7 @@ class PipelineTest(unittest.TestCase):
                 if errors:
                     raise errors[0]
             finally:
-                pipeline_module.build_llm = original
+                pipeline_module.build_agent_runtime_llm = original
 
             self.assertEqual(json.loads((out / "02-ideas.json").read_text(encoding="utf-8"))[0]["title"], "checkpoint idea")
             self.assertIn("checkpoint idea", (out / "03-experiment-plan.md").read_text(encoding="utf-8"))
@@ -1138,13 +1139,13 @@ class PipelineTest(unittest.TestCase):
             write_text(out / "02-ideas.md", "# Ideas\n\n- 证据无效分支")
             pipeline_module._write_state(out, "机械臂路径规划", "ideation_completed")
 
-            original = pipeline_module.build_llm
-            pipeline_module.build_llm = lambda _: NoopLLM()
+            original = pipeline_module.build_agent_runtime_llm
+            pipeline_module.build_agent_runtime_llm = lambda config, project_root, out_dir, *a, **k: trace_llm(NoopLLM(), out_dir, config.llm)
             try:
                 with self.assertRaisesRegex(RuntimeError, "Experiment manager blocked downstream planning"):
                     pipeline_module.resume_pipeline_after_review_approval("机械臂路径规划", out, config)
             finally:
-                pipeline_module.build_llm = original
+                pipeline_module.build_agent_runtime_llm = original
 
             state = json.loads((out / "state.json").read_text(encoding="utf-8"))
             manager = json.loads((out / "02-experiment-manager.json").read_text(encoding="utf-8"))
@@ -1187,7 +1188,7 @@ class PipelineTest(unittest.TestCase):
             )
             write_json(out / "04-results.json", [{"status": "stale"}])
 
-            with self.assertRaisesRegex(RuntimeError, "Missing model"):
+            with self.assertRaisesRegex(RuntimeError, "no model is configured for the routed agent task"):
                 pipeline_module.resume_pipeline_from_repair_queue("机械臂路径规划", out, AgentConfig())
 
             self.assertTrue((out / "04-results.json").exists())
@@ -1291,17 +1292,17 @@ class PipelineTest(unittest.TestCase):
                 },
             )
             write_json(out / "04-results.json", [{"status": "stale"}])
-            original_build_llm = pipeline_module.build_llm
-            pipeline_module.build_llm = lambda _: NoopLLM()
+            original_build_llm = pipeline_module.build_agent_runtime_llm
+            pipeline_module.build_agent_runtime_llm = lambda config, project_root, out_dir, *a, **k: trace_llm(NoopLLM(), out_dir, config.llm)
             try:
                 with self.assertRaisesRegex(ValueError, "repeats"):
                     pipeline_module.resume_pipeline_from_repair_queue(
                         "Iris",
                         out,
-                        AgentConfig(execution=ExecutionConfig(repeats=101)),
+                        AgentConfig(llm=LLMConfig(model="test-model"), execution=ExecutionConfig(repeats=101)),
                     )
             finally:
-                pipeline_module.build_llm = original_build_llm
+                pipeline_module.build_agent_runtime_llm = original_build_llm
 
             self.assertTrue((out / "04-results.json").exists())
             self.assertFalse((out / "12-repair-resume-plan.json").exists())
@@ -1330,9 +1331,9 @@ class PipelineTest(unittest.TestCase):
                 },
             )
             write_json(out / "04-results.json", [{"status": "stale"}])
-            config = AgentConfig()
+            config = AgentConfig(llm=LLMConfig(model="test-model"))
 
-            original_build_llm = pipeline_module.build_llm
+            original_build_llm = pipeline_module.build_agent_runtime_llm
             original_resume = pipeline_module.resume_pipeline_from_checkpoint
 
             def fake_resume(topic: str, run_dir: Path, config: AgentConfig) -> Path:
@@ -1345,12 +1346,12 @@ class PipelineTest(unittest.TestCase):
                 raise RuntimeError("checkpoint failed after cleanup")
 
             try:
-                pipeline_module.build_llm = lambda _: NoopLLM()
+                pipeline_module.build_agent_runtime_llm = lambda config, project_root, out_dir, *a, **k: trace_llm(NoopLLM(), out_dir, config.llm)
                 pipeline_module.resume_pipeline_from_checkpoint = fake_resume
                 with self.assertRaisesRegex(RuntimeError, "checkpoint failed after cleanup"):
                     pipeline_module.resume_pipeline_from_repair_queue("Iris", out, config)
             finally:
-                pipeline_module.build_llm = original_build_llm
+                pipeline_module.build_agent_runtime_llm = original_build_llm
                 pipeline_module.resume_pipeline_from_checkpoint = original_resume
 
             state = json.loads((out / "state.json").read_text(encoding="utf-8"))

@@ -11,6 +11,9 @@ provider = "openai-compatible"
 # max_prompt_chars = 0
 # input_cost_per_million_tokens = 0.0
 # output_cost_per_million_tokens = 0.0
+# Optional sampling parameters (omitted from the request when unset):
+# temperature = 0.2
+# max_tokens = 4096
 
 [literature]
 provider = "offline"
@@ -63,3 +66,37 @@ enabled = false
 # data_access_statement = "Describe data sources, access conditions, and restrictions."
 # environment_url = "https://github.com/org/repo/blob/main/environment.yml"
 # release_notes = "Scope, limitations, and manual verification notes."
+
+# Multi-agent routing: assign specific roles to pipeline tasks, route different
+# tasks/agents to different models, and attach skills or read-only MCP tools.
+# Model precedence per call: [multi_agent.task_models][stage] > roles[id].model > [llm].model.
+# Skills are loaded from skills/<skill_id>/SKILL.md; roles without an explicit
+# skills list fall back to the built-in defaults (e.g. skeptical_reviewer ->
+# skeptical-review).
+[multi_agent]
+enabled = false
+# task_models = { research_planning = "model-a", paper_review_loop = "model-b" }
+# max_tool_rounds = 2
+# tool_timeout_seconds = 15
+# max_tool_output_chars = 16000
+
+# [multi_agent.roles.gap_analyst]
+# model = "model-a"
+# base_url = "https://api.deepseek.com/v1"   # optional per-role endpoint
+# base_url_env = "DEEPSEEK_BASE_URL"          # optional env var for the endpoint
+# api_key_env = "DEEPSEEK_API_KEY"            # role credentials must come from env
+# skills = ["evidence-grounding"]
+# mcp_servers = ["local-docs"]
+
+# [multi_agent.roles.skeptical_reviewer]
+# model = "model-b"
+# skills = ["skeptical-review"]
+
+# [multi_agent.mcp_servers.local-docs]
+# transport = "streamable-http"   # only streamable-http is supported
+# url = "http://127.0.0.1:8000/mcp"
+# allowed_tools = ["search_docs"]
+# auth_env = "RESEARCH_AGENT_MCP_LOCAL_DOCS_TOKEN"
+# enabled = false
+# read_only = true                # write-capable tools are rejected
+# allow_remote = false            # only localhost/loopback unless explicitly enabled

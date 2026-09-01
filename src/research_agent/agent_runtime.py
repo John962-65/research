@@ -6,7 +6,7 @@ from typing import Any
 import os
 
 from .config import AgentConfig, AgentRoleConfig
-from .llm import LLM, build_llm
+from .llm import LLM, build_llm, resolve_llm_base_url
 from .multi_agent_assignment import AGENT_PROFILES
 from .tool_runtime import ToolRuntime
 
@@ -33,6 +33,9 @@ class RouteDecision:
     skills: list[str]
     mcp_servers: list[str]
     multi_agent_enabled: bool
+    base_url: str = ""
+    base_url_env: str = ""
+    api_key_env: str = ""
 
 
 @dataclass(frozen=True)
@@ -56,6 +59,29 @@ AGENT_TASKS = [
 
 _TASK_BY_STAGE = {task.stage: task for task in AGENT_TASKS}
 _PROFILE_BY_ID = {str(profile["agent_id"]): profile for profile in AGENT_PROFILES}
+
+# Skills applied when multi_agent is enabled and a role has no explicit skills.
+# Keep every listed id present under skills/<id>/SKILL.md; ToolRuntime validates them.
+DEFAULT_ROLE_SKILLS: dict[str, list[str]] = {
+    "literature_scout": ["evidence-grounding"],
+    "evidence_curator": ["evidence-grounding"],
+    "gap_analyst": ["evidence-grounding"],
+    "method_architect": ["experiment-design"],
+    "benchmark_engineer": ["experiment-design"],
+    "statistician": ["experiment-design"],
+    "skeptical_reviewer": ["skeptical-review"],
+    "manuscript_editor": ["manuscript-editing"],
+}
+
+
+def agent_for_stage(stage: str) -> str:
+    """Return the default agent_id assigned to a pipeline stage."""
+    task = _TASK_BY_STAGE.get(_normalize_stage(stage))
+    return task.agent_id if task else "gap_analyst"
+
+
+def _normalize_stage(stage: str) -> str:
+    return str(stage or "").strip().lower().replace(" ", "_")
 
 
 def agent_runtime_catalog() -> dict[str, Any]:
@@ -86,7 +112,7 @@ class RoleModelRouter:
             raise ValueError("unknown multi-agent task model overrides: " + ", ".join(unknown_tasks))
 
     def resolve(self, *, stage: str, agent_id: str = "") -> RouteDecision:
-        normalized_stage = str(stage or "").strip().lower().replace(" ", "_")
+        normalized_stage = _normalize_stage(stage)
         task = _TASK_BY_STAGE.get(normalized_stage) or AgentTask(
             normalized_stage or "generic",
             "T00",
@@ -107,6 +133,12 @@ class RoleModelRouter:
         model = task_model or role_model or default_model
         if not model:
             raise RuntimeError("no model is configured for the routed agent task")
+        role_base_url = str(role_config.base_url if role_config is not None else "").strip()
+        role_base_url_env = str(role_config.base_url_env if role_config is not None else "").strip()
+        role_api_key_env = str(role_config.api_key_env if role_config is not None else "").strip()
+        endpoint = self._resolve_endpoint(role_base_url, role_base_url_env)
+        default_skills = [] if role_config is not None and role_config.skills else DEFAULT_ROLE_SKILLS.get(selected_agent, [])
+        skills = list(role_config.skills) if role_config is not None and role_config.skills else list(default_skills)
         return RouteDecision(
             route_id=f"{task.task_id}:{selected_agent}",
             stage=normalized_stage,
@@ -117,10 +149,28 @@ class RoleModelRouter:
             responsibility=str(profile.get("responsibility") or ""),
             task=task.task,
             model=model,
-            skills=list(role_config.skills) if enabled and role_config is not None else [],
+            skills=skills if enabled and role_config is not None else [],
             mcp_servers=list(role_config.mcp_servers) if enabled and role_config is not None else [],
             multi_agent_enabled=enabled,
+            base_url=endpoint,
+            base_url_env=role_base_url_env,
+            api_key_env=role_api_key_env,
         )
+
+    def _resolve_endpoint(self, role_base_url: str, role_base_url_env: str) -> str:
+        """Best-effort resolution of the effective base URL for ledger records.
+
+        Failures stay silent here: ``build_llm`` raises the actionable error when
+        the client for this route is actually constructed.
+        """
+        try:
+            return resolve_llm_base_url(
+                self.config.llm.provider,
+                role_base_url or self.config.llm.base_url,
+                role_base_url_env or self.config.llm.base_url_env,
+            )
+        except (ValueError, RuntimeError):
+            return ""
 
 
 class AgentRoutedLLM:
@@ -151,7 +201,8 @@ class AgentRoutedLLM:
         if not route.multi_agent_enabled:
             return PreparedAgentRequest(route=route, system=system, user=user)
         role_config = self.router.roles.get(route.agent_id) or AgentRoleConfig(agent_id=route.agent_id)
-        tool_context, skill_records = self.tool_runtime.role_context(role_config)
+        effective_role = replace(role_config, skills=route.skills)
+        tool_context, skill_records = self.tool_runtime.role_context(effective_role)
         if skill_records:
             route = replace(route, skills=[str(item["skill_id"]) for item in skill_records])
         role_prompt = (
@@ -166,7 +217,7 @@ class AgentRoutedLLM:
         return PreparedAgentRequest(route=route, system=routed_system, user=user)
 
     def complete_prepared(self, prepared: PreparedAgentRequest) -> str:
-        client = self._client_for(prepared.route.model)
+        client = self._client_for(prepared.route)
         response = client.complete(prepared.system, prepared.user)
         if not prepared.route.multi_agent_enabled or not prepared.route.mcp_servers:
             return response
@@ -194,10 +245,22 @@ class AgentRoutedLLM:
             raise RuntimeError("MCP tool round limit reached before the agent produced a final response")
         return response
 
-    def _client_for(self, model: str) -> LLM:
-        key = str(model or "").strip()
+    def _client_for(self, route: RouteDecision) -> LLM:
+        key = (
+            str(route.model or "").strip(),
+            str(route.base_url or "").strip(),
+            str(route.base_url_env or "").strip(),
+            str(route.api_key_env or "").strip(),
+        )
         if key not in self._clients:
-            self._clients[key] = build_llm(replace(self.config.llm, model=key))
+            overrides: dict[str, Any] = {"model": key[0]}
+            if key[1]:
+                overrides["base_url"] = key[1]
+            if key[2]:
+                overrides["base_url_env"] = key[2]
+            if key[3]:
+                overrides["api_key_env"] = key[3]
+            self._clients[key] = build_llm(replace(self.config.llm, **overrides))
         return self._clients[key]
 
 

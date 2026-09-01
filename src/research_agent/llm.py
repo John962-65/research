@@ -57,6 +57,8 @@ class OpenAICompatibleLLM:
     base_url: str
     api_key: str
     model: str
+    temperature: float | None = None
+    max_tokens: int | None = None
 
     def complete(self, system: str, user: str) -> str:
         base_url = validate_llm_base_url(self.base_url)
@@ -67,6 +69,10 @@ class OpenAICompatibleLLM:
                 {"role": "user", "content": user},
             ],
         }
+        if self.temperature is not None:
+            payload["temperature"] = self.temperature
+        if self.max_tokens is not None:
+            payload["max_tokens"] = self.max_tokens
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         request_limit = _llm_max_request_bytes()
         if len(body) > request_limit:
@@ -606,4 +612,10 @@ def build_llm(config: LLMConfig) -> LLM:
         raise RuntimeError(f"Missing model. Set llm.model or env var: {config.model_env}")
     if urllib.parse.urlsplit(base_url).hostname == "api.openai.com" and not api_key:
         raise RuntimeError(f"Missing API key. Set llm.api_key or env var: {config.api_key_env}")
-    return OpenAICompatibleLLM(base_url=base_url, api_key=api_key, model=model)
+    return OpenAICompatibleLLM(
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        temperature=config.temperature,
+        max_tokens=config.max_tokens,
+    )
