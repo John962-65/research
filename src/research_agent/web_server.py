@@ -2009,7 +2009,7 @@ class ResearchAgentHandler(BaseHTTPRequestHandler):
 
     def _handle_run_post(self, path: str) -> None:
         parts = [unquote(part) for part in path.split("/") if part]
-        if len(parts) != 4 or parts[3] not in {"approve", "revision", "cancel", "resume", "repair-resume", "repair-resume-preview"}:
+        if len(parts) != 4 or parts[3] not in {"approve", "revision", "cancel", "resume", "repair-resume", "repair-resume-preview", "rollback-preview", "rollback-apply"}:
             self._send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
             return
         try:
@@ -2024,8 +2024,12 @@ class ResearchAgentHandler(BaseHTTPRequestHandler):
                 result = STORE.resume_with_config(parts[2], payload=payload)
             elif parts[3] == "repair-resume":
                 result = STORE.repair_resume_with_config(parts[2], payload=payload)
-            else:
+            elif parts[3] == "repair-resume-preview":
                 result = STORE.preview_repair_resume(parts[2])
+            elif parts[3] == "rollback-preview":
+                result = STORE.preview_rollback(parts[2], str(payload.get("target") or payload.get("target_stage") or "").strip())
+            else:
+                result = STORE.rollback_with_config(parts[2], payload)
         except PreflightGateError as exc:
             self._send_json(_preflight_error_payload(exc.report), HTTPStatus.CONFLICT)
             return
@@ -2201,6 +2205,13 @@ class ResearchAgentHandler(BaseHTTPRequestHandler):
                 _artifact_content_type(filename),
                 extra_headers=_artifact_response_headers(filename),
             )
+            return
+        if len(parts) == 4 and parts[3] == "rollback-options":
+            options = STORE.rollback_options(run_id)
+            if options is None:
+                self._send_json({"error": "run not found"}, HTTPStatus.NOT_FOUND)
+                return
+            self._send_json(options)
             return
         self._send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
 

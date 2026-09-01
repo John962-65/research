@@ -378,7 +378,7 @@ def apply_rollback(run_dir: Path, target: str, preview_id: str, preview_token: s
     preview = build_rollback_preview(run_dir, target)
     if (
         str(record.get("target") or "") != target
-        or int(record.get("current_revision") or -1) != int(preview["current_revision"])
+        or _safe_int(record.get("current_revision"), -1) != int(preview["current_revision"])
         or not _constant_time_equal(str(record.get("plan_digest") or ""), str(preview["plan_digest"]))
     ):
         raise RuntimeError("rollback preview is stale; preview the target again before applying")

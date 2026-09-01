@@ -1726,3 +1726,63 @@ button, input, select, textarea {
 .workflow-activity-item.status-running .workflow-activity-status { color: var(--navy-600); }
 .workflow-activity-item.status-completed .workflow-activity-status { color: #16a34a; }
 .workflow-activity-item.status-failed .workflow-activity-status { color: #dc2626; }
+
+/* ============ Rollback chooser (Phase 3) ============ */
+.rollback-chooser {
+  margin-top: 10px;
+  border-top: 1px dashed var(--line);
+  padding-top: 8px;
+}
+.rollback-chooser-header {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--navy-800);
+  margin-bottom: 6px;
+}
+.rollback-hint {
+  font-size: 11.5px;
+  color: #6b7280;
+  margin: 0 0 6px;
+}
+.rollback-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.rollback-controls select {
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--navy-900);
+  max-width: 320px;
+}
+.rollback-preview {
+  margin-top: 8px;
+  border: 1px solid var(--navy-100);
+  background: var(--navy-50);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: #374151;
+}
+.rollback-preview p { margin: 3px 0; }
+.rollback-warning { color: var(--gold-700); }
+.rollback-blocker { color: #dc2626; }
+.rollback-reason-label {
+  display: block;
+  font-size: 11.5px;
+  color: #6b7280;
+  margin: 8px 0 4px;
+}
+.rollback-preview input {
+  width: 100%;
+  max-width: 420px;
+  font-size: 12px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-sizing: border-box;
+}

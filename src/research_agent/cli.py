@@ -32,6 +32,7 @@ from .paper_grade_benchmark_probe import build_paper_grade_benchmark_probe, rend
 from .paper_grade_probe import build_paper_grade_online_probe, render_paper_grade_online_probe_markdown, write_paper_grade_online_probe_artifacts
 from .perfect_agent_readiness import PERFECT_AGENT_READINESS_MD, build_perfect_agent_readiness, render_perfect_agent_readiness_markdown, write_perfect_agent_readiness_artifacts
 from .pipeline import approve_execution_gate, approve_review_gate, default_out_dir, request_cancel, request_review_revision, resume_pipeline_from_checkpoint, resume_pipeline_from_repair_queue, run_pipeline
+from .workflow_graph import apply_rollback, build_rollback_preview, issue_rollback_preview, rollback_options
 from .platform_audit import build_platform_audit, render_platform_audit_markdown, write_platform_audit
 from .preflight import render_preflight_markdown, run_preflight
 from .repair_queue_backfill import backfill_repair_queues, render_repair_queue_backfill_markdown
@@ -724,6 +725,13 @@ def main(argv: list[str] | None = None) -> None:
     cancel_parser.add_argument("run_dir", type=Path)
     cancel_parser.add_argument("--reason", default="cli_requested")
 
+    rollback_parser = subparsers.add_parser("rollback", help="Archive artifacts from a workflow node onward and rerun from there")
+    rollback_parser.add_argument("run_dir", type=Path)
+    rollback_parser.add_argument("--target", default=None, help="Workflow node to rerun from; omit to list available targets")
+    rollback_parser.add_argument("--apply", action="store_true", help="Apply the rollback (archive + checkpoint resume) after previewing")
+    rollback_parser.add_argument("--reason", default="", help="Why the rollback is needed; required with --apply (>= 4 chars)")
+    rollback_parser.add_argument("--config", type=Path, default=None, help="TOML config path used for the resumed run")
+
     args = parser.parse_args(argv)
     _reject_forbidden_cli_secret_args(args)
     _apply_gold_defaults_to_args(args)
@@ -1193,6 +1201,41 @@ def main(argv: list[str] | None = None) -> None:
         cancel = request_cancel(args.run_dir, requester="cli", reason=args.reason)
         print(f"Cancel requested: {args.run_dir}")
         print(f"requested_at: {cancel.get('requested_at')}")
+        return
+    if args.command == "rollback":
+        if not args.target:
+            options = rollback_options(args.run_dir)
+            if not options:
+                print(f"No rollback targets: {args.run_dir}", file=sys.stderr)
+                raise SystemExit(1)
+            print("可回退目标（--target）：")
+            for option in options:
+                print(f"- {option['target']}  {option['title']}（{option['role']}）")
+            return
+        if args.apply and len(str(args.reason).strip()) < 4:
+            print("--apply requires --reason with at least 4 characters", file=sys.stderr)
+            raise SystemExit(2)
+        if not args.apply:
+            preview = build_rollback_preview(args.run_dir, args.target)
+            print(f"回退目标：{preview['target']}（revision {preview['current_revision']} -> {preview['next_revision']}）")
+            print(f"将归档文件：{preview['file_count']} 个 / {preview['total_bytes']} 字节")
+            if preview["review_reapproval_required"]:
+                print("注意：回退到文献链之前，恢复后会重新等待人工 review 审批。")
+            if preview["execution_reapproval_required"]:
+                print("注意：回退到实验执行之前，恢复后会重新等待执行审批。")
+            for blocker in preview["blockers"]:
+                print(f"阻断：{blocker}")
+            if preview["blockers"]:
+                raise SystemExit(1)
+            print("Preview only: add --apply --reason '...' to archive these artifacts and resume.")
+            return
+        preview = issue_rollback_preview(args.run_dir, args.target)
+        report = apply_rollback(args.run_dir, args.target, preview["preview_id"], preview["preview_token"])
+        print(f"Rollback applied: {report['archive_ref']}")
+        config = _apply_run_overrides(_load_resume_base_config(args.run_dir, args.config), args)
+        topic = _topic_from_state(args.run_dir)
+        result_dir = resume_pipeline_from_checkpoint(topic, args.run_dir, config)
+        print(f"Research run resumed after rollback: {result_dir}")
         return
     raise SystemExit(f"Unknown command: {args.command}")
 

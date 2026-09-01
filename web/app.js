@@ -127,6 +127,7 @@ const state = {
   literaturePreviewReport: null,
   resumingRunId: null,
   cancellingRunId: null,
+  rollbackUI: null,
   goldLaunchCommands: [],
   goldLaunchChecklist: [],
   currentPage: 1,
@@ -186,6 +187,7 @@ const els = {
   repairResumePreview: document.querySelector('#repair-resume-preview'),
   applyRepairResume: document.querySelector('#apply-repair-resume'),
   resume: document.querySelector('#resume-run'),
+  rollbackRun: document.querySelector('#rollback-run'),
   applyLiteratureFeedback: document.querySelector('#apply-literature-feedback'),
   cancel: document.querySelector('#cancel-run'),
   stageTrack: document.querySelector('#stage-track'),
@@ -280,13 +282,31 @@ function renderStages(stage, workflow) {
       renderStages(state.currentRun?.stage || 'started', state.currentRun?.workflow);
     });
   }
+  wireRollbackUI();
+}
+
+function wireRollbackUI() {
+  const ui = state.rollbackUI;
+  if (!ui || ui.runId !== state.currentRun?.id) return;
+  const targetSelect = document.querySelector('#rollback-target');
+  if (targetSelect) {
+    targetSelect.addEventListener('change', () => {
+      state.rollbackUI = { ...state.rollbackUI, target: targetSelect.value, preview: null, error: '' };
+      renderStages(state.currentRun.stage, state.currentRun.workflow);
+    });
+  }
+  const previewBtn = document.querySelector('#rollback-preview-btn');
+  if (previewBtn) previewBtn.addEventListener('click', previewRollbackTarget);
+  const applyBtn = document.querySelector('#rollback-apply-btn');
+  if (applyBtn) applyBtn.addEventListener('click', applyRollbackNow);
+  const closeBtn = document.querySelector('#rollback-close-btn');
+  if (closeBtn) closeBtn.addEventListener('click', closeRollbackChooser);
 }
 
 const WORKFLOW_STATUS_LABELS = { running: '运行中', waiting: '等待人工', completed: '已完成', pending: '未开始', failed: '失败', cancelled: '已取消' };
 
 function renderWorkflowPanel(workflow) {
-  if (!workflow || !Array.isArray(workflow.nodes) || !workflow.nodes.length) return '';
-  const activityStatus = WORKFLOW_STATUS_LABELS[workflow.activity_status] || workflow.activity_status || '';
+  if (!workflow || !Array.isArray(workflow.nodes) || !workflow.nodes.length) return '';  const activityStatus = WORKFLOW_STATUS_LABELS[workflow.activity_status] || workflow.activity_status || '';
   const nodesHtml = workflow.nodes.map(node => {
     const status = node.status || 'pending';
     const label = WORKFLOW_STATUS_LABELS[status] || status;
@@ -327,8 +347,141 @@ function renderWorkflowPanel(workflow) {
       </div>
       <div class="workflow-nodes-bar">${nodesHtml}</div>
       ${activityHtml}
+      ${renderRollbackChooser()}
     </div>
   `;
+}
+
+function renderRollbackChooser() {
+  const ui = state.rollbackUI;
+  if (!ui || ui.runId !== state.currentRun?.id) return '';
+  const options = ui.options || [];
+  if (ui.busy === 'options') {
+    return '<div class="rollback-chooser"><p class="rollback-hint">正在加载可回退节点…</p></div>';
+  }
+  if (!options.length) {
+    return '<div class="rollback-chooser"><p class="rollback-hint">当前没有可回退的节点（需要先至少完成一个阶段）。</p></div>';
+  }
+  const selected = ui.target || (options[options.length - 1] || {}).target || '';
+  const optionHtml = options.map(option => `<option value="${escapeHtml(option.target)}" ${option.target === selected ? 'selected' : ''}>${escapeHtml(option.title)}（${escapeHtml(option.target)}）</option>`).join('');
+  let previewHtml = '';
+  if (ui.preview) {
+    const preview = ui.preview;
+    const warnings = [];
+    if (preview.review_reapproval_required) warnings.push('回退到文献链之前：恢复后会重新等待人工 review 审批');
+    if (preview.execution_reapproval_required) warnings.push('回退到实验执行之前：恢复后会重新等待执行审批');
+    previewHtml = `
+      <div class="rollback-preview">
+        <p>将归档 <strong>${escapeHtml(preview.file_count)}</strong> 个文件（${escapeHtml(String(preview.total_bytes))} 字节），revision ${escapeHtml(String(preview.current_revision))} → ${escapeHtml(String(preview.next_revision))}。</p>
+        ${(preview.blockers || []).map(item => `<p class="rollback-blocker">阻断：${escapeHtml(item)}</p>`).join('')}
+        ${warnings.map(item => `<p class="rollback-warning">注意：${escapeHtml(item)}</p>`).join('')}
+        <p class="rollback-warning">注意：已发生的远程 MCP 调用、网络请求和外部 Benchmark 副作用不会被本地回退撤销。</p>
+        <label class="rollback-reason-label" for="rollback-reason">回退原因（至少 4 个字符）</label>
+        <input id="rollback-reason" type="text" value="${escapeHtml(ui.reason || '')}" maxlength="500" />
+      </div>
+    `;
+  }
+  const busy = Boolean(ui.busy);
+  const errorHtml = ui.error ? `<p class="rollback-blocker">失败：${escapeHtml(ui.error)}</p>` : '';
+  return `
+    <div class="rollback-chooser">
+      <div class="rollback-chooser-header">回退重跑</div>
+      <label class="rollback-hint" for="rollback-target">选择要回退到的节点（该节点之后的产物会先归档再重新生成）：</label>
+      <div class="rollback-controls">
+        <select id="rollback-target" ${busy ? 'disabled' : ''}>${optionHtml}</select>
+        ${ui.preview
+          ? `<button id="rollback-apply-btn" class="approval-button" type="button" ${busy ? 'disabled' : ''}>${ui.busy === 'apply' ? '回退中…' : '确认回退并续跑'}</button>`
+          : `<button id="rollback-preview-btn" class="secondary-button" type="button" ${busy ? 'disabled' : ''}>${ui.busy === 'preview' ? '预览中…' : '预览回退'}</button>`}
+        <button id="rollback-close-btn" class="mini-button" type="button" ${busy ? 'disabled' : ''}>关闭</button>
+      </div>
+      ${previewHtml}
+      ${errorHtml}
+    </div>
+  `;
+}
+
+async function openRollbackChooser() {
+  const run = state.currentRun;
+  if (!run || !canRollback(run)) return;
+  state.rollbackUI = { runId: run.id, busy: 'options', options: [], preview: null, reason: '', error: '' };
+  renderStages(run.stage, run.workflow);
+  try {
+    const result = await api(`/api/runs/${encodeURIComponent(run.id)}/rollback-options`);
+    const options = result.options || [];
+    state.rollbackUI = {
+      runId: run.id,
+      busy: null,
+      options,
+      target: options.length ? options[options.length - 1].target : '',
+      preview: null,
+      reason: '',
+      error: '',
+    };
+  } catch (error) {
+    state.rollbackUI = { ...(state.rollbackUI || {}), runId: run.id, busy: null, options: [], error: error.message };
+  }
+  renderStages(state.currentRun.stage, state.currentRun.workflow);
+}
+
+async function previewRollbackTarget() {
+  const run = state.currentRun;
+  const ui = state.rollbackUI;
+  if (!run || !ui || !ui.target) return;
+  state.rollbackUI = { ...ui, busy: 'preview', error: '' };
+  updateActionButtons();
+  try {
+    const result = await api(`/api/runs/${encodeURIComponent(run.id)}/rollback-preview`, {
+      method: 'POST',
+      body: JSON.stringify({ target: ui.target }),
+    });
+    state.rollbackUI = { ...(state.rollbackUI || {}), busy: null, preview: result.preview || null, error: '' };
+  } catch (error) {
+    state.rollbackUI = { ...(state.rollbackUI || {}), busy: null, preview: null, error: error.message };
+  }
+  renderStages(state.currentRun.stage, state.currentRun.workflow);
+  updateActionButtons();
+}
+
+async function applyRollbackNow() {
+  const run = state.currentRun;
+  const ui = state.rollbackUI;
+  if (!run || !ui || !ui.preview) return;
+  const reason = String(document.querySelector('#rollback-reason')?.value || '').trim();
+  if (reason.length < 4) {
+    state.rollbackUI = { ...ui, error: '回退原因至少需要 4 个字符' };
+    renderStages(run.stage, run.workflow);
+    return;
+  }
+  state.rollbackUI = { ...ui, busy: 'apply', reason, error: '' };
+  updateActionButtons();
+  try {
+    const result = await api(`/api/runs/${encodeURIComponent(run.id)}/rollback-apply`, {
+      method: 'POST',
+      body: JSON.stringify({
+        target: ui.target,
+        preview_id: ui.preview.preview_id,
+        preview_token: ui.preview.preview_token,
+        reason,
+      }),
+    });
+    state.rollbackUI = null;
+    if (result.run) setCurrentRun(result.run);
+    await refreshRuns(true);
+    startPolling();
+  } catch (error) {
+    state.rollbackUI = { ...(state.rollbackUI || {}), busy: null, preview: null, error: `${error.message}（预览已失效，请重新预览）` };
+    renderStages(state.currentRun.stage, state.currentRun.workflow);
+    updateActionButtons();
+    return;
+  }
+  renderStages(state.currentRun.stage, state.currentRun.workflow);
+  updateActionButtons();
+}
+
+function closeRollbackChooser() {
+  state.rollbackUI = null;
+  renderStages(state.currentRun?.stage || 'started', state.currentRun?.workflow);
+  updateActionButtons();
 }
 
 function statusClass(status) {
@@ -362,6 +515,13 @@ function canCancel(run) {
   if (['completed', 'failed', 'cancelled'].includes(run.status)) return false;
   if (['completed', 'failed', 'cancelled'].includes(run.stage)) return false;
   return ['running', 'waiting', 'unknown', 'cancelling'].includes(run.status);
+}
+
+function canRollback(run) {
+  if (!run || run.worker_active) return false;
+  if (['running', 'cancelling', 'cancelled'].includes(run.status)) return false;
+  if (run.stage === 'cancelled') return false;
+  return ['waiting', 'unknown', 'completed', 'failed', 'revision_requested'].includes(run.status);
 }
 
 function canResume(run) {
@@ -584,6 +744,10 @@ function updateActionButtons() {
   els.cancel.hidden = !cancelAllowed && !cancelling;
   els.cancel.disabled = !cancelAllowed || cancelling;
   els.cancel.textContent = cancelling ? '取消中...' : '停止';
+
+  const rollbackAllowed = canRollback(state.currentRun);
+  els.rollbackRun.hidden = !rollbackAllowed;
+  els.rollbackRun.disabled = !rollbackAllowed || Boolean(state.rollbackUI?.busy);
 
   els.goldRunVerify.disabled = !state.currentRun?.id;
 }
@@ -3395,6 +3559,7 @@ els.applyRepairResume.addEventListener('click', applyRepairResumePreviewToForm);
 els.resume.addEventListener('click', resumeCurrentRun);
 els.applyLiteratureFeedback.addEventListener('click', applyLiteratureFeedbackToForm);
 els.cancel.addEventListener('click', cancelCurrentRun);
+els.rollbackRun.addEventListener('click', openRollbackChooser);
 
 if (window.MutationObserver && els.artifactTitle) {
   new MutationObserver(clearGoldLaunchCommandsWhenArtifactChanges)
