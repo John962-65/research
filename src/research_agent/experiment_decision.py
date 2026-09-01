@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, safe_int as _safe_int
 from .models import ExperimentPlan, StatisticsReport
 
 
@@ -276,13 +276,6 @@ def _rationale(decision: str) -> str:
 
 def _as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
-
-
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
 
 
 def _metric_name(item: Any) -> str:

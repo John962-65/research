@@ -10,7 +10,7 @@ import json
 import os
 import time
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell, sha256_text as _sha256_text, utc_now as _utc_now
 from .config import LLMConfig
 from .llm import LLM
 
@@ -429,10 +429,6 @@ def _purpose(system: str, purpose: str = "") -> str:
     return first_line[:96]
 
 
-def _sha256_text(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
 def _short_error(value: str) -> str:
     value = value.replace("\n", " ").strip()
     return value[:280]
@@ -537,9 +533,3 @@ def _redact_url(value: str) -> str:
     return value.replace("@", "@***")
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

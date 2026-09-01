@@ -6,7 +6,7 @@ from typing import Any
 import json
 import re
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell, read_json_dict as _read_json
 from .config import LiteratureConfig
 from .models import LiteratureQualityReport, LiteratureReview, Paper
 
@@ -567,14 +567,6 @@ def _seed_keys(doi: str, url: str, title: str) -> list[str]:
     return keys
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
 def _list_from_payload(value: Any) -> list[str]:
     if isinstance(value, str):
         return [item.strip() for item in value.split(",") if item.strip()]
@@ -738,5 +730,3 @@ def _unique_papers(values: list[Paper]) -> list[Paper]:
     return result
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

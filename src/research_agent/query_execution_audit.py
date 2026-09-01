@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 import re
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell, safe_int as _safe_int
 from .models import LiteratureReview, Paper, ResearchPlan
 
 
@@ -443,13 +443,6 @@ def _terms(text: Any) -> list[str]:
     return _unique([value for value in values if value not in stop])
 
 
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
-
-
 def _safe_float(value: Any) -> float:
     try:
         return float(value)
@@ -476,5 +469,3 @@ def _norm(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip().lower())
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

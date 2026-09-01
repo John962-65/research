@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell
 from .models import PaperRewriteReport, PaperRevisionPlan, PaperRevisionTaskResult, RevisionTask
 
 
@@ -269,5 +269,3 @@ def _dedupe(values: list[str]) -> list[str]:
     return output
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 from typing import Any
 import re
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell
 from .config import ReleaseConfig
 from .models import ReleaseMetadataCheck, ReleaseMetadataReport
 
@@ -324,5 +324,3 @@ def _normalize_doi(value: str) -> str:
     return value
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

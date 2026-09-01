@@ -6,6 +6,7 @@ import re
 
 from .config import LiteratureConfig
 from .models import LiteratureSearchQuery, LiteratureSearchStrategy
+from .artifacts import cell as _cell
 
 
 def build_literature_search_strategy(
@@ -420,10 +421,6 @@ def _normalize_query(value: str) -> str:
 
 def _terms(query: str) -> list[str]:
     return re.findall(r"[A-Za-z][A-Za-z0-9_*+-]{2,}|[\u4e00-\u9fff]{2,}", query.lower())
-
-
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
 
 
 def _unique(values: list[str]) -> list[str]:

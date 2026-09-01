@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from typing import Any, Callable
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell
 from .config import AgentConfig, LiteratureConfig, PaperGradeConfig
 from .literature import parse_manual_seed_papers
 from .literature_sources import OnlineLiteratureClient
@@ -254,10 +254,6 @@ def _string_list(value: Any) -> list[str]:
     if isinstance(value, str):
         return [item.strip() for item in value.split(",") if item.strip()]
     return []
-
-
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
 
 
 def _safe_diagnostic(value: Exception | str, literature: LiteratureConfig) -> str:

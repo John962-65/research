@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 import re
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell
 from .models import LiteratureReview, ResearchIdea
 
 
@@ -186,10 +186,6 @@ def _idea_text(idea: ResearchIdea) -> str:
 def _terms(text: str) -> list[str]:
     raw = re.findall(r"[A-Za-z][A-Za-z0-9_*+-]{2,}|[\u4e00-\u9fff]{2,}", text.lower())
     return [term for term in raw if term not in _STOPWORDS and len(term) <= 40]
-
-
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
 
 
 _STOPWORDS = {

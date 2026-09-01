@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 import json
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell, utc_now as _utc_now, read_json_dict as _read_json
 from .run_memory import build_run_memory
 from .run_summary import RunSummary, build_run_dashboard
 
@@ -497,14 +497,6 @@ def _stage_at_or_after(stage: str, target: str) -> bool:
         return stage == "completed"
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
 def _nested(data: dict[str, Any], first: str, second: str) -> Any:
     value = data.get(first) if isinstance(data, dict) else None
     if not isinstance(value, dict):
@@ -564,9 +556,3 @@ def _severity_rank(severity: str) -> int:
     return {"info": 0, "warn": 1, "block": 2}.get(severity, 0)
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

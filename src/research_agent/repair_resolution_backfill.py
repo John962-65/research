@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 import json
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell, utc_now as _utc_now, read_json_dict as _read_json
 from .repair_resolution_audit import REPAIR_RESOLUTION_AUDIT_JSON, REPAIR_RESOLUTION_AUDIT_MD, build_repair_resolution_audit, render_repair_resolution_audit_markdown
 
 
@@ -146,14 +146,6 @@ def _topic(run_dir: Path) -> str:
     return str(state.get("topic") or queue.get("topic") or resume.get("topic") or run_dir.name)
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
 def _count_list(value: Any) -> int:
     return len(value) if isinstance(value, list) else 0
 
@@ -165,9 +157,3 @@ def _safe_float(value: Any) -> float:
         return 0.0
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

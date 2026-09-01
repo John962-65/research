@@ -6,7 +6,7 @@ import hashlib
 import json
 import tomllib
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell
 from .benchmark_adapter import audit_benchmark_adapter_config
 from .config import ExecutionConfig, PaperGradeConfig
 from .experiments import MAX_EXECUTION_REPEATS, MAX_EXECUTION_TIMEOUT_SECONDS, MAX_OUTPUT_BYTES, validate_experiment_command
@@ -212,10 +212,6 @@ def _dedupe(values: list[str]) -> list[str]:
             seen.add(value)
             result.append(value)
     return result
-
-
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
 
 
 def execution_source_binding_matches(binding: dict[str, Any]) -> bool:

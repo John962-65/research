@@ -6,7 +6,7 @@ from typing import Any
 import hashlib
 import json
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell, utc_now as _utc_now, read_json_dict as _read_json
 from .provenance import ArtifactRecord, MANIFEST_JSON, MANIFEST_MD, RunEvent, RunManifest, render_manifest_markdown
 
 
@@ -266,14 +266,6 @@ def _manifest_status(stage: str) -> str:
     return "backfilled"
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
 def _latest_mtime(run_dir: Path, paths: list[str]) -> str:
     values = [_file_mtime(run_dir / path) for path in paths]
     values = [value for value in values if value]
@@ -301,9 +293,3 @@ def _item(run_dir: Path, action: str, **extra: Any) -> dict[str, Any]:
     return {"run_id": run_dir.name, "action": action, **extra}
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

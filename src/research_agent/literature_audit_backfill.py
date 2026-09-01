@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell
 from .literature_coverage import (
     LITERATURE_COVERAGE_JSON,
     LITERATURE_COVERAGE_MD,
@@ -296,5 +296,3 @@ def _safe_float(value: Any) -> float:
         return 0.0
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

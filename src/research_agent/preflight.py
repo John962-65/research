@@ -12,7 +12,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell
 from .benchmark_adapter import audit_benchmark_adapter_config, formal_benchmark_provenance_issues
 from .config import AgentConfig
 from .credential_validation import placeholder_secret as _placeholder_secret
@@ -2214,5 +2214,3 @@ def _recent_seed_year_cutoff() -> int:
     return datetime.now(timezone.utc).year - 5
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

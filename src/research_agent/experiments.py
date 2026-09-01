@@ -17,7 +17,7 @@ import threading
 import time
 import tomllib
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell
 from .benchmark_adapter import prepare_benchmark_adapter_plan
 from .command_safety import interpreter_execution_issues
 from .config import ExecutionConfig, PaperGradeConfig
@@ -1085,10 +1085,6 @@ def _tail_text(value: str | bytes | None, limit: int = 4000) -> str:
     else:
         text = str(value)
     return text[-limit:]
-
-
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
 
 
 def _write_results_csv(path: Path, results: list[ExperimentResult]) -> None:

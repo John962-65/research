@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 import json
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell, read_json_dict as _read_json
 
 
 REPAIR_RESOLUTION_AUDIT_JSON = "12-repair-resolution-audit.json"
@@ -153,13 +153,3 @@ def _required_actions(status: str, blocking: list[str], manual: list[str]) -> li
     return ["原 repair-resume 修复项已降级为人工/高优先级待办；人工确认后再归档。", *manual[:4]]
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

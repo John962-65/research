@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 import json
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell, read_json_dict as _read_json
 from .models import IterationPlanItem, IterationPlanReport
 
 
@@ -655,14 +655,6 @@ def _field(data: dict[str, Any], key: str) -> str:
     return str(data.get(key) or "").strip() if isinstance(data, dict) else ""
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
 def _prefixed_list(prefix: str, values: Any, limit: int) -> list[str]:
     if not isinstance(values, list):
         return []
@@ -692,5 +684,3 @@ def _dedupe_items(items: list[IterationPlanItem]) -> list[IterationPlanItem]:
     return result
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

@@ -7,7 +7,7 @@ from typing import Any
 import json
 import re
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell, safe_int as _safe_int, utc_now as _utc_now, read_json_dict as _read_json
 from .literature import literature_source_health_report, render_literature_source_health_markdown
 from .literature_rescue_backfill import _load_raw_review, _load_research_plan
 from .literature_search_strategy import render_literature_search_strategy_markdown
@@ -483,14 +483,6 @@ def _finalize_source_row(row: dict[str, Any]) -> dict[str, Any]:
     return {**row, "status": status}
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
 def _string_list(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(item).strip() for item in value if str(item).strip()]
@@ -508,13 +500,6 @@ def _unique(values: list[Any]) -> list[Any]:
     return result
 
 
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
-
-
 def _safe_float(value: Any) -> float:
     try:
         return float(value)
@@ -522,9 +507,3 @@ def _safe_float(value: Any) -> float:
         return 0.0
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

@@ -6,6 +6,7 @@ from typing import Any
 import json
 
 from .human_gate_audit import HUMAN_GATE_AUDIT_JSON, HUMAN_GATE_AUDIT_MD, write_human_gate_audit_artifacts
+from .artifacts import cell as _cell, safe_int as _safe_int, utc_now as _utc_now, read_json_dict as _read_json
 
 
 def backfill_human_gate_audits(runs_dir: Path, *, dry_run: bool = False, force: bool = False, limit: int = 0) -> dict[str, Any]:
@@ -128,24 +129,3 @@ def _topic_from_state(run_dir: Path) -> str:
     return str(state.get("topic") or run_dir.name)
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

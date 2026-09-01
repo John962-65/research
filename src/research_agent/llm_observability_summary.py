@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 import json
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, utc_now as _utc_now, read_json_dict as _read_json
 
 
 LLM_OBSERVABILITY_SUMMARY_JSON = "13-llm-observability-summary.json"
@@ -176,14 +176,6 @@ def _recommended_actions(status: str, blocking: list[str], manual: list[str], wa
     return ["当前 LLM 观测摘要可用于运行复盘；继续保留 ledger、阶段审计、成本审计和 agent observability。"]
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
 def _dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
@@ -227,5 +219,3 @@ def _unique(values: list[str]) -> list[str]:
     return result
 
 
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

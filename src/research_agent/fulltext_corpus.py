@@ -7,7 +7,7 @@ import os
 import re
 import stat
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell
 from .models import FullTextCorpus, FullTextDocument
 
 
@@ -412,5 +412,3 @@ def _short_text(text: str, max_chars: int) -> str:
     return text[: max_chars - 1].rstrip() + "…"
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

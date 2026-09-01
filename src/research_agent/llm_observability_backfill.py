@@ -18,6 +18,7 @@ from .llm_observability_summary import (
 from .llm_runtime_contract import LLM_RUNTIME_CONTRACT_JSON, LLM_RUNTIME_CONTRACT_MD, write_llm_runtime_contract_artifacts
 from .llm_trace_audit import LLM_TRACE_AUDIT_JSON, LLM_TRACE_AUDIT_MD, write_llm_trace_audit_artifacts
 from .run_economics_audit import RUN_ECONOMICS_AUDIT_JSON, RUN_ECONOMICS_AUDIT_MD, write_run_economics_audit_artifacts
+from .artifacts import cell as _cell, safe_int as _safe_int, utc_now as _utc_now, read_json_dict as _read_json
 
 
 def backfill_llm_observability(runs_dir: Path, *, dry_run: bool = False, force: bool = False, limit: int = 0) -> dict[str, Any]:
@@ -225,28 +226,7 @@ def _topic_from_state(run_dir: Path) -> str:
     return str(data.get("topic") or run_dir.name)
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
 def _count_list(value: Any) -> int:
     return len(value) if isinstance(value, list) else 0
 
 
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

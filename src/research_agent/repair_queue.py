@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 import json
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell, read_json_dict as _read_json
 from .models import RepairQueueItem, RepairQueueReport
 from .seed_paper_intake import build_seed_paper_suggestion_report
 
@@ -982,13 +982,3 @@ def _final_handoff_only_upstream_block(data: dict[str, Any]) -> bool:
     return all(str(item).strip().startswith(prefixes) for item in blocking)
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

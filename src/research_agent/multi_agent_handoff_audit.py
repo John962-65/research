@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell
 from .models import ExperimentPlan, ResearchIdea
 
 
@@ -187,5 +187,3 @@ def _unique(values: list[str]) -> list[str]:
     return result
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

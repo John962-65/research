@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 import re
+from .artifacts import cell as _cell
 
 
 REVIEW_CONSTRAINTS_JSON = "01-review-constraints.json"
@@ -211,5 +212,3 @@ def _agent_text(constraints: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

@@ -11,7 +11,7 @@ import time
 
 from .analysis import analysis_matches_execution_mode, analyze_results, render_analysis_markdown
 from .agent_runtime import RoleModelRouter, build_agent_runtime_llm
-from .artifacts import read_json, write_json, write_text
+from .artifacts import read_json, write_json, write_text, cell as _cell, sha256_text as _sha256_text, utc_now as _utc_now
 from .ablation_plan import ABLATION_PLAN_JSON, ABLATION_PLAN_MD, write_ablation_plan_artifacts
 from .agent_observability_audit import AGENT_OBSERVABILITY_AUDIT_JSON, AGENT_OBSERVABILITY_AUDIT_MD, write_agent_observability_audit_artifacts
 from .agent_stage_contract import AGENT_STAGE_CONTRACT_JSON, AGENT_STAGE_CONTRACT_MD, write_agent_stage_contract_artifacts
@@ -4202,10 +4202,6 @@ def _digest_payload(value: Any) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _sha256_text(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
 def _approval_granted(path: Path) -> bool:
     if not path.exists():
         return False
@@ -4383,10 +4379,6 @@ def _file_sha256(path: Path) -> str:
         return digest.hexdigest()
     except OSError:
         return ""
-
-
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
 
 
 def _check_cancelled(
@@ -4908,5 +4900,3 @@ def _load_final_readiness_report(path: Path) -> FinalReadinessReport:
     return FinalReadinessReport(**data)
 
 
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

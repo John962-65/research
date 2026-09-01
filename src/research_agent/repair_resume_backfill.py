@@ -7,6 +7,7 @@ import json
 
 from .repair_resume import REPAIR_RESUME_PLAN_JSON, REPAIR_RESUME_PLAN_MD, build_repair_resume_plan, write_repair_resume_plan_artifacts
 from .repair_resume_backlog import backlog_item_from_plan
+from .artifacts import cell as _cell, safe_int as _safe_int, utc_now as _utc_now, read_json_dict as _read_json
 
 
 ACTIVE_QUEUE_STATUSES = {"blocked_repair_required", "needs_repair"}
@@ -216,30 +217,9 @@ def _is_improved(old: dict[str, Any], new: dict[str, Any]) -> bool:
     return new_count < old_count
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
-
-
 def _string_list(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(item).strip() for item in value if str(item).strip()]
     return []
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

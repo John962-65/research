@@ -21,7 +21,7 @@ from .literature_evidence_contract import (
     render_literature_evidence_contract_markdown,
 )
 from .models import CitationEntry, ClaimSupport, EvidenceChunk, LiteratureContext, ReviewGate
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell, safe_int as _safe_int, utc_now as _utc_now, read_json_dict as _read_json
 
 
 def backfill_literature_gate_decisions(runs_dir: Path, *, dry_run: bool = False, force: bool = False, limit: int = 0) -> dict[str, Any]:
@@ -286,14 +286,6 @@ def _topic(run_dir: Path, literature: dict[str, Any], context: LiteratureContext
     return str(state.get("topic") or literature.get("topic") or (context.topic if context else "") or run_dir.name)
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
 def _report_dict(report: Any) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key in dir(report):
@@ -307,16 +299,3 @@ def _report_dict(report: Any) -> dict[str, Any]:
     return result
 
 
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

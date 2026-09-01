@@ -5,7 +5,7 @@ from typing import Any
 import hashlib
 import json
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell
 from .models import CodeDataAvailabilityItem, CodeDataAvailabilityReport
 from .release_metadata import RELEASE_METADATA_JSON
 
@@ -274,5 +274,3 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell
 from .models import ExperimentPlan, ExperimentResult, MetricComparison, StatisticsReport
 
 
@@ -302,10 +302,6 @@ def _fmt(value: Any) -> str:
         return f"{float(value):.3f}"
     except (TypeError, ValueError):
         return "NA"
-
-
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
 
 
 def _short_text(value: str, max_chars: int) -> str:

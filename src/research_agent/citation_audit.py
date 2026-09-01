@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 from .models import CitationAuditItem, CitationAuditReport, CitationEntry, LiteratureContext
+from .artifacts import cell as _cell
 
 
 def audit_citations(context: LiteratureContext) -> CitationAuditReport:
@@ -287,5 +288,3 @@ def _looks_like_doi(value: str) -> bool:
     return bool(re.match(r"^10\.\d{4,9}/\S+$", value.strip(), flags=re.I))
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

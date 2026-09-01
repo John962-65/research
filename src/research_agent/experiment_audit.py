@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell
 from .models import ExperimentPlan, ResearchPlan
 
 
@@ -344,10 +344,6 @@ def _is_generic(value: str) -> bool:
 def _has_token(value: str, tokens: set[str]) -> bool:
     lowered = value.lower()
     return any(token in lowered for token in tokens)
-
-
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
 
 
 def _novelty_item(novelty: dict[str, Any], title: str) -> dict[str, Any]:

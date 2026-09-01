@@ -5,7 +5,7 @@ from typing import Any
 import json
 import re
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell
 from .config import ExecutionConfig
 from .models import LiteratureContext, LiteratureReview, ResearchPlan
 
@@ -625,5 +625,3 @@ def _terms(text: str) -> list[str]:
     return re.findall(r"[a-z][a-z0-9*+-]{1,}|[\u4e00-\u9fff]{2,}", str(text or "").lower())
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

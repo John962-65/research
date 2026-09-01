@@ -14,6 +14,7 @@ from .literature_context import citation_key_for_paper
 from .llm import LLM
 from .llm_trace import complete_with_purpose, record_validation_result
 from .models import Analysis, ExperimentPlan, LiteratureReview, Paper, ResearchIdea
+from .artifacts import safe_int as _safe_int
 
 
 METRIC_LABELS = {
@@ -1219,13 +1220,6 @@ def _artifact_groups(runs: list[dict[str, Any]]) -> list[tuple[str, list[str]]]:
 def _short_hash(value: Any, chars: int = 12) -> str:
     text = str(value or "")
     return text[:chars] if text else "-"
-
-
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
 
 
 def _format_number(value: Any) -> str:

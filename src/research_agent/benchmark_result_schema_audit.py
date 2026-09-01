@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 import re
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell
 from .benchmark_adapter import formal_benchmark_metric_contract_issues, formal_benchmark_provenance_issues
 from .models import ExperimentPlan, ExperimentResult, StatisticsReport
 
@@ -939,5 +939,3 @@ def _unique(values: list[str]) -> list[str]:
     return result
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

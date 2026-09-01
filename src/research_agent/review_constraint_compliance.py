@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 import re
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell
 from .models import ExperimentPlan, ResearchIdea
 
 
@@ -456,5 +456,3 @@ def _term_in_text(term: str, normalized_text: str) -> bool:
     return False
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

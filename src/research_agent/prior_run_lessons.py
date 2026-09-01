@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell
 from .run_memory import RunMemoryReport, RunMemorySignal, build_run_memory
 
 
@@ -184,5 +184,3 @@ def _agent_prompt_text(memory: RunMemoryReport, lessons: list[PriorRunLesson]) -
     return "\n".join(lines)
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

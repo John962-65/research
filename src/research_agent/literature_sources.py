@@ -18,6 +18,7 @@ import xml.etree.ElementTree as ET
 from .config import LiteratureConfig
 from .credential_validation import placeholder_secret, valid_contact_email
 from .models import Paper
+from .artifacts import safe_int as _safe_int
 
 
 USER_AGENT = "research-agent/0.1 (+https://local.research-agent)"
@@ -848,13 +849,6 @@ def _first_text(value: Any) -> str:
 
 def _strip_tags(value: str) -> str:
     return re.sub(r"<[^>]+>", "", value).strip()
-
-
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
 
 
 def _safe_optional_int(value: Any) -> int | None:

@@ -7,7 +7,7 @@ from typing import Any
 import json
 import shutil
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell, safe_int as _safe_int, utc_now as _utc_now, read_json_dict as _read_json
 from .config import AgentConfig
 from .seed_paper_intake import build_seed_paper_suggestion_report, seed_role_repair_queries
 
@@ -1544,25 +1544,6 @@ def _rerun_index(rerun_from: str) -> int:
         return len(RERUN_ORDER) - 1
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
-
-
 def _safe_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -1605,5 +1586,3 @@ def _dedupe(values: list[str]) -> list[str]:
     return result
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

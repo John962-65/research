@@ -12,7 +12,7 @@ import secrets
 import shutil
 import time
 
-from .artifacts import write_json
+from .artifacts import write_json, sha256_file as _sha256_file, utc_now as _utc_now, read_json_dict as _read_json
 from .provenance import RunManifestRecorder
 
 
@@ -751,24 +751,8 @@ def _status_lock(out_dir: Path) -> Lock:
         return _STATUS_LOCKS.setdefault(key, Lock())
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
 def _node_index(node_id: str) -> int:
     return next(index for index, node in enumerate(WORKFLOW_NODES) if node.node_id == node_id)
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _digest(value: Any) -> str:
@@ -801,5 +785,3 @@ def _is_relative_to(path: Path, root: Path) -> bool:
     return True
 
 
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

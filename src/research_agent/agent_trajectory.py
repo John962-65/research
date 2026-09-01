@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 import json
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell, utc_now as _utc_now, read_json_dict as _read_json
 
 
 AGENT_TRAJECTORY_JSON = "13-agent-trajectory.json"
@@ -334,14 +334,6 @@ def _warn_status(value: str) -> bool:
     return value in {"warn", "warning", "review_required", "needs_repair", "needs_evidence_upgrade", "needs_rescue_search", "needs_manual_seed", "needs_query_repair", "ready_for_human_polish", "needs_human_submission_review", "needs_human_release_metadata", "smoke_only", "local_experiment"}
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
 def _dicts(value: Any) -> list[dict[str, Any]]:
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
 
@@ -373,9 +365,3 @@ def _unique(values: Any) -> list[str]:
     return result
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

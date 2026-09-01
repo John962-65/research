@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell
 from .models import ExperimentPlan, ExperimentResult, StatisticsReport
 from .preregistration import plan_fingerprint
 
@@ -295,10 +295,6 @@ def _check_statistics(
         )
     if statistics.warnings:
         warnings.extend(str(item) for item in statistics.warnings)
-
-
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
 
 
 def _as_list(value: Any) -> list[Any]:

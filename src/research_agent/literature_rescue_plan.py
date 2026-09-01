@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 import re
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell
 from .models import LiteratureQualityReport, LiteratureReview, ResearchPlan
 
 
@@ -358,5 +358,3 @@ def _unique(values: list[str]) -> list[str]:
     return result
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

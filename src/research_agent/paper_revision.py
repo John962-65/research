@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .models import PaperClaimAudit, PaperRevisionPlan, PaperReview, RevisionTask
+from .artifacts import cell as _cell
 
 
 def build_paper_revision_plan(
@@ -238,5 +239,3 @@ def _unique(items: list[str]) -> list[str]:
     return output
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 import re
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell
 from .models import LiteratureContext, ResearchIdea
 
 
@@ -273,5 +273,3 @@ def _terms(text: str) -> list[str]:
     return sorted(set(ascii_terms + cjk_terms))
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

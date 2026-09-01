@@ -11,7 +11,7 @@ import re
 import shutil
 import tomllib
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell, sha256_file as _sha256_file
 from .command_safety import interpreter_execution_issues
 from .config import ExecutionConfig, PaperGradeConfig
 from .models import ExperimentCommand, ExperimentPlan
@@ -666,14 +666,6 @@ def _manifest_relative_file(manifest_dir: Path, value: str) -> Path | None:
     return resolved
 
 
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _source_file_issues(manifest_dir: Path, command: list[str], source_files: list[str]) -> list[str]:
     candidates = list(source_files)
     for token in command:
@@ -1301,5 +1293,3 @@ def _unique_suggestions(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

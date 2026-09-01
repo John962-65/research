@@ -6,6 +6,7 @@ from typing import Any
 import json
 
 from .repair_resume import build_repair_resume_plan
+from .artifacts import cell as _cell, safe_int as _safe_int, utc_now as _utc_now, read_json_dict as _read_json
 
 
 REPAIR_BACKLOG_STATUSES = {"blocked_repair_required", "needs_repair"}
@@ -341,21 +342,6 @@ def _count_items(items: list[Any], severity: str) -> int:
     return sum(1 for item in items if isinstance(item, dict) and str(item.get("severity") or "") == severity and str(item.get("status") or "open") == "open")
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
-
-
 def _string_list(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(item).strip() for item in value if str(item).strip()]
@@ -373,9 +359,3 @@ def _dedupe(values: list[Any]) -> list[str]:
     return result
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

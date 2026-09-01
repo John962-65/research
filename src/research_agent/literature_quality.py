@@ -5,6 +5,7 @@ import re
 
 from .literature_sources import build_evidence_table
 from .models import LiteratureQualityItem, LiteratureQualityReport, LiteratureReview, Paper
+from .artifacts import cell as _cell
 
 
 CORE_EVIDENCE_ROLES = ["review_survey", "benchmark_dataset", "baseline_method", "recent_work"]
@@ -698,10 +699,6 @@ def _normalize_text(text: str) -> str:
     value = str(text or "").lower().replace("*", " star")
     value = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", " ", value)
     return re.sub(r"\s+", " ", value).strip()
-
-
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
 
 
 def _safe_int(value: object) -> int:

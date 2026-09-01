@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 import json
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell, safe_int as _safe_int, utc_now as _utc_now
 
 
 @dataclass(frozen=True)
@@ -1392,13 +1392,6 @@ def _artifact_count(run_dir: Path) -> int:
     return sum(1 for path in run_dir.rglob("*") if path.is_file()) if run_dir.exists() else 0
 
 
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
-
-
 def _safe_float_or_none(value: Any) -> float | None:
     try:
         return float(value)
@@ -1413,9 +1406,3 @@ def _safe_float(value: Any) -> float:
         return 0.0
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

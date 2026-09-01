@@ -10,6 +10,7 @@ from .agent_observability_audit import (
     AGENT_OBSERVABILITY_AUDIT_MD,
     write_agent_observability_audit_artifacts,
 )
+from .artifacts import cell as _cell, safe_int as _safe_int, utc_now as _utc_now
 
 
 def backfill_agent_observability_audits(runs_dir: Path, *, dry_run: bool = False, force: bool = False, limit: int = 0) -> dict[str, Any]:
@@ -138,16 +139,3 @@ def _topic_from_state(run_dir: Path) -> str:
     return str(data.get("topic") or run_dir.name)
 
 
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

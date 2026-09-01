@@ -9,7 +9,7 @@ from urllib.request import Request, urlopen
 import json
 import os
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell, utc_now as _utc_now
 
 
 OPEN_SOURCE_LESSONS_JSON = "00-open-source-lessons.json"
@@ -423,10 +423,6 @@ def _safe_error(exc: Exception, *secrets: str | None) -> str:
     return text[:240]
 
 
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
 def _lessons(topic: str) -> list[OpenSourceLesson]:
     base = [
         OpenSourceLesson(
@@ -624,5 +620,3 @@ def _robotics_topic(topic: str) -> bool:
     return "机械臂" in topic or "manipulator" in lowered or ("robot" in lowered and ("path" in lowered or "motion" in lowered))
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 import json
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell, safe_int as _safe_int, read_json_dict as _read_json
 
 
 REVIEW_REVISION_PLAN_JSON = "01-review-revision-plan.json"
@@ -296,23 +296,8 @@ def _gate_status(context: dict[str, Any]) -> str:
     return str(gate.get("status") or "")
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
 def _as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
-
-
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
 
 
 def _dedupe_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -348,5 +333,3 @@ def _quote(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

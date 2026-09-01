@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from .artifacts import safe_int as _safe_int
 
 
 _RECOVERABLE_STATUSES = {"failed", "budget_exceeded"}
@@ -122,8 +123,3 @@ def _dicts(value: Any) -> list[dict[str, Any]]:
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
 
 
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0

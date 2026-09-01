@@ -10,6 +10,7 @@ from .literature_search_strategy import build_literature_search_strategy, strate
 from .llm import LLM
 from .llm_trace import complete_with_purpose, record_validation_result
 from .models import LiteratureReview, Paper
+from .artifacts import safe_int as _safe_int
 
 
 OFFLINE_CORPUS = [
@@ -791,8 +792,3 @@ def _query_results(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0

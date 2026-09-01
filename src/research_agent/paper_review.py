@@ -15,6 +15,7 @@ from .models import (
     PaperReview,
     ResearchIdea,
 )
+from .artifacts import cell as _cell
 
 
 def review_paper_draft(
@@ -634,10 +635,6 @@ def _short_text(text: str, max_chars: int) -> str:
 
 def _normalize_claim(text: str) -> str:
     return re.sub(r"[\s，,。.;；:：!！?？、（）()【】\[\]\"'`\\-_/]+", "", text.lower())
-
-
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
 
 
 _NONASSERTIVE_MARKERS = [

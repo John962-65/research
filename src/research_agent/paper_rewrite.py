@@ -7,6 +7,7 @@ from .llm import LLM
 from .llm_trace import complete_with_purpose, record_validation_result
 from .models import PaperRewriteReport, PaperRevisionPlan, PaperRevisionTaskResult, PaperReview, RevisionTask
 from .paper_review import _claim_asserted_in_paper, _claim_explicitly_scoped_out
+from .artifacts import cell as _cell
 
 
 def revise_paper_draft(
@@ -538,5 +539,3 @@ def _strip_code_fence(text: str) -> str:
     return text
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

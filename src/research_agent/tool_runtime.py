@@ -13,7 +13,7 @@ import os
 import re
 import urllib.parse
 
-from .artifacts import write_json
+from .artifacts import write_json, utc_now as _utc_now, read_json_dict as _read_json
 from .config import AgentRoleConfig, MCPServerConfig, MultiAgentConfig
 
 
@@ -368,14 +368,6 @@ def _workflow_revision(run_dir: Path) -> int:
         return 0
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
 def _digest(value: Any) -> str:
     raw = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
@@ -385,5 +377,3 @@ def _unique(values: list[str]) -> list[str]:
     return list(dict.fromkeys(str(value).strip() for value in values if str(value).strip()))
 
 
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

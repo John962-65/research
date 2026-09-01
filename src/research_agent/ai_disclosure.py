@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 import json
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, safe_int as _safe_int
 
 
 AI_DISCLOSURE_JSON = "10-ai-disclosure.json"
@@ -148,13 +148,6 @@ def _read_json(path: Path) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
-
-
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
 
 
 def _dedupe(values: list[str]) -> list[str]:

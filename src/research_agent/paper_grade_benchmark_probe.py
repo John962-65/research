@@ -8,7 +8,7 @@ import re
 import urllib.error
 import urllib.request
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell
 from .benchmark_adapter import audit_benchmark_adapter_config
 from .config import AgentConfig
 
@@ -398,5 +398,3 @@ def _check(name: str, status: str, detail: str, action: str = "") -> dict[str, s
     return {"name": name, "status": status, "detail": detail, "action": action}
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

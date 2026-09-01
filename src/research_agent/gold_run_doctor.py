@@ -9,7 +9,7 @@ import os
 import re
 import zipfile
 
-from .artifacts import read_json, write_json, write_text
+from .artifacts import read_json, write_json, write_text, cell as _cell, safe_int as _safe_int
 from .config import AgentConfig
 from .credential_validation import placeholder_secret as _placeholder_secret
 from .credential_validation import valid_contact_email
@@ -2476,13 +2476,6 @@ def _count_list(value: Any) -> int:
     return len(value) if isinstance(value, list) else 0
 
 
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
-
-
 def _path_name(value: Any) -> str:
     text = str(value or "").strip()
     return Path(text).name if text else ""
@@ -2490,10 +2483,6 @@ def _path_name(value: Any) -> str:
 
 def _check(name: str, status: str, detail: str, action: str = "") -> dict[str, Any]:
     return {"id": name, "name": name, "status": status, "detail": detail, "action": action}
-
-
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
 
 
 def _string_list(value: Any) -> list[str]:

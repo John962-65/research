@@ -5,7 +5,7 @@ from typing import Any
 import json
 import re
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell
 from .literature_context import retrieve_chunks
 from .models import LiteratureContext, LiteratureReview, ResearchPlan
 
@@ -421,5 +421,3 @@ def _clean_query(value: str) -> str:
     return re.sub(r"\s+", " ", value.replace("|", " ")).strip()
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

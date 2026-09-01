@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 import json
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell, read_json_dict as _read_json
 from .seed_paper_intake import build_seed_paper_suggestion_report
 
 
@@ -578,14 +578,6 @@ def _recommended_actions(status: str, blocking: list[str], manual: list[str]) ->
     return ["外部项目约束已闭环；继续检查 repair queue、stage contract 和 scorecard。"]
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
 def _list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
@@ -662,5 +654,3 @@ def _robotics_topic(topic: str) -> bool:
     return "机械臂" in topic or "manipulator" in lowered or ("robot" in lowered and ("path" in lowered or "motion" in lowered))
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

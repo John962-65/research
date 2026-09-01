@@ -9,7 +9,7 @@ import json
 import shlex
 import shutil
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, sha256_file as _sha256_file
 
 
 BENCHMARK_MANIFEST_BUILD_JSON = "benchmark-manifest-build-report.json"
@@ -250,14 +250,6 @@ def _external_http_url(value: str) -> bool:
     except ValueError:
         return True
     return not any([address.is_private, address.is_loopback, address.is_link_local, address.is_multicast, address.is_unspecified])
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _unique(values: list[str]) -> list[str]:

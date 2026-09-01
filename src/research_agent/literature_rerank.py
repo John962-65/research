@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 import re
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell
 from .literature_sources import build_evidence_table
 from .models import LiteratureReview, Paper, ResearchPlan
 
@@ -486,5 +486,3 @@ def _paper_text(paper: Paper) -> str:
     return f"{paper.title} {paper.abstract} {paper.venue} {' '.join(paper.authors)}".lower()
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

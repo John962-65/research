@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 import re
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell, safe_int as _safe_int
 from .config import ExecutionConfig
 from .models import ExplorationMap, ExperimentPlan, ResearchIdea, ResearchPlan
 
@@ -347,12 +347,3 @@ def _unique(values: Any) -> list[str]:
     return result
 
 
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

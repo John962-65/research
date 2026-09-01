@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 import re
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell
 from .models import CitationGroundingItem, CitationGroundingReport, LiteratureContext
 
 
@@ -321,5 +321,3 @@ def _truncate(value: str, limit: int) -> str:
     return text[: limit - 1].rstrip() + "..."
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 import shutil
 
-from .artifacts import read_json, write_json, write_text
+from .artifacts import read_json, write_json, write_text, cell as _cell
 from .benchmark_adapter import prepare_benchmark_adapter_plan
 from .benchmark_evidence_audit import write_benchmark_evidence_audit_artifacts
 from .benchmark_plan import BENCHMARK_PLAN_JSON, BENCHMARK_PLAN_MD, render_benchmark_plan_markdown
@@ -402,5 +402,3 @@ def _fmt(value: Any) -> str:
     return str(value)
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

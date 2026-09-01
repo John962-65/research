@@ -19,6 +19,7 @@ from .literature_quality_backfill import (
 from .literature_rescue_backfill import _load_raw_review, _read_literature_review
 from .literature_search_audit_backfill import _source_health_review
 from .pipeline import CITATION_AUDIT_JSON, CITATION_AUDIT_MD, write_context_and_citation_artifacts
+from .artifacts import cell as _cell, safe_int as _safe_int, utc_now as _utc_now, read_json_dict as _read_json
 
 
 LITERATURE_CONTEXT_JSON = "01-context.json"
@@ -344,30 +345,9 @@ def _topic(run_dir: Path, fallback: str) -> str:
     return str(state.get("topic") or fallback or run_dir.name)
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
 def _string_list(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(item).strip() for item in value if str(item).strip()]
     return []
 
 
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

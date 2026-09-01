@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import html
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell
 from .idea_audit import idea_audit_item_for_title, idea_audit_penalty
 from .models import ExplorationBranch, ExplorationMap, ResearchIdea
 from .novelty_audit import duplicate_penalty, novelty_item_for_title
@@ -214,10 +214,6 @@ def _replace_branch_status(branch: ExplorationBranch, status: str) -> Exploratio
         evidence_keys=branch.evidence_keys,
         baseline=branch.baseline,
     )
-
-
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
 
 
 def _svg_text(value: str) -> str:

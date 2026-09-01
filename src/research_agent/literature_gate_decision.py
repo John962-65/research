@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell, safe_int as _safe_int
 from .config import PaperGradeConfig
 
 
@@ -816,13 +816,6 @@ def _score(value: Any) -> float | None:
         return None
 
 
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
-
-
 def _safe_float(value: Any) -> float:
     try:
         return float(value)
@@ -861,5 +854,3 @@ def _unique_dicts(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

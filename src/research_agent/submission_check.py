@@ -5,7 +5,7 @@ from typing import Any
 import json
 import re
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell, safe_int as _safe_int
 from .config import PaperConfig
 from .models import SubmissionCheckItem, SubmissionCheckReport
 
@@ -419,17 +419,6 @@ def _bib_keys(text: str) -> list[str]:
         if key and key not in keys:
             keys.append(key)
     return keys
-
-
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
-
-
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
 
 
 def _safe_float(value: Any) -> float:

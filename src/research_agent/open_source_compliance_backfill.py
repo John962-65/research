@@ -8,6 +8,7 @@ import json
 from .open_source_compliance import OPEN_SOURCE_COMPLIANCE_JSON, OPEN_SOURCE_COMPLIANCE_MD, write_open_source_compliance_artifacts
 from .open_source_lessons import OPEN_SOURCE_LESSONS_JSON, OPEN_SOURCE_LESSONS_MD, write_open_source_lessons_artifacts
 from .repair_queue import REPAIR_QUEUE_JSON, write_repair_queue_artifacts
+from .artifacts import cell as _cell, safe_int as _safe_int, utc_now as _utc_now, read_json_dict as _read_json
 
 
 def backfill_open_source_compliance(runs_dir: Path, *, dry_run: bool = False, force: bool = False, limit: int = 0) -> dict[str, Any]:
@@ -190,14 +191,6 @@ def _topic_from_state(run_dir: Path) -> str:
     return str(data.get("topic") or run_dir.name)
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
 def _needs_repair_queue_refresh(run_dir: Path, compliance: dict[str, Any], *, compliance_will_change: bool = False) -> bool:
     if compliance_will_change and not _repair_queue_has_open_source_item(run_dir):
         return True
@@ -232,13 +225,6 @@ def _list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
-
-
 def _safe_float(value: Any) -> float:
     try:
         return float(value)
@@ -246,9 +232,3 @@ def _safe_float(value: Any) -> float:
         return 0.0
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

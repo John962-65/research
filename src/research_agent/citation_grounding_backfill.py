@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 import json
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell, safe_int as _safe_int, utc_now as _utc_now, read_json_dict as _read_json
 from .citation_grounding import CITATION_GROUNDING_JSON, CITATION_GROUNDING_MD, build_citation_grounding_report, render_citation_grounding_markdown
 from .literature_gate_backfill import _read_context
 
@@ -156,14 +156,6 @@ def _has_paper(run_dir: Path) -> bool:
     return False
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
 def _report_dict(report: Any) -> dict[str, Any]:
     if isinstance(report, dict):
         return report
@@ -179,13 +171,6 @@ def _report_dict(report: Any) -> dict[str, Any]:
     return result
 
 
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
-
-
 def _safe_float(value: Any) -> float:
     try:
         return float(value)
@@ -193,9 +178,3 @@ def _safe_float(value: Any) -> float:
         return 0.0
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

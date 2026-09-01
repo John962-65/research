@@ -5,7 +5,7 @@ from typing import Any
 import hashlib
 import json
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell, safe_int as _safe_int, read_json_dict as _read_json
 from .submission_package_zip import submission_package_zip_blocking_issue
 
 
@@ -804,26 +804,11 @@ def _item(category: str, name: str, status: str, evidence: str, action: str, art
     return {"category": category, "name": name, "status": status, "evidence": evidence, "action": action, "artifacts": artifacts or []}
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
 def _nonempty_file(path: Path) -> bool:
     try:
         return path.is_file() and path.stat().st_size > 0
     except OSError:
         return False
-
-
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
 
 
 def _safe_float(value: Any) -> float:
@@ -844,5 +829,3 @@ def _dedupe(values: list[str]) -> list[str]:
     return result
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

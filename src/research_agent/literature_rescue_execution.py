@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Callable
 import re
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell
 from .config import LiteratureConfig
 from .literature import build_literature_review_from_papers
 from .literature_sources import OnlineLiteratureClient, deduplicate_papers, filter_relevant_papers, rank_papers
@@ -399,5 +399,3 @@ def _warnings(status: str, query_outcomes: list[dict[str, Any]]) -> list[str]:
     return warnings
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

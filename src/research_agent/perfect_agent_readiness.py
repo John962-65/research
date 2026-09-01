@@ -12,7 +12,7 @@ import re
 import socket
 import tomllib
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell, read_json_dict as _read_json
 from .benchmark_plan import _domain_candidates
 from .config import PaperGradeConfig, load_config
 from .gold_run_doctor import (
@@ -2315,14 +2315,6 @@ def _capability(
     )
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
 def _read_text(path: Path) -> str:
     try:
         return path.read_text(encoding="utf-8")
@@ -2434,10 +2426,6 @@ def _string_list(value: Any) -> list[str]:
     if isinstance(value, str):
         return [item.strip() for item in value.split(",") if item.strip()]
     return []
-
-
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
 
 
 def _limit_label(limit: int) -> str:

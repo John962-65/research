@@ -8,7 +8,7 @@ import json
 import shutil
 import zipfile
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, cell as _cell, read_json_dict as _read_json
 from .models import SubmissionPackageFile, SubmissionPackageReport
 
 
@@ -489,14 +489,6 @@ def _file_record(source_path: str, package_path: str, path: Path, required: bool
     return SubmissionPackageFile(source_path, package_path, "pass", len(data), hashlib.sha256(data).hexdigest(), required, note)
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
 def _status_field(data: dict[str, Any]) -> str:
     return str(data.get("status") or "").strip()
 
@@ -526,5 +518,3 @@ def _dedupe(values: list[str]) -> list[str]:
     return result
 
 
-def _cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")

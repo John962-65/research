@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 import json
 
-from .artifacts import write_json, write_text
+from .artifacts import write_json, write_text, safe_int as _safe_int, read_json_dict as _read_json
 from .submission_package_zip import safe_submission_package_zip_filename, submission_package_zip_blocking_issue
 
 
@@ -340,13 +340,6 @@ def _count_list(value: Any) -> int:
     return len(value) if isinstance(value, list) else 0
 
 
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
-
-
 def _safe_float_or_none(value: Any) -> float | None:
     try:
         return float(value)
@@ -365,14 +358,6 @@ def _nonempty_file(path: Path) -> bool:
         return path.is_file() and path.stat().st_size > 0
     except OSError:
         return False
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
 
 
 def _dedupe(values: list[str]) -> list[str]:
