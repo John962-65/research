@@ -1704,7 +1704,13 @@ async function refreshRuns(keepSelection = true, forceArtifact = false) {
       selected = await api(`/api/runs/${encodeURIComponent(selected.id)}`);
       if (refreshSequence !== state.runsRefreshSequence || runLoadSequence !== state.runLoadSequence) return;
     } else {
-      selected = {...state.currentRun, ...selected};
+      const merged = {...state.currentRun, ...selected};
+      // List records carry only a workflow summary (no node graph); keep the
+      // full workflow from the run detail so the node panel survives polling.
+      if (!Array.isArray(merged.workflow?.nodes) && Array.isArray(state.currentRun.workflow?.nodes)) {
+        merged.workflow = state.currentRun.workflow;
+      }
+      selected = merged;
     }
   } else if (selected && !selected.config) {
     const detail = await api(`/api/runs/${encodeURIComponent(selected.id)}`);
