@@ -270,6 +270,75 @@ class PipelineReviewRevisionRequested(RuntimeError):
         super().__init__(f"Review revision requested in {out_dir}: {notes}")
 
 
+_LITERATURE_CHAIN_KEYS = (
+    "review",
+    "rerank_report",
+    "source_health",
+    "query_execution_audit",
+    "quality_report",
+    "snowball_report",
+    "curated_review",
+    "metadata_audit",
+    "seed_intake",
+    "coverage_report",
+    "evidence_mix_report",
+    "rescue_report",
+)
+
+
+def _bind_literature_chain(chain: dict[str, Any]) -> list[Any]:
+    return [chain[key] for key in _LITERATURE_CHAIN_KEYS]
+
+
+def _run_literature_audit_chain(
+    topic: str,
+    config: AgentConfig,
+    research_plan: ResearchPlan,
+    review: Any,
+    out_dir: Path,
+    *,
+    write_search_strategy: bool = True,
+) -> dict[str, Any]:
+    """Rerank the review and write every derived literature audit artifact.
+
+    Shared by the full-run, review-revision-refresh, and rescue-retry paths;
+    rescue execution (which may update the review) is orchestrated by the
+    caller, which re-enters this chain when the review changed. Checkpoint
+    resume keeps its own per-artifact guarded variants.
+    """
+    review, rerank_report = _write_reranked_literature(out_dir, review, research_plan)
+    if write_search_strategy:
+        write_literature_search_strategy_artifacts(out_dir, review)
+    source_health = write_literature_source_health_artifacts(out_dir, review)
+    query_execution_audit = write_query_execution_audit_artifacts(research_plan, review, rerank_report, source_health, out_dir)
+    quality_report = assess_literature_quality(review)
+    write_json(out_dir / "01-literature-quality.json", quality_report)
+    write_text(out_dir / "01-literature-quality.md", render_literature_quality_markdown(quality_report))
+    snowball_report = write_literature_snowball_artifacts(review, quality_report, out_dir)
+    curated_review = filter_review_by_quality(review, quality_report)
+    write_json(out_dir / "01-literature-curated.json", curated_review)
+    write_text(out_dir / "01-literature-curated.md", render_literature_markdown(curated_review))
+    metadata_audit = write_literature_metadata_audit_artifacts(review, curated_review, quality_report, out_dir)
+    seed_intake = write_seed_paper_intake_artifacts(topic, config.literature, review, curated_review, quality_report, out_dir)
+    coverage_report = write_literature_coverage_artifacts(research_plan, curated_review, out_dir)
+    evidence_mix_report = write_literature_evidence_mix_artifacts(research_plan, review, curated_review, quality_report, coverage_report, out_dir)
+    rescue_report = write_literature_rescue_plan_artifacts(research_plan, review, curated_review, quality_report, snowball_report, coverage_report, out_dir)
+    return {
+        "review": review,
+        "rerank_report": rerank_report,
+        "source_health": source_health,
+        "query_execution_audit": query_execution_audit,
+        "quality_report": quality_report,
+        "snowball_report": snowball_report,
+        "curated_review": curated_review,
+        "metadata_audit": metadata_audit,
+        "seed_intake": seed_intake,
+        "coverage_report": coverage_report,
+        "evidence_mix_report": evidence_mix_report,
+        "rescue_report": rescue_report,
+    }
+
+
 def run_pipeline(topic: str, out_dir: Path, config: AgentConfig) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     _validate_or_create_checkpoint_contract(out_dir, topic, config)
@@ -350,39 +419,38 @@ def run_pipeline(topic: str, out_dir: Path, config: AgentConfig) -> Path:
 
     _stage_begin(out_dir, topic, "literature_review")
     review = run_literature_review(topic, config.literature, llm, research_plan.search_queries)
-    review, rerank_report = _write_reranked_literature(out_dir, review, research_plan)
-    write_literature_search_strategy_artifacts(out_dir, review)
-    source_health = write_literature_source_health_artifacts(out_dir, review)
-    query_execution_audit = write_query_execution_audit_artifacts(research_plan, review, rerank_report, source_health, out_dir)
-    quality_report = assess_literature_quality(review)
-    write_json(out_dir / "01-literature-quality.json", quality_report)
-    write_text(out_dir / "01-literature-quality.md", render_literature_quality_markdown(quality_report))
-    snowball_report = write_literature_snowball_artifacts(review, quality_report, out_dir)
-    curated_review = filter_review_by_quality(review, quality_report)
-    write_json(out_dir / "01-literature-curated.json", curated_review)
-    write_text(out_dir / "01-literature-curated.md", render_literature_markdown(curated_review))
-    metadata_audit = write_literature_metadata_audit_artifacts(review, curated_review, quality_report, out_dir)
-    seed_intake = write_seed_paper_intake_artifacts(topic, config.literature, review, curated_review, quality_report, out_dir)
-    coverage_report = write_literature_coverage_artifacts(research_plan, curated_review, out_dir)
-    evidence_mix_report = write_literature_evidence_mix_artifacts(research_plan, review, curated_review, quality_report, coverage_report, out_dir)
-    rescue_report = write_literature_rescue_plan_artifacts(research_plan, review, curated_review, quality_report, snowball_report, coverage_report, out_dir)
+    chain = _run_literature_audit_chain(topic, config, research_plan, review, out_dir)
+    (
+        review,
+        rerank_report,
+        source_health,
+        query_execution_audit,
+        quality_report,
+        snowball_report,
+        curated_review,
+        metadata_audit,
+        seed_intake,
+        coverage_report,
+        evidence_mix_report,
+        rescue_report,
+    ) = _bind_literature_chain(chain)
     review, rescue_execution = write_literature_rescue_execution_artifacts(topic, config.literature, llm, review, rescue_report, out_dir, repair_tasks=_repair_resume_retrieval_tasks(out_dir))
     if rescue_execution.get("updated_review"):
-        review, rerank_report = _write_reranked_literature(out_dir, review, research_plan)
-        source_health = write_literature_source_health_artifacts(out_dir, review)
-        query_execution_audit = write_query_execution_audit_artifacts(research_plan, review, rerank_report, source_health, out_dir)
-        quality_report = assess_literature_quality(review)
-        write_json(out_dir / "01-literature-quality.json", quality_report)
-        write_text(out_dir / "01-literature-quality.md", render_literature_quality_markdown(quality_report))
-        snowball_report = write_literature_snowball_artifacts(review, quality_report, out_dir)
-        curated_review = filter_review_by_quality(review, quality_report)
-        write_json(out_dir / "01-literature-curated.json", curated_review)
-        write_text(out_dir / "01-literature-curated.md", render_literature_markdown(curated_review))
-        metadata_audit = write_literature_metadata_audit_artifacts(review, curated_review, quality_report, out_dir)
-        seed_intake = write_seed_paper_intake_artifacts(topic, config.literature, review, curated_review, quality_report, out_dir)
-        coverage_report = write_literature_coverage_artifacts(research_plan, curated_review, out_dir)
-        evidence_mix_report = write_literature_evidence_mix_artifacts(research_plan, review, curated_review, quality_report, coverage_report, out_dir)
-        rescue_report = write_literature_rescue_plan_artifacts(research_plan, review, curated_review, quality_report, snowball_report, coverage_report, out_dir)
+        chain = _run_literature_audit_chain(topic, config, research_plan, review, out_dir, write_search_strategy=False)
+        (
+            review,
+            rerank_report,
+            source_health,
+            query_execution_audit,
+            quality_report,
+            snowball_report,
+            curated_review,
+            metadata_audit,
+            seed_intake,
+            coverage_report,
+            evidence_mix_report,
+            rescue_report,
+        ) = _bind_literature_chain(chain)
     search_feedback = write_literature_search_feedback_artifacts(
         research_plan,
         review,
@@ -653,41 +721,38 @@ def _refresh_literature_context_after_review_revision(
     manifest: RunManifestRecorder,
 ) -> tuple[LiteratureReview, LiteratureContext]:
     raw_review = run_literature_review(topic, config.literature, llm, research_plan.search_queries)
-    raw_review, rerank_report = _write_reranked_literature(out_dir, raw_review, research_plan)
-    write_literature_search_strategy_artifacts(out_dir, raw_review)
-    source_health = write_literature_source_health_artifacts(out_dir, raw_review)
-    query_execution_audit = write_query_execution_audit_artifacts(research_plan, raw_review, rerank_report, source_health, out_dir)
-
-    quality_report = assess_literature_quality(raw_review)
-    write_json(out_dir / "01-literature-quality.json", quality_report)
-    write_text(out_dir / "01-literature-quality.md", render_literature_quality_markdown(quality_report))
-    snowball_report = write_literature_snowball_artifacts(raw_review, quality_report, out_dir)
-    curated_review = filter_review_by_quality(raw_review, quality_report)
-    write_json(out_dir / "01-literature-curated.json", curated_review)
-    write_text(out_dir / "01-literature-curated.md", render_literature_markdown(curated_review))
-    metadata_audit = write_literature_metadata_audit_artifacts(raw_review, curated_review, quality_report, out_dir)
-    seed_intake = write_seed_paper_intake_artifacts(topic, config.literature, raw_review, curated_review, quality_report, out_dir)
-    coverage_report = write_literature_coverage_artifacts(research_plan, curated_review, out_dir)
-    evidence_mix_report = write_literature_evidence_mix_artifacts(research_plan, raw_review, curated_review, quality_report, coverage_report, out_dir)
-    rescue_report = write_literature_rescue_plan_artifacts(research_plan, raw_review, curated_review, quality_report, snowball_report, coverage_report, out_dir)
+    chain = _run_literature_audit_chain(topic, config, research_plan, raw_review, out_dir)
+    (
+        raw_review,
+        rerank_report,
+        source_health,
+        query_execution_audit,
+        quality_report,
+        snowball_report,
+        curated_review,
+        metadata_audit,
+        seed_intake,
+        coverage_report,
+        evidence_mix_report,
+        rescue_report,
+    ) = _bind_literature_chain(chain)
     raw_after_rescue, rescue_execution = write_literature_rescue_execution_artifacts(topic, config.literature, llm, raw_review, rescue_report, out_dir, repair_tasks=_repair_resume_retrieval_tasks(out_dir))
     if rescue_execution.get("updated_review"):
-        raw_review = raw_after_rescue
-        raw_review, rerank_report = _write_reranked_literature(out_dir, raw_review, research_plan)
-        source_health = write_literature_source_health_artifacts(out_dir, raw_review)
-        query_execution_audit = write_query_execution_audit_artifacts(research_plan, raw_review, rerank_report, source_health, out_dir)
-        quality_report = assess_literature_quality(raw_review)
-        write_json(out_dir / "01-literature-quality.json", quality_report)
-        write_text(out_dir / "01-literature-quality.md", render_literature_quality_markdown(quality_report))
-        snowball_report = write_literature_snowball_artifacts(raw_review, quality_report, out_dir)
-        curated_review = filter_review_by_quality(raw_review, quality_report)
-        write_json(out_dir / "01-literature-curated.json", curated_review)
-        write_text(out_dir / "01-literature-curated.md", render_literature_markdown(curated_review))
-        metadata_audit = write_literature_metadata_audit_artifacts(raw_review, curated_review, quality_report, out_dir)
-        seed_intake = write_seed_paper_intake_artifacts(topic, config.literature, raw_review, curated_review, quality_report, out_dir)
-        coverage_report = write_literature_coverage_artifacts(research_plan, curated_review, out_dir)
-        evidence_mix_report = write_literature_evidence_mix_artifacts(research_plan, raw_review, curated_review, quality_report, coverage_report, out_dir)
-        rescue_report = write_literature_rescue_plan_artifacts(research_plan, raw_review, curated_review, quality_report, snowball_report, coverage_report, out_dir)
+        chain = _run_literature_audit_chain(topic, config, research_plan, raw_after_rescue, out_dir, write_search_strategy=False)
+        (
+            raw_review,
+            rerank_report,
+            source_health,
+            query_execution_audit,
+            quality_report,
+            snowball_report,
+            curated_review,
+            metadata_audit,
+            seed_intake,
+            coverage_report,
+            evidence_mix_report,
+            rescue_report,
+        ) = _bind_literature_chain(chain)
 
     search_feedback = write_literature_search_feedback_artifacts(
         research_plan,
