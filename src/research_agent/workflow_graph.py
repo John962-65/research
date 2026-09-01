@@ -214,6 +214,42 @@ def update_workflow_stage(out_dir: Path, topic: str, stage: str) -> dict[str, An
     )
 
 
+def begin_workflow_node(out_dir: Path, topic: str, node_id: str) -> dict[str, Any]:
+    """Mark a workflow node as actively running.
+
+    Completion boundaries already advance the graph; this covers the long
+    stretch of work inside a node (literature retrieval, experiment execution)
+    so the UI shows fresh progress instead of the previous stage's name.
+    """
+    node = next((item for item in WORKFLOW_NODES if item.node_id == node_id), None)
+    if node is None:
+        raise ValueError(f"unknown workflow node: {node_id}")
+    status = _update_status(
+        out_dir,
+        topic=topic,
+        pipeline_stage=node_id,
+        node_id=node.node_id,
+        agent_id=node.role,
+        task=node.task,
+        activity_status="running",
+        event_kind="stage",
+        detail=f"阶段开始：{node.title}",
+    )
+    with _status_lock(out_dir):
+        state_path = out_dir / "state.json"
+        state = _read_json(state_path)
+        state.update(
+            {
+                "topic": str(state.get("topic") or topic),
+                "current_stage": node.node_id,
+                "stage_status": "running",
+                "updated_at": _utc_now(),
+            }
+        )
+        write_json(state_path, state)
+    return status
+
+
 def update_agent_activity(
     out_dir: Path,
     *,

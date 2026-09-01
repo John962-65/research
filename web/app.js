@@ -217,7 +217,7 @@ const milestones = [
   { id: 'audit', num: '06', title: '溯源归档', stages: ['final_readiness_completed', 'submission_package_completed', 'iteration_plan_completed', 'llm_trace_audit_completed', 'run_economics_audit_completed', 'llm_runtime_contract_completed', 'agent_observability_audit_completed', 'human_gate_audit_completed', 'repair_queue_completed', 'repair_resolution_audit_completed', 'agent_stage_contract_completed', 'scorecard_completed', 'run_integrity_audit_completed', 'final_handoff_completed', 'completed'] },
 ];
 
-function renderStages(stage) {
+function renderStages(stage, workflow) {
   const currentIdx = stageIndex(stage);
   const currentStageInfo = stages[currentIdx] || ['started', '开始'];
   const percent = stage === 'completed' ? 100 : Math.round((currentIdx / Math.max(1, stages.length - 1)) * 100);
@@ -246,8 +246,10 @@ function renderStages(stage) {
   }).join('');
 
   const isExpanded = Boolean(state.microStepsExpanded);
+  const workflowHtml = renderWorkflowPanel(workflow);
 
   els.stageTrack.innerHTML = `
+    ${workflowHtml}
     <div class="compact-stepper-wrapper">
       <div class="milestones-bar">
         ${milestonesHtml}
@@ -275,9 +277,58 @@ function renderStages(stage) {
   if (toggleBtn) {
     toggleBtn.addEventListener('click', () => {
       state.microStepsExpanded = !state.microStepsExpanded;
-      renderStages(state.currentRun?.stage || 'started');
+      renderStages(state.currentRun?.stage || 'started', state.currentRun?.workflow);
     });
   }
+}
+
+const WORKFLOW_STATUS_LABELS = { running: '运行中', waiting: '等待人工', completed: '已完成', pending: '未开始', failed: '失败', cancelled: '已取消' };
+
+function renderWorkflowPanel(workflow) {
+  if (!workflow || !Array.isArray(workflow.nodes) || !workflow.nodes.length) return '';
+  const activityStatus = WORKFLOW_STATUS_LABELS[workflow.activity_status] || workflow.activity_status || '';
+  const nodesHtml = workflow.nodes.map(node => {
+    const status = node.status || 'pending';
+    const label = WORKFLOW_STATUS_LABELS[status] || status;
+    const title = `${node.title} · ${node.role} · ${label}\n${node.task || ''}`;
+    return `
+      <div class="workflow-node ${status}" title="${escapeHtml(title)}">
+        <span class="workflow-node-dot"></span>
+        <span class="workflow-node-title">${escapeHtml(node.title)}</span>
+      </div>
+    `;
+  }).join('<span class="workflow-node-arrow">→</span>');
+
+  const agentEvents = (workflow.events || []).filter(event => event.kind === 'agent').slice(-8).reverse();
+  const activityHtml = agentEvents.length ? `
+    <div class="workflow-activity">
+      <div class="workflow-activity-header">智能体活动</div>
+      <ul class="workflow-activity-list">
+        ${agentEvents.map(event => {
+          const statusLabel = WORKFLOW_STATUS_LABELS[event.status] || event.status || '';
+          return `<li class="workflow-activity-item status-${escapeHtml(event.status || 'unknown')}">
+            <span class="workflow-activity-time">${escapeHtml((event.at || '').slice(11, 19))}</span>
+            <span class="workflow-activity-agent">${escapeHtml(event.agent_id || '-')}</span>
+            <span class="workflow-activity-task">${escapeHtml(event.task || '')}</span>
+            <span class="workflow-activity-model">${escapeHtml(event.model || '')}</span>
+            <span class="workflow-activity-status">${escapeHtml(statusLabel)}</span>
+          </li>`;
+        }).join('')}
+      </ul>
+    </div>
+  ` : '';
+
+  return `
+    <div class="workflow-panel">
+      <div class="workflow-panel-header">
+        <span class="workflow-progress-badge">${escapeHtml(String(workflow.completed_nodes ?? 0))}/${escapeHtml(String(workflow.total_nodes ?? workflow.nodes.length))} 节点</span>
+        <span class="workflow-current">${escapeHtml(workflow.current_node_title || '')}</span>
+        <span class="workflow-activity-status-badge">${escapeHtml(activityStatus)}</span>
+      </div>
+      <div class="workflow-nodes-bar">${nodesHtml}</div>
+      ${activityHtml}
+    </div>
+  `;
 }
 
 function statusClass(status) {
@@ -484,7 +535,7 @@ function setCurrentRun(run) {
   const status = run ? run.status : 'idle';
   if (els.status.textContent !== status) els.status.textContent = status;
   els.status.className = `status-pill ${statusClass(status)}`;
-  renderStages(run ? run.stage : 'started');
+  renderStages(run ? run.stage : 'started', run?.workflow);
   updateActionButtons();
   updateTabs();
 }

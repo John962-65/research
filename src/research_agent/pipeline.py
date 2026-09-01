@@ -224,7 +224,7 @@ from .statistics import (
 from .submission_check import SUBMISSION_CHECK_JSON, SUBMISSION_CHECK_MD, render_submission_check_markdown, write_submission_check_artifacts
 from .submission_package import SUBMISSION_PACKAGE_JSON, SUBMISSION_PACKAGE_MD, SUBMISSION_PACKAGE_ZIP, write_submission_package_artifacts
 from .writing import markdown_to_latex, write_paper_markdown
-from .workflow_graph import update_workflow_stage
+from .workflow_graph import begin_workflow_node, update_workflow_stage
 
 
 APPROVAL_FILENAME = "approval.json"
@@ -348,6 +348,7 @@ def run_pipeline(topic: str, out_dir: Path, config: AgentConfig) -> Path:
     )
     _check_cancelled(out_dir, topic, manifest, "research_plan_completed")
 
+    _stage_begin(out_dir, topic, "literature_review")
     review = run_literature_review(topic, config.literature, llm, research_plan.search_queries)
     review, rerank_report = _write_reranked_literature(out_dir, review, research_plan)
     write_literature_search_strategy_artifacts(out_dir, review)
@@ -1392,6 +1393,7 @@ def _run_after_review_approval(
     prior_lessons_text: str = "",
 ) -> None:
     _check_cancelled(out_dir, topic, manifest, "review_approved")
+    _stage_begin(out_dir, topic, "ideation")
     gap_map_path = out_dir / RESEARCH_GAP_MAP_JSON
     if resume and gap_map_path.exists():
         research_gap_map = _read_dict(gap_map_path)
@@ -1591,6 +1593,7 @@ def _run_after_review_approval(
         )
     chosen_idea = selected_idea(exploration_map, ideas)
     _check_cancelled(out_dir, topic, manifest, "exploration_map_completed")
+    _stage_begin(out_dir, topic, "experiment_plan")
     manager_path = out_dir / EXPERIMENT_MANAGER_JSON
     if resume and manager_path.exists():
         experiment_manager = _read_dict(manager_path)
@@ -1970,6 +1973,7 @@ def _run_after_review_approval(
             },
         )
     else:
+        _stage_begin(out_dir, topic, "experiments")
         results = run_experiments(plan, config.execution, out_dir, paper_grade=config.paper_grade)
         write_json(results_path, results)
         runbook = _read_dict(out_dir / EXPERIMENT_RUNBOOK_JSON)
@@ -2090,6 +2094,7 @@ def _run_after_review_approval(
             metrics={"findings": len(analysis.findings), "limitations": len(analysis.limitations)},
         )
     else:
+        _stage_begin(out_dir, topic, "analysis")
         analysis = analyze_results(results, statistics, execution_mode=config.execution.mode)
         write_json(analysis_path, analysis)
         write_text(out_dir / "05-analysis.md", render_analysis_markdown(analysis))
@@ -2213,6 +2218,7 @@ def _run_after_review_approval(
             metrics={"calibration_status": review_calibration.get("status")},
         )
     else:
+        _stage_begin(out_dir, topic, "paper_writing")
         evidence_integrity = write_evidence_integrity_artifacts(topic, out_dir)
         if paper_checkpoint_reusable:
             paper_md = paper_path.read_text(encoding="utf-8")
@@ -2237,6 +2243,7 @@ def _run_after_review_approval(
             )
             write_text(paper_path, paper_md)
             write_text(out_dir / "06-paper.tex", markdown_to_latex(paper_md))
+        _stage_begin(out_dir, topic, "paper_review")
         paper_review = review_paper_draft(topic, review, ideas, plan, analysis, paper_md, context, llm)
         write_json(paper_review_path, paper_review)
         write_text(out_dir / "07-paper-review.md", render_paper_review_markdown(paper_review))
@@ -2263,6 +2270,7 @@ def _run_after_review_approval(
         )
     _check_cancelled(out_dir, topic, manifest, "paper_review_completed")
 
+    _stage_begin(out_dir, topic, "paper_revision")
     revision_plan_path = out_dir / REVISION_PLAN_JSON
     if resume and revision_plan_path.exists() and _paper_revision_plan_checkpoint_matches(
         _load_paper_revision_plan(revision_plan_path),
@@ -2350,6 +2358,7 @@ def _run_after_review_approval(
             },
         )
     _check_cancelled(out_dir, topic, manifest, "revision_response_audit_completed")
+    _stage_begin(out_dir, topic, "finalization")
 
     revised_review_path = out_dir / REVISED_PAPER_REVIEW_JSON
     availability_path = out_dir / CODE_DATA_AVAILABILITY_JSON
@@ -3955,6 +3964,11 @@ def _write_state(out_dir: Path, topic: str, stage: str) -> None:
     }
     write_json(out_dir / "state.json", state)
     update_workflow_stage(out_dir, topic, stage)
+
+
+def _stage_begin(out_dir: Path, topic: str, node_id: str) -> None:
+    """Mark a workflow node as running while its (possibly long) work executes."""
+    begin_workflow_node(out_dir, topic, node_id)
 
 
 def _write_run_config_snapshot(out_dir: Path, config: AgentConfig) -> None:
