@@ -190,6 +190,32 @@ def _pricing_check(pricing: dict[str, Any], manual: list[str], warnings: list[st
     return _check("pricing_config", "pass", f"input=${input_price:.4f}/M output=${output_price:.4f}/M", "无需处理。")
 
 
+def _provider_cost(entries: list[dict[str, Any]], pricing: dict[str, Any]) -> float | None:
+    """COST-01: cost from provider-reported usage using the per-model price
+    table; entries without usage fall back to the global estimate."""
+    model_costs = pricing.get("model_costs") if isinstance(pricing.get("model_costs"), dict) else {}
+    if not usage_has_provider_tokens(entries) and not model_costs:
+        return None
+    total = 0.0
+    for entry in entries:
+        model = str(entry.get("model") or "")
+        costs = model_costs.get(model) if isinstance(model_costs.get(model), dict) else {}
+        input_price = _safe_float((costs or {}).get("input_cost_per_million_tokens")) or _safe_float(pricing.get("input_cost_per_million_tokens"))
+        output_price = _safe_float((costs or {}).get("output_cost_per_million_tokens")) or _safe_float(pricing.get("output_cost_per_million_tokens"))
+        input_tokens = _safe_int(entry.get("usage_input_tokens"))
+        output_tokens = _safe_int(entry.get("usage_output_tokens"))
+        if input_tokens or output_tokens:
+            total += (input_tokens / 1_000_000) * input_price + (output_tokens / 1_000_000) * output_price
+        else:
+            total += (_tokens(_safe_int(entry.get("system_chars")) + _safe_int(entry.get("user_chars"))) / 1_000_000) * input_price
+            total += (_tokens(_safe_int(entry.get("response_chars"))) / 1_000_000) * output_price
+    return round(total, 6)
+
+
+def usage_has_provider_tokens(entries: list[dict[str, Any]]) -> bool:
+    return any(_safe_int(item.get("usage_input_tokens")) or _safe_int(item.get("usage_output_tokens")) for item in entries)
+
+
 def _summary(ledger: dict[str, Any], budget: dict[str, Any], pricing: dict[str, Any], stages: list[dict[str, Any]]) -> dict[str, Any]:
     input_chars = _safe_int(ledger.get("total_prompt_chars"))
     output_chars = _safe_int(ledger.get("total_response_chars"))
@@ -209,6 +235,7 @@ def _summary(ledger: dict[str, Any], budget: dict[str, Any], pricing: dict[str, 
         "usage_input_tokens": sum(_safe_int(item.get("usage_input_tokens")) for item in usage_calls),
         "usage_output_tokens": sum(_safe_int(item.get("usage_output_tokens")) for item in usage_calls),
         "provider_usage_calls": len(usage_calls),
+        "provider_cost_usd": _provider_cost(entries, pricing),
         "total_duration_seconds": round(sum(_safe_float(stage.get("duration_seconds")) for stage in stages), 3),
         "estimated_cost_usd": _estimated_cost(input_tokens, output_tokens, pricing),
         "call_utilization": budget.get("call_utilization", 0.0),
@@ -263,12 +290,14 @@ def _stage_summaries(entries: list[dict[str, Any]], pricing: dict[str, Any]) -> 
 
 def _pricing(run_config: dict[str, Any]) -> dict[str, Any]:
     llm = _dict(run_config.get("llm"))
+    model_costs = llm.get("model_costs") if isinstance(llm.get("model_costs"), dict) else {}
     input_price = _safe_float(llm.get("input_cost_per_million_tokens"))
     output_price = _safe_float(llm.get("output_cost_per_million_tokens"))
     return {
         "input_cost_per_million_tokens": input_price,
         "output_cost_per_million_tokens": output_price,
         "cost_estimation_enabled": input_price > 0.0 and output_price > 0.0,
+        "model_costs": model_costs,
     }
 
 

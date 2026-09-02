@@ -14,12 +14,12 @@
 | 阶段 B（LOCK-01 / TX-01 / ART-02 / ART-03） | ✅ 完成 | 02b0a85 | 跨进程 flock 租约 + 回退 journal + 幂等恢复 + reason/actor 持久化 + 磁盘余量检查；per-run/global 归档配额与 CLI 归档清理命令仍属后续（ART-03 的完整版） |
 | 阶段 C（REV-01 / TRACE-01 / SKILL-02 / ART-01） | ✅ 完成 | c2c5b95、b163674、f1146ce、d6f9011 | Manifest schema v2（revision/branch_id/node_id/attempt_id/event_id，v1 读兼容）；完整性审计按 active branch 过滤；call_id 贯穿 prepare→call→validate；effective skill 内容哈希进 checkpoint 与账本；节点归属 registry + 未归属文件报告 |
 | 阶段 D（ENGINE-01 / STATE-01） | ✅ 完成 | 5b33e0d | run-node-events.json 追加式事件日志 + 归约器（9 种节点状态、每 revision attempt 列表）；pipeline/rollback/web 失败路径全部接入发射适配器；WorkflowEngine 将 19 条声明边全部实现为可测试谓词（表驱动测试证明无死边）；完整性审计新增 node_state_consistency；API 暴露 node_states。遗留：引擎调度器真正驱动执行仍是阶段 E+ 的逐节点搬迁工作 |
-| 阶段 E（AGENT-01 / GATE-02 / ROUTE-01 / COST-01） | ✅ 完成 | cf74054 | agent_verdict.py 独立执行层（每角色最小证据视图、串行、verdict 绑定 call_id/model/revision/哈希，invalid 按 block）；statistician 获得独立 T10 统计审查任务；GateAggregator 聚合确定性审计 + 独立 verdict + 缺失角色 + 人工 override（需 reviewer/reason/revision/verdict 哈希），blocked 强制 final readiness 为 blocked；ROUTE-01 路由枚举 + preflight llm_routes；COST-01 provider usage 进账本与 economics 汇总 |
+| 阶段 E（AGENT-01 / GATE-02 / ROUTE-01 / COST-01） | ✅ 完成 | cf74054 | agent_verdict.py 独立执行层（每角色最小证据视图、串行、verdict 绑定 call_id/model/revision/哈希，invalid 按 block）；statistician 获得独立 T10 统计审查任务；GateAggregator 聚合确定性审计 + 独立 verdict + 缺失角色 + 人工 override（需 reviewer/reason/revision/verdict 哈希），blocked 强制 final readiness 为 blocked；ROUTE-01 路由枚举 + preflight llm_routes；COST-01 provider usage 进账本与 economics 汇总，model_costs 价格表按模型计价（provider_cost_usd） |
 | 阶段 F（MCP-01 / MCP-02 / SANDBOX-01） | ✅ 完成 | 848e4f8 | tools/list 能力核验（工具存在 + readOnlyHint=False 拒绝）；意图级回执（requested/denied/started/success/failed/outcome_unknown，含 tool_call_id、参数 shape、脱敏错误）；超时记 outcome_unknown 不自动重试；README 改称受限本地执行 |
 | 阶段 G（WEB-01 / LIVE-01 / WEB-03 / DEPLOY-01） | ✅ 完成 | 9283edc | /api/agent-catalog + 前端智能体配置视图（角色开关/模型/skill/MCP，Key 永不进页面）；状态签名纳入 workflow revision/updated_at；/api/runs 与详情支持 ETag 304；/api/runs/{id}/activity SSE 事件流（cursor 增量）；docs/platform.md 记录 TLS 拓扑与 SSE 协议 |
 | 阶段 H（TEST-01 / 收尾） | ✅ 完成 | 本次提交 | scripts/run_tests.sh 隔离测试入口（PYTEST_DISABLE_PLUGIN_AUTOLOAD=1）；scripts/check_docs.py Markdown 链接检查；rollback-prune 归档清理 CLI（ART-03 完整版）；备份/恢复/保留策略文档 |
 
-验证：阶段 A-H 合入后全量测试 1340 passed, 1 skipped, 72 subtests（经 scripts/run_tests.sh 隔离入口验证）。阶段 A/B 生效后即可解除 §4 的临时运行约束中与凭据和回退审批相关的两项；`local`/`benchmark` 回退后自动执行现在会正确停在执行审批门（批准文件已随回退归档失效）。
+验证：阶段 A-H 合入后全量测试 1338 passed, 1 skipped, 72 subtests（经 scripts/run_tests.sh 隔离入口验证）。阶段 A/B 生效后即可解除 §4 的临时运行约束中与凭据和回退审批相关的两项；`local`/`benchmark` 回退后自动执行现在会正确停在执行审批门（批准文件已随回退归档失效）。
 
 ## 1. 结论
 
