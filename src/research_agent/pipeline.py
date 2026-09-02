@@ -224,6 +224,7 @@ from .statistics import (
 from .submission_check import SUBMISSION_CHECK_JSON, SUBMISSION_CHECK_MD, render_submission_check_markdown, write_submission_check_artifacts
 from .submission_package import SUBMISSION_PACKAGE_JSON, SUBMISSION_PACKAGE_MD, SUBMISSION_PACKAGE_ZIP, write_submission_package_artifacts
 from .writing import markdown_to_latex, write_paper_markdown
+from .run_lease import acquire_run_lease
 from .workflow_graph import begin_workflow_node, update_workflow_stage
 
 
@@ -340,6 +341,11 @@ def _run_literature_audit_chain(
 
 
 def run_pipeline(topic: str, out_dir: Path, config: AgentConfig) -> Path:
+    with acquire_run_lease(out_dir, "run", owner="pipeline"):
+        return _run_pipeline_unlocked(topic, out_dir, config)
+
+
+def _run_pipeline_unlocked(topic: str, out_dir: Path, config: AgentConfig) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     _validate_or_create_checkpoint_contract(out_dir, topic, config)
     _write_run_config_snapshot(out_dir, config)
@@ -615,6 +621,11 @@ def run_pipeline(topic: str, out_dir: Path, config: AgentConfig) -> Path:
 
 
 def resume_pipeline_after_review_approval(topic: str, out_dir: Path, config: AgentConfig) -> Path:
+    with acquire_run_lease(out_dir, "resume_after_review", owner="pipeline"):
+        return _resume_pipeline_after_review_approval_unlocked(topic, out_dir, config)
+
+
+def _resume_pipeline_after_review_approval_unlocked(topic: str, out_dir: Path, config: AgentConfig) -> Path:
     _check_cancelled(out_dir, topic, None, "resume_requested")
     revision_repair = _approval_requires_revision_repair(out_dir / APPROVAL_FILENAME)
     if revision_repair:
@@ -879,6 +890,11 @@ def _refresh_literature_context_after_review_revision(
 
 
 def resume_pipeline_from_checkpoint(topic: str, out_dir: Path, config: AgentConfig) -> Path:
+    with acquire_run_lease(out_dir, "checkpoint_resume", owner="pipeline"):
+        return _resume_pipeline_from_checkpoint_unlocked(topic, out_dir, config)
+
+
+def _resume_pipeline_from_checkpoint_unlocked(topic: str, out_dir: Path, config: AgentConfig) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     _validate_or_create_checkpoint_contract(out_dir, topic, config)
     _write_run_config_snapshot(out_dir, config)
@@ -1388,6 +1404,23 @@ def resume_pipeline_from_checkpoint(topic: str, out_dir: Path, config: AgentConf
 
 
 def resume_pipeline_from_repair_queue(
+    topic: str,
+    out_dir: Path,
+    config: AgentConfig,
+    doctor_report_path: Path | None = None,
+    gold_verification_report_path: Path | None = None,
+) -> Path:
+    with acquire_run_lease(out_dir, "repair_resume", owner="pipeline"):
+        return _resume_pipeline_from_repair_queue_unlocked(
+            topic,
+            out_dir,
+            config,
+            doctor_report_path=doctor_report_path,
+            gold_verification_report_path=gold_verification_report_path,
+        )
+
+
+def _resume_pipeline_from_repair_queue_unlocked(
     topic: str,
     out_dir: Path,
     config: AgentConfig,

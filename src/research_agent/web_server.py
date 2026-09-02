@@ -998,8 +998,7 @@ class RunStore:
         }
         config = _resume_config(out_dir, config_payload)
         _write_resume_preflight_or_raise(record.get("topic") or run_id, config, out_dir)
-        report = apply_rollback(out_dir, target, preview_id, preview_token)
-        report["reason"] = reason[:500]
+        report = apply_rollback(out_dir, target, preview_id, preview_token, reason=reason[:500], actor="web")
         self._update(
             run_id,
             status="running",

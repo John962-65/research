@@ -1230,7 +1230,7 @@ def main(argv: list[str] | None = None) -> None:
             print("Preview only: add --apply --reason '...' to archive these artifacts and resume.")
             return
         preview = issue_rollback_preview(args.run_dir, args.target)
-        report = apply_rollback(args.run_dir, args.target, preview["preview_id"], preview["preview_token"])
+        report = apply_rollback(args.run_dir, args.target, preview["preview_id"], preview["preview_token"], reason=str(args.reason).strip(), actor="cli")
         print(f"Rollback applied: {report['archive_ref']}")
         config = _apply_run_overrides(_load_resume_base_config(args.run_dir, args.config), args)
         topic = _topic_from_state(args.run_dir)

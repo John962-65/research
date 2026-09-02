@@ -14,6 +14,7 @@ import time
 
 from .artifacts import write_json, sha256_file as _sha256_file, utc_now as _utc_now, read_json_dict as _read_json
 from .provenance import RunManifestRecorder
+from .run_lease import acquire_run_lease
 
 
 WORKFLOW_STATUS_JSON = "workflow-status.json"
@@ -23,6 +24,8 @@ MAX_WORKFLOW_EVENTS = 40
 ROLLBACK_PREVIEW_TTL_SECONDS = 600
 MAX_ROLLBACK_FILES = 10_000
 MAX_ROLLBACK_BYTES = 20 * 1024 * 1024 * 1024
+# The archive copy plus a safety margin must fit on the same filesystem (ART-03).
+MIN_ROLLBACK_FREE_BYTES = 64 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -355,6 +358,7 @@ def build_rollback_preview(run_dir: Path, target: str) -> dict[str, Any]:
 
 
 def issue_rollback_preview(run_dir: Path, target: str) -> dict[str, Any]:
+    cleanup_expired_previews(run_dir)
     if target not in {item["target"] for item in rollback_options(run_dir)}:
         raise ValueError("rollback target is later than the current workflow node")
     preview = build_rollback_preview(run_dir, target)
@@ -388,7 +392,43 @@ def issue_rollback_preview(run_dir: Path, target: str) -> dict[str, Any]:
     }
 
 
-def apply_rollback(run_dir: Path, target: str, preview_id: str, preview_token: str) -> dict[str, Any]:
+def apply_rollback(
+    run_dir: Path,
+    target: str,
+    preview_id: str,
+    preview_token: str,
+    *,
+    reason: str = "",
+    actor: str = "",
+) -> dict[str, Any]:
+    """Archive the rerun set and commit the rollback as a crash-safe transaction.
+
+    Holds the cross-process run lease for the whole apply (LOCK-01), journals
+    every step (TX-01), persists reason/actor into the archive report and the
+    manifest (ART-02), and refuses to run when disk space cannot hold the
+    archive copy (ART-03).
+    """
+    with acquire_run_lease(run_dir, "rollback", owner=actor or "rollback"):
+        return _apply_rollback_locked(
+            run_dir,
+            target,
+            preview_id,
+            preview_token,
+            reason=reason,
+            actor=actor,
+        )
+
+
+def _apply_rollback_locked(
+    run_dir: Path,
+    target: str,
+    preview_id: str,
+    preview_token: str,
+    *,
+    reason: str = "",
+    actor: str = "",
+) -> dict[str, Any]:
+    reconciled = reconcile_rollback_journals(run_dir)
     record_path = _preview_record_path(run_dir, preview_id)
     record = _read_json(record_path)
     if not record or record.get("run_id") != run_dir.name or record.get("status") != "issued":
@@ -409,40 +449,123 @@ def apply_rollback(run_dir: Path, target: str, preview_id: str, preview_token: s
         raise RuntimeError("rollback preview is stale; preview the target again before applying")
     if preview["blockers"]:
         raise RuntimeError("rollback is blocked: " + "; ".join(preview["blockers"]))
+    free_bytes = shutil.disk_usage(str(run_dir)).free
+    if free_bytes < preview["total_bytes"] + MIN_ROLLBACK_FREE_BYTES:
+        raise RuntimeError(
+            f"rollback refused: only {free_bytes} bytes free, "
+            f"archive copy needs {preview['total_bytes']} bytes plus a {MIN_ROLLBACK_FREE_BYTES} byte margin"
+        )
     record["status"] = "applying"
     write_json(record_path, record)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     archive_id = f"{timestamp}-r{preview['next_revision']}-{preview['target']}"
+    applied_at = _utc_now()
     archive_root = _archive_run_root(run_dir) / archive_id
-    archive_root.mkdir(parents=True, exist_ok=False)
+    journal: dict[str, Any] = {
+        "schema_version": 1,
+        "state": "prepared",
+        "archive_id": archive_id,
+        "target": target,
+        "revision": preview["next_revision"],
+        "previous_revision": preview["current_revision"],
+        "applied_at": applied_at,
+        "reason": str(reason or "").strip()[:500],
+        "actor": str(actor or "").strip()[:120],
+        "artifact_index": preview["artifact_index"],
+        "directory_index": preview["directory_index"],
+        "moved_files": [],
+        "moved_directories": [],
+        "metadata_committed": False,
+        "error": "",
+        "updated_at": _utc_now(),
+    }
+    journal_path = _journal_path(run_dir, archive_id)
+    write_json(journal_path, journal)
+    archive_root.mkdir(parents=True, exist_ok=True)
     moved_files: list[str] = []
     moved_directories: list[str] = []
     try:
-        for record in preview["artifact_index"]:
-            relative = str(record["path"])
+        for item in preview["artifact_index"]:
+            relative = str(item["path"])
             source = _safe_file(run_dir, relative)
-            if _sha256_file(source) != record["sha256"]:
+            if _sha256_file(source) != item["sha256"]:
                 raise RuntimeError(f"rollback artifact changed after preview: {relative}")
             destination = archive_root / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
             os.replace(source, destination)
             moved_files.append(relative)
-        for record in preview["directory_index"]:
-            relative = str(record["path"])
+            journal["state"] = "moving"
+            journal["moved_files"] = moved_files
+            journal["updated_at"] = _utc_now()
+            write_json(journal_path, journal)
+        for item in preview["directory_index"]:
+            relative = str(item["path"])
             source = _safe_directory(run_dir, relative)
-            if _directory_digest(source) != record["sha256"]:
+            if _directory_digest(source) != item["sha256"]:
                 raise RuntimeError(f"rollback directory changed after preview: {relative}")
             destination = archive_root / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(source), str(destination))
             moved_directories.append(relative)
-    except BaseException:
+            journal["state"] = "moving"
+            journal["moved_directories"] = moved_directories
+            journal["updated_at"] = _utc_now()
+            write_json(journal_path, journal)
+    except BaseException as exc:
+        # In-process failure: restore the archived files so the run stays on
+        # the old revision. The journal is marked failed (not reconciled
+        # forward) because the operator's intent was to abort.
         _restore_partial_archive(run_dir, archive_root, moved_files, moved_directories)
+        journal["state"] = "failed"
+        journal["error"] = str(exc)[:400]
+        journal["updated_at"] = _utc_now()
+        write_json(journal_path, journal)
         record["status"] = "failed"
         write_json(record_path, record)
         raise
 
-    applied_at = _utc_now()
+    journal["state"] = "moves_done"
+    journal["moved_files"] = moved_files
+    journal["moved_directories"] = moved_directories
+    journal["updated_at"] = _utc_now()
+    write_json(journal_path, journal)
+    report = _commit_rollback_metadata(
+        run_dir,
+        journal,
+        archive_root=archive_root,
+        preview=preview,
+        moved_files=moved_files,
+        moved_directories=moved_directories,
+    )
+    journal["state"] = "completed"
+    journal["metadata_committed"] = True
+    journal["updated_at"] = _utc_now()
+    write_json(journal_path, journal)
+    record["status"] = "consumed"
+    record["consumed_at"] = applied_at
+    record["archive_ref"] = archive_id
+    write_json(record_path, record)
+    report["reconciled_journals"] = reconciled
+    return report
+
+
+def _commit_rollback_metadata(
+    run_dir: Path,
+    journal: dict[str, Any],
+    *,
+    archive_root: Path,
+    preview: dict[str, Any],
+    moved_files: list[str],
+    moved_directories: list[str],
+) -> dict[str, Any]:
+    """Write the rollback report, index, checkpoint revision, state, and manifest.
+
+    Every step is idempotent so a crashed run can be reconciled without
+    duplicating index entries, workflow events, or manifest events.
+    """
+    archive_id = str(journal["archive_id"])
+    target = str(journal["target"])
+    applied_at = str(journal["applied_at"])
     report = {
         **preview,
         "status": "applied",
@@ -450,30 +573,194 @@ def apply_rollback(run_dir: Path, target: str, preview_id: str, preview_token: s
         "archive_ref": archive_id,
         "archived_artifacts": moved_files,
         "archived_directories": moved_directories,
+        "reason": str(journal.get("reason") or ""),
+        "actor": str(journal.get("actor") or ""),
     }
     write_json(archive_root / "rollback.json", report)
     _update_rollback_index(run_dir, report)
     _mark_checkpoint_revision(run_dir, report)
     _set_rollback_status(run_dir, report)
     topic = str(_read_json(run_dir / "state.json").get("topic") or run_dir.name)
-    RunManifestRecorder(run_dir, topic).record(
-        "workflow_rollback",
-        status="completed",
-        inputs=[f"archive:{archive_id}/rollback.json"],
-        outputs=["state.json", WORKFLOW_STATUS_JSON],
-        notes=[f"archived immutable revision before rerunning {target}"],
-        metrics={
-            "target": target,
-            "revision": preview["next_revision"],
-            "files": len(moved_files),
-            "directories": len(moved_directories),
-        },
+    events = _read_json(run_dir / "run-manifest.json").get("events")
+    already_recorded = any(
+        isinstance(event, dict)
+        and event.get("stage") == "workflow_rollback"
+        and _safe_int((event.get("metrics") or {}).get("revision"), -1) == _safe_int(journal.get("revision"), -1)
+        for event in (events if isinstance(events, list) else [])
     )
-    record["status"] = "consumed"
-    record["consumed_at"] = applied_at
-    record["archive_ref"] = archive_id
-    write_json(record_path, record)
+    if not already_recorded:
+        RunManifestRecorder(run_dir, topic).record(
+            "workflow_rollback",
+            status="completed",
+            inputs=[f"archive:{archive_id}/rollback.json"],
+            outputs=["state.json", WORKFLOW_STATUS_JSON],
+            notes=[
+                f"archived immutable revision before rerunning {target}",
+                *( [f"reason: {journal.get('reason')}" if journal.get("reason") else "reason: (not provided)"] ),
+            ],
+            metrics={
+                "target": target,
+                "revision": _safe_int(journal.get("revision"), 0),
+                "files": len(moved_files),
+                "directories": len(moved_directories),
+            },
+        )
     return report
+
+
+def reconcile_rollback_journals(run_dir: Path) -> list[str]:
+    """Finish any rollback left half-done by a crashed process (TX-01).
+
+    Only journals in ``prepared``/``moving``/``moves_done`` are reconciled
+    forward; ``failed`` journals keep the run on the old revision and stay as
+    an audit record. Returns the archive ids it completed.
+    """
+    completed: list[str] = []
+    archive_run_root = _archive_run_root(run_dir)
+    previews = archive_run_root / "previews"
+    if not archive_run_root.is_dir():
+        return completed
+    for journal_path in sorted(archive_run_root.glob("journal-*.json")):
+        journal = _read_json(journal_path)
+        state = str(journal.get("state") or "")
+        if state not in {"prepared", "moving", "moves_done"}:
+            continue
+        archive_id = str(journal.get("archive_id") or "")
+        if not archive_id:
+            continue
+        try:
+            archive_root = _archive_run_root(run_dir) / archive_id
+            moved_files = [str(item) for item in journal.get("moved_files", [])]
+            moved_directories = [str(item) for item in journal.get("moved_directories", [])]
+            for item in journal.get("artifact_index", []):
+                if not isinstance(item, dict):
+                    continue
+                relative = str(item["path"])
+                if relative in moved_files:
+                    continue
+                source = run_dir / relative
+                destination = archive_root / relative
+                if source.is_file():
+                    _safe_file(run_dir, relative)
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    os.replace(source, destination)
+                    moved_files.append(relative)
+                elif destination.is_file():
+                    moved_files.append(relative)
+                else:
+                    raise RuntimeError(f"rollback journal {archive_id}: artifact is neither in the run nor archived: {relative}")
+                journal["moved_files"] = moved_files
+                journal["state"] = "moving"
+                write_json(journal_path, journal)
+            for item in journal.get("directory_index", []):
+                if not isinstance(item, dict):
+                    continue
+                relative = str(item["path"])
+                if relative in moved_directories:
+                    continue
+                source = run_dir / relative
+                destination = archive_root / relative
+                if source.is_dir() and not source.is_symlink():
+                    shutil.move(str(source), str(destination))
+                    moved_directories.append(relative)
+                elif destination.is_dir():
+                    moved_directories.append(relative)
+                else:
+                    raise RuntimeError(f"rollback journal {archive_id}: directory is neither in the run nor archived: {relative}")
+                journal["moved_directories"] = moved_directories
+                journal["state"] = "moving"
+                write_json(journal_path, journal)
+            journal["state"] = "moves_done"
+            write_json(journal_path, journal)
+            preview = build_rollback_preview(run_dir, str(journal.get("target") or ""))
+            # The scan above ran on a half-moved run; the journal's own plan is
+            # the committed truth for what was archived.
+            preview["artifact_index"] = list(journal.get("artifact_index", []))
+            preview["directory_index"] = list(journal.get("directory_index", []))
+            preview["next_revision"] = _safe_int(journal.get("revision"), 0)
+            preview["current_revision"] = _safe_int(journal.get("previous_revision"), 0)
+            preview["blockers"] = [
+                blocker
+                for blocker in preview["blockers"]
+                if "archive plan" not in blocker
+            ]
+            preview["file_count"] = len(moved_files) + sum(
+                int(item.get("files") or 0) for item in preview["directory_index"] if isinstance(item, dict)
+            )
+            preview["total_bytes"] = sum(
+                int(item.get("bytes") or 0) for item in preview["artifact_index"] if isinstance(item, dict)
+            ) + sum(
+                int(item.get("bytes") or 0) for item in preview["directory_index"] if isinstance(item, dict)
+            )
+            report = _commit_rollback_metadata(
+                run_dir,
+                journal,
+                archive_root=archive_root,
+                preview=preview,
+                moved_files=moved_files,
+                moved_directories=moved_directories,
+            )
+            journal["state"] = "completed"
+            journal["metadata_committed"] = True
+            journal["updated_at"] = _utc_now()
+            write_json(journal_path, journal)
+            # A stale preview record for this crashed apply may still say
+            # "applying"; consume it so it cannot be applied twice.
+            for record_path in previews.glob("*.json"):
+                preview_record = _read_json(record_path)
+                if (
+                    preview_record.get("status") in {"issued", "applying"}
+                    and preview_record.get("run_id") == run_dir.name
+                    and str(preview_record.get("target") or "") == str(journal.get("target"))
+                ):
+                    preview_record["status"] = "consumed"
+                    preview_record["archive_ref"] = archive_id
+                    write_json(record_path, preview_record)
+            completed.append(archive_id)
+            report.setdefault("reconciled", True)
+        except Exception as exc:
+            journal["state"] = "failed"
+            journal["error"] = str(exc)[:400]
+            journal["updated_at"] = _utc_now()
+            write_json(journal_path, journal)
+    return completed
+
+
+def cleanup_expired_previews(run_dir: Path) -> int:
+    """Delete preview records that can no longer be applied (ART-03)."""
+    now = int(time.time())
+    removed = 0
+    previews = _archive_run_root(run_dir) / "previews"
+    if not previews.is_dir():
+        return removed
+    for record_path in sorted(previews.glob("*.json")):
+        record = _read_json(record_path)
+        if not record:
+            removed += _unlink_if_expired_file(record_path, now)
+            continue
+        status = str(record.get("status") or "")
+        expired = int(record.get("expires_at_epoch") or 0) < now
+        if expired and status in {"issued", "expired", "failed"}:
+            try:
+                record_path.unlink()
+                removed += 1
+            except OSError:
+                continue
+    return removed
+
+
+def _unlink_if_expired_file(path: Path, now: int) -> int:
+    try:
+        if path.stat().st_mtime + ROLLBACK_PREVIEW_TTL_SECONDS < now:
+            path.unlink()
+            return 1
+    except OSError:
+        return 0
+    return 0
+
+
+def _journal_path(run_dir: Path, archive_id: str) -> Path:
+    return _archive_run_root(run_dir) / f"journal-{archive_id}.json"
 
 
 def _update_status(
@@ -552,6 +839,14 @@ def _update_status(
 def _set_rollback_status(run_dir: Path, report: dict[str, Any]) -> None:
     state = _read_json(run_dir / "state.json")
     topic = str(state.get("topic") or run_dir.name)
+    # Idempotent for crash recovery: re-committing the same revision must not
+    # append a duplicate workflow event or rewrite the original timestamp.
+    already_applied = (
+        str(state.get("stage") or "") == "rollback_applied"
+        and _safe_int(state.get("workflow_revision"), -1) == _safe_int(report["next_revision"], -1)
+    )
+    if already_applied:
+        return
     write_json(
         run_dir / "state.json",
         {
@@ -597,6 +892,9 @@ def _update_rollback_index(run_dir: Path, report: dict[str, Any]) -> None:
     path = _archive_run_root(run_dir) / "index.json"
     current = _read_json(path)
     entries = current.get("entries") if isinstance(current.get("entries"), list) else []
+    # Idempotent for crash recovery: the same archive is never indexed twice.
+    if any(entry.get("archive_ref") == report["archive_ref"] for entry in entries if isinstance(entry, dict)):
+        return
     entries.append(
         {
             "revision": report["next_revision"],
@@ -604,6 +902,8 @@ def _update_rollback_index(run_dir: Path, report: dict[str, Any]) -> None:
             "applied_at": report["applied_at"],
             "archive_ref": report["archive_ref"],
             "plan_digest": report["plan_digest"],
+            "reason": str(report.get("reason") or "")[:200],
+            "actor": str(report.get("actor") or "")[:80],
         }
     )
     write_json(path, {"schema_version": 1, "entries": entries[-100:]})
