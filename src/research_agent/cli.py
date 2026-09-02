@@ -32,7 +32,7 @@ from .paper_grade_benchmark_probe import build_paper_grade_benchmark_probe, rend
 from .paper_grade_probe import build_paper_grade_online_probe, render_paper_grade_online_probe_markdown, write_paper_grade_online_probe_artifacts
 from .perfect_agent_readiness import PERFECT_AGENT_READINESS_MD, build_perfect_agent_readiness, render_perfect_agent_readiness_markdown, write_perfect_agent_readiness_artifacts
 from .pipeline import approve_execution_gate, approve_review_gate, default_out_dir, request_cancel, request_review_revision, resume_pipeline_from_checkpoint, resume_pipeline_from_repair_queue, run_pipeline
-from .workflow_graph import apply_rollback, build_rollback_preview, issue_rollback_preview, rollback_options
+from .workflow_graph import apply_rollback, build_rollback_preview, issue_rollback_preview, prune_rollback_archives, rollback_options
 from .platform_audit import build_platform_audit, render_platform_audit_markdown, write_platform_audit
 from .preflight import render_preflight_markdown, run_preflight
 from .repair_queue_backfill import backfill_repair_queues, render_repair_queue_backfill_markdown
@@ -725,6 +725,11 @@ def main(argv: list[str] | None = None) -> None:
     cancel_parser.add_argument("run_dir", type=Path)
     cancel_parser.add_argument("--reason", default="cli_requested")
 
+    rollback_prune_parser = subparsers.add_parser("rollback-prune", help="Preview or apply rollback archive cleanup (ART-03)")
+    rollback_prune_parser.add_argument("run_dir", type=Path)
+    rollback_prune_parser.add_argument("--keep", type=int, default=3, help="Number of newest rollback archives to keep (default: 3)")
+    rollback_prune_parser.add_argument("--apply", action="store_true", help="Delete the older archives; without it the command only previews")
+
     rollback_parser = subparsers.add_parser("rollback", help="Archive artifacts from a workflow node onward and rerun from there")
     rollback_parser.add_argument("run_dir", type=Path)
     rollback_parser.add_argument("--target", default=None, help="Workflow node to rerun from; omit to list available targets")
@@ -1201,6 +1206,15 @@ def main(argv: list[str] | None = None) -> None:
         cancel = request_cancel(args.run_dir, requester="cli", reason=args.reason)
         print(f"Cancel requested: {args.run_dir}")
         print(f"requested_at: {cancel.get('requested_at')}")
+        return
+    if args.command == "rollback-prune":
+        report = prune_rollback_archives(args.run_dir, keep=args.keep, apply=args.apply)
+        print(f"归档总数：{len(report['archives'])}；将保留：{len(report['kept'])}")
+        for item in report["archives"]:
+            marker = "（已删除）" if item["archive_ref"] in report["removed"] else "（保留）"
+            print(f"- {item['archive_ref']}  {item['bytes']} 字节  {marker}")
+        if not args.apply:
+            print("Preview only: add --apply to delete the marked archives.")
         return
     if args.command == "rollback":
         if not args.target:

@@ -161,3 +161,18 @@ SSE 活动流：`GET /api/runs/{id}/activity?cursor=N` 以 `text/event-stream`
 `data` 含 node_id/type/revision），随后发送 `event: done` 并关闭。客户端可以
 携带上次收到的最大 id 作为 cursor 重新请求，实现不丢不重的活动增量；前端
 当前仍使用低频摘要轮询 + ETag 条件请求作为降级路径（WEB-03）。
+
+## 备份、恢复与数据保留
+
+- **需要备份的内容**：`runs/`（全部 run 产物，含 `run-node-events.json`、
+  `run-llm-ledger.json`）、`.research-agent-archives/`（回退归档与 journal/index，
+  位于 runs 的同级目录）、`config*.toml` 与项目 skills。`.cache/` 与 `logs/` 可重建。
+- **恢复**：将备份的目录原位放回（路径必须与 `runs/` 的相对布局一致），然后运行
+  `research-agent status runs/<run-id>` 核对 state；回退归档恢复后可用
+  `research-agent rollback runs/<run-id>` 查看 index 与归档完整性。
+- **保留策略**：回退归档通过 `research-agent rollback-prune runs/<run-id> --keep N`
+  显式清理（默认预览，加 `--apply` 生效；index 条目保留供审计）。文献缓存
+  `.cache/research-agent/literature/` 按 TTL（默认 7 天）自动失效，可整目录删除。
+  建议在生产中按项目合规要求为 `runs/` 设置外部备份计划，本平台不自动删除任何 run。
+- **隔离测试入口**：`bash scripts/run_tests.sh`（设置 `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`，
+  不受宿主机 pytest 插件影响）；`python3 scripts/check_docs.py` 校验 Markdown 链接。

@@ -12,6 +12,7 @@ from research_agent.run_lease import lease_path as wg_lease_path
 from research_agent.workflow_graph import (
     apply_rollback,
     build_rollback_preview,
+    prune_rollback_archives,
     cleanup_expired_previews,
     issue_rollback_preview,
     reconcile_rollback_journals,
@@ -187,6 +188,59 @@ class RollbackDiskSpaceTest(unittest.TestCase):
             removed = cleanup_expired_previews(run_dir)
             self.assertEqual(removed, 1)
             self.assertFalse((previews_dir / f"{preview['preview_id']}.json").exists())
+
+
+class RollbackArchivePruneTest(unittest.TestCase):
+    """ART-03 complete: explicit, previewable, auditable archive cleanup."""
+
+    def _apply_two_rollbacks(self, run_dir: Path) -> None:
+        for revision in range(2):
+            preview = issue_rollback_preview(run_dir, "ideation")
+            apply_rollback(
+                run_dir,
+                "ideation",
+                preview["preview_id"],
+                preview["preview_token"],
+                reason=f"prune test {revision}",
+                actor="test",
+            )
+            # After the rollback the ideation artifacts are archived; recreate
+            # them so the next rollback has something to archive.
+            (run_dir / "02-ideas.json").write_text("[]", encoding="utf-8")
+            (run_dir / "02-ideas.md").write_text("# Ideas\n", encoding="utf-8")
+
+    def test_prune_previews_then_applies(self) -> None:
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir()
+            (run_dir / "02-ideas.json").write_text("[]", encoding="utf-8")
+            (run_dir / "02-ideas.md").write_text("# Ideas\n", encoding="utf-8")
+            update_workflow_stage(run_dir, "清理测试", "ideation_completed")
+            self._apply_two_rollbacks(run_dir)
+            archive_root = run_dir.parent / ".research-agent-archives" / run_dir.name
+
+            preview = prune_rollback_archives(run_dir, keep=1, apply=False)
+            self.assertEqual(len(preview["archives"]), 2)
+            self.assertEqual(preview["removed"], [])
+            self.assertEqual(len(preview["kept"]), 1)
+            def _archive_dirs() -> list[Path]:
+                return [path for path in archive_root.iterdir() if path.is_dir() and (path / "rollback.json").is_file()]
+
+            self.assertEqual(len(_archive_dirs()), 2)
+
+            applied = prune_rollback_archives(run_dir, keep=1, apply=True)
+            self.assertEqual(len(applied["removed"]), 1)
+            self.assertEqual(len(_archive_dirs()), 1)
+            # Index entries survive for audit purposes.
+            index = json.loads((archive_root / "index.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(index["entries"]), 2)
+
+    def test_prune_rejects_negative_keep(self) -> None:
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir()
+            with self.assertRaises(ValueError):
+                prune_rollback_archives(run_dir, keep=-1)
 
 
 class RollbackRunLeaseIntegrationTest(unittest.TestCase):

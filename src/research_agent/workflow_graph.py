@@ -800,6 +800,47 @@ def reconcile_rollback_journals(run_dir: Path) -> list[str]:
     return completed
 
 
+def prune_rollback_archives(run_dir: Path, *, keep: int = 3, apply: bool = False) -> dict[str, Any]:
+    """ART-03: explicit, previewable, auditable archive cleanup.
+
+    Lists rollback archives (oldest first, ordered by revision) and — only
+    with ``apply=True`` — deletes all but the newest ``keep`` archives,
+    keeping their index entries for audit purposes.
+    """
+    if keep < 0:
+        raise ValueError("keep must be >= 0")
+    archive_run_root = _archive_run_root(run_dir)
+    archives: list[dict[str, Any]] = []
+    for path in sorted(archive_run_root.iterdir()):
+        if not path.is_dir() or path.name in {"previews"}:
+            continue
+        if not (path / "rollback.json").is_file():
+            continue
+        total = sum(item.stat().st_size for item in path.rglob("*") if item.is_file())
+        archives.append({"archive_ref": path.name, "bytes": total, "path": str(path)})
+    archives.sort(key=lambda item: item["archive_ref"])
+    removable = archives[:-keep] if keep > 0 else archives
+    removable_refs = [item["archive_ref"] for item in removable]
+    kept_refs = [item["archive_ref"] for item in archives[len(removable):]]
+    removed: list[str] = []
+    if apply:
+        import shutil as _shutil
+
+        for item in removable:
+            _shutil.rmtree(item["path"])
+            removed.append(item["archive_ref"])
+    return {
+        "schema_version": 1,
+        "run_id": run_dir.name,
+        "keep": keep,
+        "applied": apply,
+        "archives": [{"archive_ref": item["archive_ref"], "bytes": item["bytes"]} for item in archives],
+        "removed": removed,
+        "would_remove": removable_refs if not apply else [],
+        "kept": kept_refs,
+    }
+
+
 def cleanup_expired_previews(run_dir: Path) -> int:
     """Delete preview records that can no longer be applied (ART-03)."""
     now = int(time.time())
