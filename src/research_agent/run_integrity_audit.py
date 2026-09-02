@@ -6,6 +6,7 @@ import hashlib
 import json
 
 from .artifacts import write_json, write_text, cell as _cell, safe_int as _safe_int, read_json_dict as _read_json
+from .provenance import active_revision, filter_active_events
 from .submission_package_zip import submission_package_zip_blocking_issue
 
 
@@ -455,7 +456,7 @@ def _human_gate_checks(run_dir: Path, approval: dict[str, Any], manifest: dict[s
         else:
             items.append(_item("human_gate", "approval_notes", "pass", "review gate 为 pass 或历史状态未知，不强制要求批准意见。", "无需处理。"))
 
-    events = manifest.get("events") if isinstance(manifest.get("events"), list) else []
+    events = _active_events(run_dir, manifest)
     if events and downstream:
         approval_index = _first_event_index(events, {"review_approval", "review_approval_checkpoint"})
         downstream_index = _first_event_index(events, {"ideation", "ideation_checkpoint", "experiment_plan", "experiment_plan_checkpoint", "experiments", "experiments_checkpoint"})
@@ -500,7 +501,7 @@ def _execution_gate_checks(run_dir: Path, execution_approval: dict[str, Any], ru
     elif execution_approval:
         items.append(_item("execution_gate", "blocked_actions_declared", "warn", "03-execution-approval.json 未声明阻断 experiment_execution。", "重新生成 execution approval gate 或人工核对历史 run。"))
 
-    events = manifest.get("events") if isinstance(manifest.get("events"), list) else []
+    events = _active_events(run_dir, manifest)
     if events:
         approval_index = _first_event_index(events, {"execution_approval"})
         experiments_index = _first_event_index(events, {"experiments", "experiments_checkpoint"})
@@ -524,7 +525,7 @@ def _execution_mode(execution_approval: dict[str, Any], runbook: dict[str, Any])
 def _freshness_checks(run_dir: Path, manifest: dict[str, Any]) -> list[dict[str, Any]]:
     if not manifest:
         return []
-    events = manifest.get("events") if isinstance(manifest.get("events"), list) else []
+    events = _active_events(run_dir, manifest)
     if not events:
         return []
     grounding_index = _last_event_index(events, GROUNDING_STAGES)
@@ -765,6 +766,16 @@ def _manifest_hash_issues(run_dir: Path, artifacts: list[Any]) -> list[str]:
         if digest != expected:
             issues.append(rel)
     return issues
+
+
+def _active_events(run_dir: Path, manifest: dict[str, Any]) -> list[Any]:
+    """Manifest events that may back current-revision evidence (REV-01).
+
+    After a rollback, success events from older revisions must not satisfy
+    gate-order or freshness checks for the active revision.
+    """
+    events = manifest.get("events") if isinstance(manifest.get("events"), list) else []
+    return filter_active_events(events, active_revision(run_dir))
 
 
 def _first_event_index(events: list[Any], stages: set[str]) -> int | None:
