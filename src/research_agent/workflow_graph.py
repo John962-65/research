@@ -147,6 +147,12 @@ _NODE_PATTERNS = {
     ],
     "ideation": ["02-*"],
     "experiment_plan": ["03-*"],
+    # Rolling back to a gate must invalidate the approval granted at it, so the
+    # rerun re-arms the human gate instead of silently reusing the old approval
+    # (which request_execution_approval/request_review_approval would otherwise
+    # keep honoring while plan/safety/binding hashes look unchanged).
+    "review_gate": ["approval.json"],
+    "execution_gate": ["03-execution-approval.json", "03-execution-approval.md"],
     "experiments": ["04-*"],
     "analysis": ["05-*"],
     "paper_writing": ["06-*"],
@@ -304,8 +310,27 @@ def build_rollback_preview(run_dir: Path, target: str) -> dict[str, Any]:
         blockers.append(f"rollback contains {file_count} files; limit is {MAX_ROLLBACK_FILES}")
     if total_bytes > MAX_ROLLBACK_BYTES:
         blockers.append(f"rollback contains {total_bytes} bytes; limit is {MAX_ROLLBACK_BYTES}")
-    review_reapproval = _node_index(target_id) <= _node_index("literature_context")
+    review_reapproval = _node_index(target_id) <= _node_index("review_gate")
     execution_reapproval = _node_index(target_id) <= _node_index("experiments")
+    # GATE-01 invariant: a promised reapproval must correspond to an approval
+    # file that the archive plan actually invalidates; otherwise the rerun
+    # could silently reuse the old approval (request_execution_approval honors
+    # an existing approval while plan/safety/binding hashes look unchanged).
+    # A missing approval file has nothing to invalidate and is not a blocker.
+    if review_reapproval and (run_dir / "approval.json").is_file() and "approval.json" not in files:
+        blockers.append(
+            "review reapproval is required but approval.json is not in the archive plan; "
+            "refusing to roll back without invalidating the review gate"
+        )
+    if (
+        execution_reapproval
+        and (run_dir / "03-execution-approval.json").is_file()
+        and "03-execution-approval.json" not in files
+    ):
+        blockers.append(
+            "execution reapproval is required but 03-execution-approval.json is not in the archive plan; "
+            "refusing to roll back without invalidating the execution gate"
+        )
     payload = {
         "schema_version": 1,
         "target": target_id,
@@ -606,6 +631,15 @@ def _rollback_patterns_and_directories(target: str) -> tuple[list[str], list[str
     for node in WORKFLOW_NODES[start:]:
         patterns.extend(_NODE_PATTERNS.get(node.node_id, []))
         directories.extend(_NODE_DIRECTORIES.get(node.node_id, []))
+    # Approval invalidation closure: whenever rolling back to `target` promises
+    # a reapproval, the approval file authorizing the rerun set must be part of
+    # the archive plan even when the gate node itself is not being rerun
+    # (e.g. rolling back to `experiments` still invalidates the execution
+    # approval granted at the preceding gate).
+    if start <= _node_index("review_gate"):
+        patterns.extend(_NODE_PATTERNS.get("review_gate", []))
+    if start <= _node_index("experiments"):
+        patterns.extend(_NODE_PATTERNS.get("execution_gate", []))
     patterns.extend(["run-diagnostics.*", "run-recovery-plan.*"])
     return _unique(patterns), _unique(directories)
 

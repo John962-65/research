@@ -233,6 +233,68 @@ class CredentialOriginPreflightTest(unittest.TestCase):
         self.assertTrue(all(check.status == "pass" for check in origin_checks))
 
 
+class RollbackApprovalInvalidationTest(unittest.TestCase):
+    """GATE-01: a promised reapproval must invalidate the approval file."""
+
+    def _make_run(self, tmp: str) -> Path:
+        run_dir = Path(tmp) / "run"
+        run_dir.mkdir()
+        (run_dir / "03-experiment-plan.json").write_text("{}", encoding="utf-8")
+        (run_dir / "03-execution-approval.json").write_text(
+            json.dumps({"approved": True, "plan_sha256": "old"}), encoding="utf-8"
+        )
+        (run_dir / "04-results.json").write_text("[]", encoding="utf-8")
+        update_workflow_stage(run_dir, "回退审批测试", "experiments_completed")
+        return run_dir
+
+    def test_rollback_to_experiments_archives_execution_approval(self) -> None:
+        with TemporaryDirectory() as tmp:
+            run_dir = self._make_run(tmp)
+            preview = build_rollback_preview(run_dir, "experiments")
+            self.assertTrue(preview["execution_reapproval_required"])
+            self.assertIn("03-execution-approval.json", preview["artifacts_to_archive"])
+            self.assertEqual(preview["blockers"], [])
+
+            issued = issue_rollback_preview(run_dir, "experiments")
+            report = apply_rollback(run_dir, "experiments", issued["preview_id"], issued["preview_token"])
+            self.assertEqual(report["status"], "applied")
+            self.assertFalse((run_dir / "03-execution-approval.json").exists())
+            archived = (
+                run_dir.parent / ".research-agent-archives" / run_dir.name / report["archive_ref"] / "03-execution-approval.json"
+            )
+            self.assertTrue(archived.exists())
+
+    def test_rollback_to_literature_context_archives_review_approval(self) -> None:
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir()
+            (run_dir / "01-context.json").write_text("{}", encoding="utf-8")
+            (run_dir / "approval.json").write_text(json.dumps({"approved": True}), encoding="utf-8")
+            update_workflow_stage(run_dir, "回退审批测试", "awaiting_review_approval")
+            preview = build_rollback_preview(run_dir, "literature_context")
+            self.assertTrue(preview["review_reapproval_required"])
+            self.assertIn("approval.json", preview["artifacts_to_archive"])
+            self.assertEqual(preview["blockers"], [])
+
+    def test_invariant_blocks_when_approval_not_in_archive_plan(self) -> None:
+        import research_agent.workflow_graph as wg
+
+        with TemporaryDirectory() as tmp:
+            run_dir = self._make_run(tmp)
+            original = wg._rollback_patterns_and_directories
+
+            def broken_patterns(target: str) -> tuple[list[str], list[str]]:
+                patterns, directories = original(target)
+                return [p for p in patterns if not p.startswith("03-execution-approval")], directories
+
+            with mock.patch.object(wg, "_rollback_patterns_and_directories", broken_patterns):
+                preview = build_rollback_preview(run_dir, "experiments")
+            self.assertTrue(
+                any("03-execution-approval.json" in blocker for blocker in preview["blockers"]),
+                preview["blockers"],
+            )
+
+
 
 if __name__ == "__main__":
     unittest.main()
