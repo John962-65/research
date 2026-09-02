@@ -6,7 +6,7 @@ import re
 
 from .config import IdeationConfig
 from .llm import LLM
-from .llm_trace import complete_with_purpose, record_validation_result
+from .llm_trace import complete_with_purpose_detail, record_validation_result
 from .literature_context import retrieve_chunks
 from .multi_agent_assignment import agent_roles_for_text, multi_agent_prompt_context
 from .research_gap_map import best_gap_for_text, research_gap_map_prompt_context
@@ -62,7 +62,7 @@ def _generate_ai_ideas(
     research_gap_map: dict[str, Any] | None,
     agent_assignment: dict[str, Any] | None,
 ) -> list[ResearchIdea]:
-    raw = complete_with_purpose(
+    raw, call_id = complete_with_purpose_detail(
         llm,
         "Research ideas. You generate testable scientific ideas. Return only valid JSON in Chinese.",
         _ideas_prompt(review, config.max_ideas, context, review_feedback, research_gap_map, agent_assignment),
@@ -73,7 +73,7 @@ def _generate_ai_ideas(
     data = _parse_json(raw)
     items = data.get("ideas") if isinstance(data, dict) else data
     if not isinstance(items, list):
-        record_validation_result(llm, stage="idea_generation", valid=False, error="response does not contain an ideas list")
+        record_validation_result(llm, stage="idea_generation", valid=False, error="response does not contain an ideas list", call_id=call_id)
         return []
     ideas: list[ResearchIdea] = []
     for item in items:
@@ -115,6 +115,7 @@ def _generate_ai_ideas(
         stage="idea_generation",
         valid=bool(ideas),
         error="no idea satisfied the required schema" if not ideas else "",
+        call_id=call_id,
     )
     return ideas
 

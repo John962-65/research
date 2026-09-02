@@ -8,7 +8,7 @@ from .config import LiteratureConfig
 from .literature_sources import OnlineLiteratureClient, annotate_evidence, build_evidence_table, deduplicate_papers, rank_papers
 from .literature_search_strategy import build_literature_search_strategy, strategy_to_dict
 from .llm import LLM
-from .llm_trace import complete_with_purpose, record_validation_result
+from .llm_trace import complete_with_purpose_detail, record_validation_result
 from .models import LiteratureReview, Paper
 from .artifacts import safe_int as _safe_int
 
@@ -574,7 +574,7 @@ def build_literature_review_from_papers(
 
 
 def _llm_search_queries(topic: str, llm: LLM, max_queries: int) -> tuple[list[str], list[str]]:
-    raw = complete_with_purpose(
+    raw, call_id = complete_with_purpose_detail(
         llm,
         "Academic search query planning. Return only valid JSON.",
         _search_query_prompt(topic, max_queries),
@@ -585,9 +585,9 @@ def _llm_search_queries(topic: str, llm: LLM, max_queries: int) -> tuple[list[st
     data = _parse_json_object(raw)
     queries = _as_str_list(data.get("queries")) if data else []
     if not queries:
-        record_validation_result(llm, stage="online_search_query_planning", valid=False, error="response contains no usable search queries")
+        record_validation_result(llm, stage="online_search_query_planning", valid=False, error="response contains no usable search queries", call_id=call_id)
         return _rule_search_queries(topic, max_queries), ["LLM 未返回可用检索式，使用规则检索式。"]
-    record_validation_result(llm, stage="online_search_query_planning", valid=True)
+    record_validation_result(llm, stage="online_search_query_planning", valid=True, call_id=call_id)
     return queries[:max_queries], ["LLM 检索式: " + " | ".join(queries[:max_queries])]
 
 
@@ -634,7 +634,7 @@ def _literature_prompt(topic: str, papers: list[Paper]) -> str:
 
 
 def _llm_literature_synthesis(topic: str, papers: list[Paper], llm: LLM) -> dict[str, Any]:
-    raw = complete_with_purpose(
+    raw, call_id = complete_with_purpose_detail(
         llm,
         "Literature synthesis. You are a scientific research assistant. Return only valid JSON in Chinese.",
         _literature_json_prompt(topic, papers),
@@ -644,10 +644,10 @@ def _llm_literature_synthesis(topic: str, papers: list[Paper], llm: LLM) -> dict
     )
     parsed = _parse_json_object(raw)
     if not parsed:
-        record_validation_result(llm, stage="literature_synthesis", valid=False, error="response is not a valid literature synthesis object")
+        record_validation_result(llm, stage="literature_synthesis", valid=False, error="response is not a valid literature synthesis object", call_id=call_id)
         return {"summary": raw.strip()}
     valid = bool(str(parsed.get("summary") or "").strip())
-    record_validation_result(llm, stage="literature_synthesis", valid=valid, error="literature synthesis is missing summary")
+    record_validation_result(llm, stage="literature_synthesis", valid=valid, error="literature synthesis is missing summary", call_id=call_id)
     return parsed
 
 

@@ -22,7 +22,7 @@ from .benchmark_adapter import prepare_benchmark_adapter_plan
 from .command_safety import interpreter_execution_issues
 from .config import ExecutionConfig, PaperGradeConfig
 from .llm import LLM
-from .llm_trace import complete_with_purpose, record_validation_result
+from .llm_trace import complete_with_purpose_detail, record_validation_result
 from .literature_context import retrieve_chunks
 from .models import ExperimentCommand, ExperimentPlan, ExperimentResult, LiteratureContext, ResearchIdea, ResearchPlan
 
@@ -138,7 +138,7 @@ def _try_ai_plan(
     review_feedback: str,
     manager_constraints: str,
 ) -> ExperimentPlan | None:
-    raw = complete_with_purpose(
+    raw, call_id = complete_with_purpose_detail(
         llm,
         "Experiment planning. You design safe, reproducible scientific experiments. Return only valid JSON in Chinese.",
         _plan_prompt(idea, context, research_plan, review_feedback, manager_constraints),
@@ -148,16 +148,16 @@ def _try_ai_plan(
     )
     data = _parse_json(raw)
     if not isinstance(data, dict):
-        record_validation_result(llm, stage="experiment_planning", valid=False, error="response is not a JSON object")
+        record_validation_result(llm, stage="experiment_planning", valid=False, error="response is not a JSON object", call_id=call_id)
         return None
     objective = str(data.get("objective") or "").strip()
     variables = _as_str_list(data.get("variables"))
     metrics = _as_str_list(data.get("metrics"))
     protocol = _as_str_list(data.get("protocol"))
     if not objective or len(variables) < 2 or len(metrics) < 2 or len(protocol) < 3:
-        record_validation_result(llm, stage="experiment_planning", valid=False, error="experiment plan schema is incomplete")
+        record_validation_result(llm, stage="experiment_planning", valid=False, error="experiment plan schema is incomplete", call_id=call_id)
         return None
-    record_validation_result(llm, stage="experiment_planning", valid=True)
+    record_validation_result(llm, stage="experiment_planning", valid=True, call_id=call_id)
     template_profile = _template_profile(research_plan)
     return ExperimentPlan(
         idea_title=idea.title,

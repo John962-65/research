@@ -4,7 +4,7 @@ import re
 from typing import Any
 
 from .llm import LLM
-from .llm_trace import complete_with_purpose, record_validation_result
+from .llm_trace import complete_with_purpose_detail, record_validation_result
 from .models import PaperRewriteReport, PaperRevisionPlan, PaperRevisionTaskResult, PaperReview, RevisionTask
 from .paper_review import _claim_asserted_in_paper, _claim_explicitly_scoped_out
 from .artifacts import cell as _cell
@@ -65,7 +65,7 @@ def _try_ai_rewrite(
     llm: LLM,
     benchmark_evidence: dict[str, Any] | None,
 ) -> str:
-    draft = complete_with_purpose(
+    draft, call_id = complete_with_purpose_detail(
         llm,
         "Paper revision. You revise Chinese academic Markdown without inventing evidence.",
         _rewrite_prompt(topic, paper_md, revision_plan, paper_review, benchmark_evidence),
@@ -75,7 +75,7 @@ def _try_ai_rewrite(
     )
     draft = _strip_code_fence(draft).strip()
     valid = _looks_like_revised_paper(draft, benchmark_evidence)
-    record_validation_result(llm, stage="paper_revision", valid=valid, error="revised paper failed structure/evidence validation")
+    record_validation_result(llm, stage="paper_revision", valid=valid, error="revised paper failed structure/evidence validation", call_id=call_id)
     return draft if valid else ""
 
 

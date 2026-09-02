@@ -7,7 +7,14 @@ import os
 import unittest
 
 from research_agent.config import LLMConfig
-from research_agent.llm_trace import complete_with_purpose, trace_llm
+from research_agent.llm_trace import (
+    LLM_TRACE_JSON,
+    complete_with_purpose,
+    complete_with_purpose_detail,
+    record_validation_result,
+    trace_llm,
+    _read_entries,
+)
 
 
 class LLMTraceTest(unittest.TestCase):
@@ -126,6 +133,41 @@ class LLMTraceTest(unittest.TestCase):
             self.assertEqual(data["budget_exceeded_calls"], 1)
             self.assertEqual(data["entries"][0]["status"], "budget_exceeded")
             self.assertNotIn("abcde", encoded)
+
+
+class ValidationCallIdTest(unittest.TestCase):
+    """TRACE-01: validation results attach to their exact call, not to the
+    last pending entry that shares the stage."""
+
+    def test_validation_by_call_id_hits_the_right_entry(self) -> None:
+        with TemporaryDirectory() as tmp:
+            llm = trace_llm(_FakeLLM("输出"), Path(tmp), LLMConfig())
+            first, first_id = complete_with_purpose_detail(
+                llm, "sys", "user", stage="paper_review_loop", purpose="review", requires_validation=True
+            )
+            _second, second_id = complete_with_purpose_detail(
+                llm, "sys", "user2", stage="paper_review_loop", purpose="review", requires_validation=True
+            )
+            self.assertEqual(first, "输出")
+            self.assertNotEqual(first_id, second_id)
+            record_validation_result(llm, stage="paper_review_loop", valid=True, call_id=first_id)
+            entries = _read_entries(Path(tmp) / LLM_TRACE_JSON)
+            by_id = {entry.call_id: entry for entry in entries}
+            self.assertEqual(by_id[first_id].status, "success")
+            self.assertEqual(by_id[first_id].validation_status, "accepted")
+            # The second call must stay pending; the old last-pending matching
+            # would have validated the wrong call.
+            self.assertEqual(by_id[second_id].status, "validation_pending")
+
+    def test_validation_with_unknown_call_id_is_a_noop(self) -> None:
+        with TemporaryDirectory() as tmp:
+            llm = trace_llm(_FakeLLM("输出"), Path(tmp), LLMConfig())
+            _response, call_id = complete_with_purpose_detail(
+                llm, "sys", "user", stage="idea_generation", purpose="ideas", requires_validation=True
+            )
+            record_validation_result(llm, stage="idea_generation", valid=False, error="x", call_id=call_id + 999)
+            entries = _read_entries(Path(tmp) / LLM_TRACE_JSON)
+            self.assertEqual(entries[0].status, "validation_pending")
 
 
 class _FakeLLM:

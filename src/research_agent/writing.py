@@ -12,7 +12,7 @@ from .evidence_integrity import (
 )
 from .literature_context import citation_key_for_paper
 from .llm import LLM
-from .llm_trace import complete_with_purpose, record_validation_result
+from .llm_trace import complete_with_purpose_detail, record_validation_result
 from .models import Analysis, ExperimentPlan, LiteratureReview, Paper, ResearchIdea
 from .artifacts import safe_int as _safe_int
 
@@ -108,7 +108,7 @@ def _try_ai_paper(
     evidence_integrity: EvidenceIntegrity | None = None,
     runbook: dict[str, Any] | None = None,
 ) -> str:
-    draft = complete_with_purpose(
+    draft, call_id = complete_with_purpose_detail(
         llm,
         "Paper writing. You write concise Chinese academic Markdown. Use only provided evidence and experimental results.",
         _paper_prompt(topic, review, ideas, plan, analysis, config, failure_analysis, experiment_decision, hypothesis_outcome, claim_boundary_preflight, benchmark_evidence, evidence_integrity, runbook),
@@ -118,7 +118,7 @@ def _try_ai_paper(
     )
     draft = _strip_code_fence(draft).strip()
     valid = _looks_like_paper(draft, citation_keys, claim_boundaries, claim_boundary_preflight)
-    record_validation_result(llm, stage="paper_writing", valid=valid, error="paper draft failed structure/evidence validation")
+    record_validation_result(llm, stage="paper_writing", valid=valid, error="paper draft failed structure/evidence validation", call_id=call_id)
     if valid:
         return draft
     return ""

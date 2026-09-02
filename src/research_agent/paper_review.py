@@ -5,7 +5,7 @@ import json
 import re
 
 from .llm import LLM
-from .llm_trace import complete_with_purpose, record_validation_result
+from .llm_trace import complete_with_purpose_detail, record_validation_result
 from .models import (
     Analysis,
     ExperimentPlan,
@@ -76,7 +76,7 @@ def _try_ai_review(
     context: LiteratureContext | None,
     llm: LLM,
 ) -> PaperReview | None:
-    raw = complete_with_purpose(
+    raw, call_id = complete_with_purpose_detail(
         llm,
         "Scientific peer review. You are a rigorous reviewer. Return only valid JSON in Chinese.",
         _review_prompt(topic, review, ideas, plan, analysis, paper_md, context),
@@ -86,13 +86,13 @@ def _try_ai_review(
     )
     data = _parse_json(raw)
     if not isinstance(data, dict):
-        record_validation_result(llm, stage="paper_review_loop", valid=False, error="response is not a JSON object")
+        record_validation_result(llm, stage="paper_review_loop", valid=False, error="response is not a JSON object", call_id=call_id)
         return None
     summary = str(data.get("summary") or "").strip()
     if not summary:
-        record_validation_result(llm, stage="paper_review_loop", valid=False, error="review schema is missing summary")
+        record_validation_result(llm, stage="paper_review_loop", valid=False, error="review schema is missing summary", call_id=call_id)
         return None
-    record_validation_result(llm, stage="paper_review_loop", valid=True)
+    record_validation_result(llm, stage="paper_review_loop", valid=True, call_id=call_id)
     claim_audit = _parse_claim_audit(data.get("claim_audit"))
     if claim_audit:
         claim_audit = _paper_only_claim_audit(claim_audit, paper_md)

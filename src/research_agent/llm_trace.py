@@ -81,6 +81,32 @@ class TracedLLM:
         requires_validation: bool = False,
         agent_id: str = "",
     ) -> str:
+        response, _call_id = self.complete_validatable(
+            system,
+            user,
+            stage=stage,
+            purpose=purpose,
+            requires_validation=requires_validation,
+            agent_id=agent_id,
+        )
+        return response
+
+    def complete_validatable(
+        self,
+        system: str,
+        user: str,
+        *,
+        stage: str = "",
+        purpose: str = "",
+        requires_validation: bool = False,
+        agent_id: str = "",
+    ) -> tuple[str, int]:
+        """Run one traced call and return ``(response, call_id)`` (TRACE-01).
+
+        The call id is the only safe key for attaching a validation result to
+        the exact ledger entry it belongs to; matching by stage alone can hit
+        the wrong pending entry when a stage calls the model more than once.
+        """
         with _ledger_lock(self.run_dir):
             prepared = _prepare_request(self.inner, system, user, stage=stage, purpose=purpose, agent_id=agent_id)
             traced_system = str(getattr(prepared, "system", system))
@@ -92,7 +118,7 @@ class TracedLLM:
             _publish_activity(self.run_dir, metadata, status="running")
             budget_error, budget_status = self._budget_error(traced_system, traced_user)
             if budget_error:
-                self._append(
+                call_id = self._append(
                     traced_system,
                     traced_user,
                     "",
@@ -124,7 +150,7 @@ class TracedLLM:
                 _publish_activity(self.run_dir, metadata, status="failed", detail=str(exc))
                 raise
             status = "validation_pending" if requires_validation else "success"
-            self._append(
+            call_id = self._append(
                 traced_system,
                 traced_user,
                 response,
@@ -137,7 +163,7 @@ class TracedLLM:
                 route=route,
             )
             _publish_activity(self.run_dir, metadata, status="completed")
-            return response
+            return response, call_id
 
     def complete_as_agent(
         self,
@@ -158,18 +184,32 @@ class TracedLLM:
             agent_id=agent_id,
         )
 
-    def record_validation_result(self, *, stage: str, valid: bool, error: str = "") -> None:
+    def record_validation_result(self, *, stage: str, valid: bool, error: str = "", call_id: int = 0) -> None:
         with _ledger_lock(self.run_dir):
             entries = _read_entries(self.run_dir / LLM_TRACE_JSON)
             normalized_stage = _stage(stage)
-            index = next(
-                (
-                    index
-                    for index in range(len(entries) - 1, -1, -1)
-                    if entries[index].stage == normalized_stage and entries[index].status == "validation_pending"
-                ),
-                None,
-            )
+            if call_id > 0:
+                # TRACE-01: attach to the exact call, never to a later pending
+                # entry that happens to share the stage.
+                index = next(
+                    (
+                        index
+                        for index in range(len(entries) - 1, -1, -1)
+                        if entries[index].call_id == call_id
+                        and entries[index].stage == normalized_stage
+                        and entries[index].status == "validation_pending"
+                    ),
+                    None,
+                )
+            else:
+                index = next(
+                    (
+                        index
+                        for index in range(len(entries) - 1, -1, -1)
+                        if entries[index].stage == normalized_stage and entries[index].status == "validation_pending"
+                    ),
+                    None,
+                )
             if index is None:
                 return
             entries[index] = replace(
@@ -216,7 +256,7 @@ class TracedLLM:
         stage: str,
         purpose: str,
         route: Any = None,
-    ) -> None:
+    ) -> int:
         entries = _read_entries(self.run_dir / LLM_TRACE_JSON)
         entry = LLMTraceEntry(
             call_id=len(entries) + 1,
@@ -247,6 +287,7 @@ class TracedLLM:
         report = _report([*entries, entry])
         write_json(self.run_dir / LLM_TRACE_JSON, report)
         write_text(self.run_dir / LLM_TRACE_MD, render_llm_trace_markdown(report))
+        return entry.call_id
 
 
 def trace_llm(llm: LLM, run_dir: Path, config: LLMConfig) -> LLM:
@@ -306,10 +347,51 @@ def complete_as_agent(
     )
 
 
-def record_validation_result(llm: LLM, *, stage: str, valid: bool, error: str = "") -> None:
+def complete_with_purpose_detail(
+    llm: LLM,
+    system: str,
+    user: str,
+    *,
+    stage: str,
+    purpose: str,
+    requires_validation: bool = False,
+    agent_id: str = "",
+) -> tuple[str, int]:
+    """Run one (traced) call and return ``(response, call_id)`` (TRACE-01)."""
+    validatable = getattr(llm, "complete_validatable", None)
+    if callable(validatable):
+        return validatable(
+            system,
+            user,
+            stage=stage,
+            purpose=purpose,
+            requires_validation=requires_validation,
+            agent_id=agent_id,
+        )
+    complete = getattr(llm, "complete_with_purpose", None)
+    if callable(complete):
+        response = complete(
+            system,
+            user,
+            stage=stage,
+            purpose=purpose,
+            requires_validation=requires_validation,
+        )
+        return response, 0
+    return llm.complete(system, user), 0
+
+
+def record_validation_result(
+    llm: LLM,
+    *,
+    stage: str,
+    valid: bool,
+    error: str = "",
+    call_id: int = 0,
+) -> None:
     record = getattr(llm, "record_validation_result", None)
     if callable(record):
-        record(stage=stage, valid=valid, error=error)
+        record(stage=stage, valid=valid, error=error, call_id=call_id)
 
 
 def render_llm_trace_markdown(report: LLMTraceReport) -> str:

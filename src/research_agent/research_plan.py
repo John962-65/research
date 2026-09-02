@@ -5,7 +5,7 @@ import json
 import re
 
 from .llm import LLM
-from .llm_trace import complete_with_purpose, record_validation_result
+from .llm_trace import complete_with_purpose_detail, record_validation_result
 from .models import ResearchPlan
 
 
@@ -43,7 +43,7 @@ def render_research_plan_markdown(plan: ResearchPlan) -> str:
 
 
 def _try_ai_plan(topic: str, llm: LLM, prior_lessons: str = "") -> ResearchPlan | None:
-    raw = complete_with_purpose(
+    raw, call_id = complete_with_purpose_detail(
         llm,
         "Research planning. You create domain profiles for scientific agents. Return only valid JSON in Chinese.",
         _prompt(topic, prior_lessons=prior_lessons),
@@ -53,16 +53,16 @@ def _try_ai_plan(topic: str, llm: LLM, prior_lessons: str = "") -> ResearchPlan 
     )
     data = _parse_json(raw)
     if not isinstance(data, dict):
-        record_validation_result(llm, stage="research_planning", valid=False, error="response is not a JSON object")
+        record_validation_result(llm, stage="research_planning", valid=False, error="response is not a JSON object", call_id=call_id)
         return None
     domain = str(data.get("domain") or "").strip()
     objective = str(data.get("objective") or "").strip()
     search_queries = _as_str_list(data.get("search_queries"))
     metrics = _as_str_list(data.get("metrics"))
     if not domain or not objective or len(search_queries) < 2 or len(metrics) < 2:
-        record_validation_result(llm, stage="research_planning", valid=False, error="research plan schema is incomplete")
+        record_validation_result(llm, stage="research_planning", valid=False, error="research plan schema is incomplete", call_id=call_id)
         return None
-    record_validation_result(llm, stage="research_planning", valid=True)
+    record_validation_result(llm, stage="research_planning", valid=True, call_id=call_id)
     fallback = _rule_plan(topic)
     return ResearchPlan(
         topic=topic,
