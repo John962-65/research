@@ -6,7 +6,7 @@ from typing import Any
 import os
 
 from .config import AgentConfig, AgentRoleConfig
-from .llm import LLM, build_llm, resolve_llm_base_url
+from .llm import LLM, build_llm, resolve_llm_base_url, resolve_role_llm_config
 from .multi_agent_assignment import AGENT_PROFILES
 from .tool_runtime import ToolRuntime
 
@@ -253,14 +253,15 @@ class AgentRoutedLLM:
             str(route.api_key_env or "").strip(),
         )
         if key not in self._clients:
-            overrides: dict[str, Any] = {"model": key[0]}
-            if key[1]:
-                overrides["base_url"] = key[1]
-            if key[2]:
-                overrides["base_url_env"] = key[2]
-            if key[3]:
-                overrides["api_key_env"] = key[3]
-            self._clients[key] = build_llm(replace(self.config.llm, **overrides))
+            self._clients[key] = build_llm(
+                resolve_role_llm_config(
+                    self.config.llm,
+                    model=key[0],
+                    base_url=key[1],
+                    base_url_env=key[2],
+                    api_key_env=key[3],
+                )
+            )
         return self._clients[key]
 
 

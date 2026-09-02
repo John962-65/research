@@ -58,6 +58,7 @@ def run_preflight(
     checks.extend(_literature_checks(config))
     checks.extend(_execution_checks(config))
     checks.extend(_paper_grade_checks(config))
+    checks.extend(_multi_agent_credential_checks(config))
     checks.extend(_release_checks(config))
     checks.extend(_run_memory_checks(config, run_memory))
     if ping_llm:
@@ -91,6 +92,45 @@ def write_preflight_artifacts(report: PreflightReport, out_dir: Path) -> tuple[P
     write_json(json_path, report)
     write_text(md_path, render_preflight_markdown(report))
     return json_path, md_path
+
+
+def _multi_agent_credential_checks(config: AgentConfig) -> list[PreflightCheck]:
+    """SEC-01: every role endpoint must bind to a provably same-origin credential."""
+    from .llm import resolve_role_llm_config
+
+    checks: list[PreflightCheck] = []
+    multi_agent = config.multi_agent
+    if not multi_agent.enabled or not multi_agent.roles:
+        return checks
+    for role in multi_agent.roles:
+        if not role.enabled:
+            continue
+        try:
+            resolve_role_llm_config(
+                config.llm,
+                model=role.model,
+                base_url=role.base_url,
+                base_url_env=role.base_url_env,
+                api_key_env=role.api_key_env,
+            )
+        except ValueError as exc:
+            checks.append(
+                PreflightCheck(
+                    "multi_agent_credential_origin",
+                    "fail",
+                    f"角色 {role.agent_id}: {exc}",
+                    action="为该角色声明成对的 base_url_env/api_key_env；或去掉独立 endpoint，改用全局 endpoint 与凭据。",
+                )
+            )
+        else:
+            checks.append(
+                PreflightCheck(
+                    "multi_agent_credential_origin",
+                    "pass",
+                    f"角色 {role.agent_id} 的 endpoint/凭据绑定同源可证",
+                )
+            )
+    return checks
 
 
 def _llm_static_checks(config: AgentConfig) -> list[PreflightCheck]:

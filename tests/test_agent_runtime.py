@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import os
 import unittest
+from unittest import mock
 
 from research_agent.agent_runtime import (
     DEFAULT_ROLE_SKILLS,
@@ -150,15 +152,22 @@ class AgentRoutedLLMTest(unittest.TestCase):
         config = _config(
             enabled=True,
             roles=[
-                AgentRoleConfig(agent_id="gap_analyst", base_url=ALT_BASE_URL),
+                AgentRoleConfig(
+                    agent_id="gap_analyst",
+                    base_url=ALT_BASE_URL,
+                    base_url_env="ROLE_A_BASE_URL",
+                    api_key_env="ROLE_A_API_KEY",
+                ),
                 AgentRoleConfig(agent_id="skeptical_reviewer"),
             ],
             task_models={"research_planning": "planner-model", "paper_review_loop": "reviewer-model"},
         )
         routed = AgentRoutedLLM(config, self.project_root, self.run_dir)
-        planner = routed._client_for(routed.router.resolve(stage="research_planning"))
-        reviewer = routed._client_for(routed.router.resolve(stage="paper_review_loop"))
-        again = routed._client_for(routed.router.resolve(stage="research_planning"))
+        env = {"ROLE_A_BASE_URL": ALT_BASE_URL, "ROLE_A_API_KEY": "role-key"}
+        with mock.patch.dict(os.environ, env):
+            planner = routed._client_for(routed.router.resolve(stage="research_planning"))
+            reviewer = routed._client_for(routed.router.resolve(stage="paper_review_loop"))
+            again = routed._client_for(routed.router.resolve(stage="research_planning"))
         self.assertIs(planner, again)
         self.assertIsNot(planner, reviewer)
         self.assertEqual(planner.base_url, ALT_BASE_URL)
@@ -173,16 +182,29 @@ class AgentRoutedLLMTest(unittest.TestCase):
                 AgentRoleConfig(
                     agent_id="gap_analyst",
                     base_url=ALT_BASE_URL,
+                    base_url_env="ROLE_BASE_URL",
                     api_key_env="ROLE_API_KEY",
                 )
             ],
         )
         routed = AgentRoutedLLM(config, self.project_root, self.run_dir)
-        client = routed._client_for(routed.router.resolve(stage="research_planning"))
+        env = {"ROLE_BASE_URL": ALT_BASE_URL}
+        with mock.patch.dict(os.environ, env, clear=False):
+            client = routed._client_for(routed.router.resolve(stage="research_planning"))
         self.assertEqual(client.base_url, ALT_BASE_URL)
-        # The credential itself stays empty: the env var is resolved by
-        # resolve_llm_api_key and this test environment does not set it.
+        # The credential itself stays empty: ROLE_API_KEY is not set in this
+        # test environment, and resolve_llm_api_key refuses to invent one.
         self.assertEqual(client.api_key, "")
+
+    def test_cross_origin_role_without_env_pair_rejected_at_client_build(self) -> None:
+        config = _config(
+            enabled=True,
+            roles=[AgentRoleConfig(agent_id="gap_analyst", base_url=ALT_BASE_URL)],
+        )
+        routed = AgentRoutedLLM(config, self.project_root, self.run_dir)
+        with self.assertRaises(ValueError) as caught:
+            routed._client_for(routed.router.resolve(stage="research_planning"))
+        self.assertIn("credential binding rejected", str(caught.exception))
 
     def test_sampling_parameters_reach_client(self) -> None:
         config = replace(

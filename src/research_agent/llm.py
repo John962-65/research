@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from contextlib import contextmanager
@@ -530,6 +530,135 @@ def resolve_llm_api_key(config: LLMConfig, resolved_base_url: str | None = None)
     except ValueError:
         return ""
     return env_key if actual_url == trusted_url else ""
+
+
+@dataclass(frozen=True)
+class CredentialBinding:
+    """Provenance of the credential for one route: which env it comes from and where it goes."""
+
+    origin_base_url: str
+    source: str  # "literal" | "env" | "none"
+    env_name: str
+    same_origin_as_global: bool
+
+
+def _url_origin(url: str) -> tuple[str, str, int | None]:
+    parts = urllib.parse.urlsplit(url)
+    return (parts.scheme.lower(), (parts.hostname or "").lower().rstrip("."), parts.port)
+
+
+def resolve_role_llm_config(
+    global_config: LLMConfig,
+    *,
+    model: str = "",
+    base_url: str = "",
+    base_url_env: str = "",
+    api_key_env: str = "",
+) -> LLMConfig:
+    """Bind one role/task route to an endpoint and a provably matching credential.
+
+    This is the single credential-origin enforcement point shared by runtime,
+    preflight, Web, and CLI. A global literal API key must never be sent to an
+    endpoint whose origin differs from the global one: a cross-origin route
+    must declare a paired ``base_url_env``/``api_key_env``, and the endpoint
+    named by ``base_url_env`` must match the effective origin.
+    """
+    overrides: dict[str, Any] = {}
+    model_value = str(model or "").strip()
+    if model_value:
+        overrides["model"] = model_value
+    base_url_value = str(base_url or "").strip()
+    base_url_env_value = str(base_url_env or "").strip()
+    api_key_env_value = str(api_key_env or "").strip()
+    if base_url_value:
+        overrides["base_url"] = base_url_value
+    if base_url_env_value:
+        overrides["base_url_env"] = base_url_env_value
+    if api_key_env_value:
+        overrides["api_key_env"] = api_key_env_value
+    if not overrides:
+        return global_config
+    if not base_url_value and not base_url_env_value and not api_key_env_value:
+        # Model-only override keeps the global endpoint and its credential.
+        return replace(global_config, **overrides)
+
+    try:
+        global_base_url = resolve_llm_base_url(
+            global_config.provider, global_config.base_url, global_config.base_url_env
+        )
+    except ValueError:
+        global_base_url = ""
+    effective_base_url = resolve_llm_base_url(
+        global_config.provider,
+        base_url_value,
+        base_url_env_value,
+    )
+    same_origin = bool(global_base_url) and _url_origin(global_base_url) == _url_origin(effective_base_url)
+    if same_origin:
+        return replace(global_config, **overrides)
+
+    if not api_key_env_value:
+        raise ValueError(
+            "LLM credential binding rejected: role endpoint "
+            f"{redact_url(effective_base_url)} does not share the global endpoint origin; "
+            "declare api_key_env for this role instead of reusing the global literal key"
+        )
+    if not base_url_env_value:
+        raise ValueError(
+            "LLM credential binding rejected: role endpoint "
+            f"{redact_url(effective_base_url)} does not share the global endpoint origin; "
+            "declare the matching base_url_env so the credential origin can be proven"
+        )
+    env_base = os.environ.get(base_url_env_value, "").strip()
+    if not env_base:
+        raise ValueError(
+            "LLM credential binding rejected: environment variable "
+            f"{base_url_env_value} is not set, so the credential origin for "
+            f"{redact_url(effective_base_url)} cannot be proven"
+        )
+    try:
+        env_base_url = validate_llm_base_url(env_base)
+    except ValueError as exc:
+        raise ValueError(
+            f"LLM credential binding rejected: {base_url_env_value} is not a valid base URL"
+        ) from exc
+    if _url_origin(env_base_url) != _url_origin(effective_base_url):
+        raise ValueError(
+            "LLM credential binding rejected: "
+            f"{base_url_env_value} resolves to {redact_url(env_base_url)} which does not match "
+            f"the role endpoint {redact_url(effective_base_url)}"
+        )
+    # Cross-origin route: drop the global literal key entirely and pin the
+    # role's endpoint fields (base_url="" clears a global literal so the env
+    # var stays authoritative).
+    return replace(
+        global_config,
+        model=overrides.get("model", global_config.model),
+        base_url=base_url_value,
+        base_url_env=base_url_env_value,
+        api_key="",
+        api_key_env=api_key_env_value,
+    )
+
+
+def describe_credential_binding(config: LLMConfig, resolved_base_url: str | None = None) -> CredentialBinding:
+    """Describe where the credential for ``config`` comes from (no secret values)."""
+    try:
+        origin = resolved_base_url or resolve_llm_base_url(
+            config.provider, config.base_url, config.base_url_env
+        )
+    except ValueError:
+        origin = ""
+    if config.api_key:
+        return CredentialBinding(origin_base_url=origin, source="literal", env_name="", same_origin_as_global=True)
+    if config.api_key_env:
+        return CredentialBinding(
+            origin_base_url=origin,
+            source="env",
+            env_name=config.api_key_env,
+            same_origin_as_global=True,
+        )
+    return CredentialBinding(origin_base_url=origin, source="none", env_name="", same_origin_as_global=True)
 
 def fetch_provider_models(provider: str, base_url: str, api_key: str, timeout_seconds: float = 8.0) -> dict[str, Any]:
     provider_norm = validate_llm_provider(provider)
