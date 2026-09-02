@@ -12,9 +12,10 @@
 | --- | --- | --- | --- |
 | 阶段 A（SEC-01 / GATE-01 / DOC-01 / WEB-02） | ✅ 完成 | f675568、74f27e9、e4f8ad0 | SEC-01 与 GATE-01 各自独立提交并带行为级回归测试；README/examples 已作为 TOML fixture 进入测试 |
 | 阶段 B（LOCK-01 / TX-01 / ART-02 / ART-03） | ✅ 完成 | 02b0a85 | 跨进程 flock 租约 + 回退 journal + 幂等恢复 + reason/actor 持久化 + 磁盘余量检查；per-run/global 归档配额与 CLI 归档清理命令仍属后续（ART-03 的完整版） |
-| 阶段 C-H | 未开始 | - | 按 §8 顺序执行；阶段 C 的 schema v2 迁移设计见 §9 |
+| 阶段 C（REV-01 / TRACE-01 / SKILL-02 / ART-01） | ✅ 完成 | c2c5b95、b163674、f1146ce、d6f9011 | Manifest schema v2（revision/branch_id/node_id/attempt_id/event_id，v1 读兼容）；完整性审计按 active branch 过滤；call_id 贯穿 prepare→call→validate；effective skill 内容哈希进 checkpoint 与账本；节点归属 registry + 未归属文件报告。遗留：submission provenance 中的 skill 哈希、ledger 稳定 UUID 索引、审计查询的 revision 选择参数（在阶段 D/E 随节点执行器补齐） |
+| 阶段 D-H | 未开始 | - | 按 §8 顺序执行 |
 
-验证：阶段 A/B 合入后全量测试 1270 passed, 1 skipped, 72 subtests。阶段 A/B 生效后即可解除 §4 的临时运行约束中与凭据和回退审批相关的两项；`local`/`benchmark` 回退后自动执行现在会正确停在执行审批门（批准文件已随回退归档失效）。
+验证：阶段 A-C 合入后全量测试 1287 passed, 1 skipped, 72 subtests。阶段 A/B 生效后即可解除 §4 的临时运行约束中与凭据和回退审批相关的两项；`local`/`benchmark` 回退后自动执行现在会正确停在执行审批门（批准文件已随回退归档失效）。
 
 ## 1. 结论
 
