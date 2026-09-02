@@ -12,6 +12,7 @@ import json
 import os
 import re
 import urllib.parse
+import uuid
 
 from .artifacts import write_json, utc_now as _utc_now, read_json_dict as _read_json
 from .config import AgentRoleConfig, MCPServerConfig, MultiAgentConfig
@@ -180,17 +181,66 @@ class ToolRuntime:
             raise RuntimeError(f"MCP tool arguments exceed {MAX_TOOL_ARGUMENT_CHARS} characters")
         return {"server_id": server_id, "name": name, "arguments": arguments}
 
-    def call(self, request: dict[str, Any], *, stage: str, agent_id: str) -> str:
+    def call(self, request: dict[str, Any], *, stage: str, agent_id: str, authorized_servers: list[str] | None = None) -> str:
+        """Execute one allowlisted tool call with a full intent receipt trail (MCP-02).
+
+        Every intent — requested, denied, started, success, failed, or timed
+        out (outcome_unknown) — is recorded; timeouts are never retried
+        automatically because the remote side effect may have happened.
+        """
         server_id = str(request.get("server_id") or "")
         name = str(request.get("name") or "")
         arguments = request.get("arguments") if isinstance(request.get("arguments"), dict) else {}
+        tool_call_id = uuid.uuid4().hex
         server = self.servers.get(server_id)
         if server is None:
+            self._record_intent(
+                stage=stage,
+                agent_id=agent_id,
+                server_id=server_id,
+                tool=name,
+                arguments=arguments,
+                tool_call_id=tool_call_id,
+                status="denied",
+                error=f"MCP server is not enabled for this run: {server_id}",
+            )
             raise RuntimeError(f"MCP server is not enabled for this run: {server_id}")
+        if authorized_servers is not None and server_id not in authorized_servers:
+            self._record_intent(
+                stage=stage,
+                agent_id=agent_id,
+                server_id=server_id,
+                tool=name,
+                arguments=arguments,
+                tool_call_id=tool_call_id,
+                status="denied",
+                error=f"agent {agent_id} is not assigned MCP server {server_id}",
+            )
+            raise RuntimeError(f"agent {agent_id} is not assigned MCP server {server_id}")
         if name not in server.allowed_tools:
+            self._record_intent(
+                stage=stage,
+                agent_id=agent_id,
+                server_id=server_id,
+                tool=name,
+                arguments=arguments,
+                tool_call_id=tool_call_id,
+                status="denied",
+                error=f"MCP tool is not allowlisted on {server_id}: {name}",
+            )
             raise RuntimeError(f"MCP tool is not allowlisted on {server_id}: {name}")
         validate_mcp_server(server)
         started_at = _utc_now()
+        self._record_intent(
+            stage=stage,
+            agent_id=agent_id,
+            server_id=server_id,
+            tool=name,
+            arguments=arguments,
+            tool_call_id=tool_call_id,
+            status="started",
+            server=server,
+        )
         try:
             result = asyncio.run(
                 asyncio.wait_for(
@@ -199,6 +249,25 @@ class ToolRuntime:
                 )
             )
             text = _bounded_text(result, self.config.max_tool_output_chars)
+        except asyncio.TimeoutError as exc:
+            # MCP-01: after a timeout the remote side effect is unknown; record
+            # outcome_unknown and refuse to pretend the call did not happen.
+            self._record_receipt(
+                stage=stage,
+                agent_id=agent_id,
+                server=server,
+                tool=name,
+                arguments=arguments,
+                response="",
+                status="outcome_unknown",
+                started_at=started_at,
+                error=f"timed out after {self.config.tool_timeout_seconds}s; remote side effect state unknown",
+                tool_call_id=tool_call_id,
+            )
+            raise RuntimeError(
+                f"MCP tool {server_id}/{name} timed out after {self.config.tool_timeout_seconds}s "
+                "(outcome_unknown): verify the remote side effect before retrying"
+            ) from exc
         except Exception as exc:
             self._record_receipt(
                 stage=stage,
@@ -210,6 +279,7 @@ class ToolRuntime:
                 status="failed",
                 started_at=started_at,
                 error=str(exc),
+                tool_call_id=tool_call_id,
             )
             raise RuntimeError(f"MCP tool {server_id}/{name} failed: {exc}") from exc
         self._record_receipt(
@@ -221,8 +291,37 @@ class ToolRuntime:
             response=text,
             status="success",
             started_at=started_at,
+            tool_call_id=tool_call_id,
         )
         return text
+
+    def _record_intent(
+        self,
+        *,
+        stage: str,
+        agent_id: str,
+        server_id: str,
+        tool: str,
+        arguments: dict[str, Any],
+        tool_call_id: str,
+        status: str,
+        error: str = "",
+        server: MCPServerConfig | None = None,
+    ) -> None:
+        """Record an intent that may never reach a real connection (MCP-02)."""
+        self._record_receipt(
+            stage=stage,
+            agent_id=agent_id,
+            server=server
+            or MCPServerConfig(server_id=server_id or "unknown", url="", allowed_tools=[tool]),
+            tool=tool,
+            arguments=arguments,
+            response="",
+            status=status,
+            started_at=_utc_now(),
+            error=error,
+            tool_call_id=tool_call_id,
+        )
 
     def _record_receipt(
         self,
@@ -236,6 +335,7 @@ class ToolRuntime:
         status: str,
         started_at: str,
         error: str = "",
+        tool_call_id: str = "",
     ) -> None:
         with _RECEIPT_LOCK:
             path = self.run_dir / TOOL_RECEIPTS_JSON
@@ -243,14 +343,16 @@ class ToolRuntime:
             receipts = current.get("receipts") if isinstance(current.get("receipts"), list) else []
             receipt = {
                 "receipt_id": len(receipts) + 1,
+                "tool_call_id": tool_call_id or uuid.uuid4().hex,
                 "revision": _workflow_revision(self.run_dir),
                 "stage": stage,
                 "agent_id": agent_id,
                 "server_id": server.server_id,
                 "transport": server.transport,
-                "endpoint_origin": _endpoint_origin(server.url),
+                "endpoint_origin": _endpoint_origin(server.url) if server.url else "",
                 "tool": tool,
-                "effect": "read_only",
+                "effect": "declared_read_only",
+                "argument_keys": sorted(str(key) for key in arguments),
                 "request_sha256": _digest(arguments),
                 "response_sha256": hashlib.sha256(response.encode("utf-8")).hexdigest() if response else "",
                 "response_chars": len(response),
@@ -260,7 +362,7 @@ class ToolRuntime:
                 "error": str(error or "").replace("\n", " ")[:280],
             }
             receipts = [*receipts, receipt][-MAX_TOOL_RECEIPTS:]
-            write_json(path, {"schema_version": 1, "receipts": receipts})
+            write_json(path, {"schema_version": 2, "receipts": receipts})
 
 
 async def _call_mcp_tool(server: MCPServerConfig, name: str, arguments: dict[str, Any]) -> Any:
@@ -293,7 +395,29 @@ async def _call_mcp_tool_low_level(
         read_stream, write_stream, *_ = streams
         async with ClientSession(read_stream, write_stream) as session:
             await session.initialize()
+            tools_result = await session.list_tools()
+            verify_tool_capability(getattr(tools_result, "tools", []), name)
             return await session.call_tool(name, arguments=arguments)
+
+
+def verify_tool_capability(tools: list[Any], name: str) -> None:
+    """MCP-01: capability contract before calling.
+
+    The tool must exist on the server, and a tool advertising
+    ``readOnlyHint=False`` is refused under the read-only policy. Missing
+    annotations are allowed (older servers) — the receipt records the gap,
+    because a client-side hint can never guarantee server behaviour.
+    """
+    tool = next((item for item in tools if getattr(item, "name", "") == name), None)
+    if tool is None:
+        available = ",".join(sorted(getattr(item, "name", "") for item in tools))
+        raise RuntimeError(f"MCP server does not expose tool {name!r} (available: {available or 'none'})")
+    annotations = getattr(tool, "annotations", None)
+    read_only_hint = getattr(annotations, "readOnlyHint", None) if annotations is not None else None
+    if read_only_hint is False:
+        raise RuntimeError(
+            f"MCP tool {name!r} advertises readOnlyHint=False; refusing to call it under a read-only policy"
+        )
 
 
 def _read_skill_file(skills_root: Path, skill_id: str) -> str:

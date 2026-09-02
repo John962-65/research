@@ -133,7 +133,7 @@ PYTHONPATH=src python3 -m research_agent library --runs-dir runs --query "robot 
 ## 安全模型
 
 - **两个人工 gate**：文献证据门（`approval.json`）与 local/benchmark 执行门（`03-execution-approval.json`），都有主题绑定哈希与实质性意见校验；退回意见会解析为结构化约束注入后续阶段。
-- **执行隔离**：`execution.allowed_commands` 二进制白名单（默认 `python3`/`pytest`）+ `command_safety` 禁止解释器动态代码执行（`python -c`、`node --eval` 等）+ 子进程环境变量剥离密钥 + 超时与输出上限。模拟执行器结果恒标记 `status=simulated`，下游审计强制 `smoke_only/review_required` 降级，不因模拟结果宣称科学结论。
+- **受限本地执行**（SANDBOX-01：这不是容器级 sandbox）：`execution.allowed_commands` 二进制白名单（默认 `python3`/`pytest`）+ `command_safety` 禁止解释器动态代码执行（`python -c`、`node --eval` 等）+ 子进程环境变量剥离密钥 + 超时与输出上限。不可信代码的正式强隔离需要容器或独立 worker，当前版本不宣称具备。模拟执行器结果恒标记 `status=simulated`，下游审计强制 `smoke_only/review_required` 降级，不因模拟结果宣称科学结论。
 - **密钥安全**：run-config 快照脱敏；LLM 账本只记长度/哈希；MCP 凭据限定专用 env 命名空间；env API key 只发给与其声明来源一致的 base URL。
 - **Web 安全**：默认仅回环监听、Host/Origin 校验、body/response 大小上限、回退等危险操作需要预览 token 与原因。
 

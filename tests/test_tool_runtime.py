@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import json
 import os
 import unittest
 
@@ -185,6 +186,105 @@ class ToolRuntimeTest(unittest.TestCase):
                 stage="research_planning",
                 agent_id="gap_analyst",
             )
+
+
+class ToolIntentReceiptTest(unittest.TestCase):
+    """MCP-02: every tool intent (denied/started/failed) leaves a receipt."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.project_root = Path(self._tmp.name)
+        (self.project_root / "run").mkdir()
+        self.runtime = _runtime(self.project_root)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _receipts(self) -> list[dict]:
+        from research_agent.tool_runtime import TOOL_RECEIPTS_JSON
+
+        path = self.project_root / "run" / TOOL_RECEIPTS_JSON
+        if not path.exists():
+            return []
+        return json.loads(path.read_text(encoding="utf-8")).get("receipts", [])
+
+    def test_denied_intent_recorded_when_server_disabled(self) -> None:
+        runtime = _runtime(self.project_root, mcp_servers=[_mcp_server(enabled=False)])
+        with self.assertRaises(RuntimeError):
+            runtime.call(
+                {"server_id": "local-docs", "name": "search_docs", "arguments": {"q": "x"}},
+                stage="research_planning",
+                agent_id="gap_analyst",
+            )
+        receipts = self._receipts()
+        self.assertEqual(receipts[-1]["status"], "denied")
+        self.assertTrue(receipts[-1]["tool_call_id"])
+        self.assertIn("not enabled", receipts[-1]["error"])
+
+    def test_denied_intent_recorded_for_unauthorized_agent(self) -> None:
+        with self.assertRaises(RuntimeError):
+            self.runtime.call(
+                {"server_id": "local-docs", "name": "search_docs", "arguments": {}},
+                stage="research_planning",
+                agent_id="gap_analyst",
+                authorized_servers=["other-server"],
+            )
+        receipts = self._receipts()
+        self.assertEqual(receipts[-1]["status"], "denied")
+        self.assertIn("not assigned", receipts[-1]["error"])
+
+    def test_denied_intent_recorded_for_non_allowlisted_tool(self) -> None:
+        with self.assertRaises(RuntimeError):
+            self.runtime.call(
+                {"server_id": "local-docs", "name": "write_file", "arguments": {}},
+                stage="research_planning",
+                agent_id="gap_analyst",
+            )
+        receipts = self._receipts()
+        self.assertEqual(receipts[-1]["status"], "denied")
+        self.assertIn("not allowlisted", receipts[-1]["error"])
+
+    def test_receipt_carries_argument_shape_and_declared_effect(self) -> None:
+        with self.assertRaises(RuntimeError):
+            self.runtime.call(
+                {"server_id": "local-docs", "name": "write_file", "arguments": {"path": "x", "data": "y"}},
+                stage="research_planning",
+                agent_id="gap_analyst",
+            )
+        receipt = self._receipts()[-1]
+        self.assertEqual(receipt["effect"], "declared_read_only")
+        self.assertEqual(receipt["argument_keys"], ["data", "path"])
+        self.assertNotIn("x", receipt["request_sha256"])
+
+
+class ToolCapabilityCheckTest(unittest.TestCase):
+    """MCP-01: capability verification before calling."""
+
+    def test_missing_tool_rejected(self) -> None:
+        from types import SimpleNamespace
+        from research_agent.tool_runtime import verify_tool_capability
+
+        tools = [SimpleNamespace(name="other_tool", annotations=None)]
+        with self.assertRaises(RuntimeError) as caught:
+            verify_tool_capability(tools, "search_docs")
+        self.assertIn("does not expose tool", str(caught.exception))
+
+    def test_writable_annotation_rejected(self) -> None:
+        from types import SimpleNamespace
+        from research_agent.tool_runtime import verify_tool_capability
+
+        annotations = SimpleNamespace(readOnlyHint=False)
+        tools = [SimpleNamespace(name="search_docs", annotations=annotations)]
+        with self.assertRaises(RuntimeError) as caught:
+            verify_tool_capability(tools, "search_docs")
+        self.assertIn("readOnlyHint=False", str(caught.exception))
+
+    def test_read_only_hint_and_missing_annotations_allowed(self) -> None:
+        from types import SimpleNamespace
+        from research_agent.tool_runtime import verify_tool_capability
+
+        verify_tool_capability([SimpleNamespace(name="search_docs", annotations=SimpleNamespace(readOnlyHint=True))], "search_docs")
+        verify_tool_capability([SimpleNamespace(name="search_docs", annotations=None)], "search_docs")
 
 
 class ParseCallTest(unittest.TestCase):

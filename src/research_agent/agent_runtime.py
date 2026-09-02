@@ -248,6 +248,7 @@ class AgentRoutedLLM:
                 request,
                 stage=prepared.route.stage,
                 agent_id=prepared.route.agent_id,
+                authorized_servers=list(prepared.route.mcp_servers),
             )
             user = (
                 f"{user}\n\n"
