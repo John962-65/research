@@ -43,6 +43,9 @@ class PreparedAgentRequest:
     route: RouteDecision
     system: str
     user: str
+    # SKILL-02: the skill records (id + content sha256) actually injected into
+    # this request, so the ledger can bind a call to the exact skill content.
+    skill_records: tuple[dict[str, Any], ...] = ()
 
 
 AGENT_TASKS = [
@@ -214,7 +217,12 @@ class AgentRoutedLLM:
             "Follow the caller's output schema exactly."
         )
         routed_system = "\n\n".join(value for value in [role_prompt, tool_context, system] if value)
-        return PreparedAgentRequest(route=route, system=routed_system, user=user)
+        return PreparedAgentRequest(
+            route=route,
+            system=routed_system,
+            user=user,
+            skill_records=tuple(dict(record) for record in skill_records),
+        )
 
     def complete_prepared(self, prepared: PreparedAgentRequest) -> str:
         client = self._client_for(prepared.route)

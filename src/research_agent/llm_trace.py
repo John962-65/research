@@ -45,6 +45,7 @@ class LLMTraceEntry:
     task_type: str = ""
     route_id: str = ""
     skills: list[str] = field(default_factory=list)
+    skill_hashes: list[str] = field(default_factory=list)
     mcp_servers: list[str] = field(default_factory=list)
     workflow_revision: int = 0
 
@@ -129,6 +130,7 @@ class TracedLLM:
                     stage=stage,
                     purpose=purpose,
                     route=route,
+                    skill_records=_prepared_skill_records(prepared),
                 )
                 _publish_activity(self.run_dir, metadata, status="failed", detail=budget_error)
                 raise RuntimeError(budget_error)
@@ -146,6 +148,7 @@ class TracedLLM:
                     stage=stage,
                     purpose=purpose,
                     route=route,
+                    skill_records=_prepared_skill_records(prepared),
                 )
                 _publish_activity(self.run_dir, metadata, status="failed", detail=str(exc))
                 raise
@@ -161,6 +164,7 @@ class TracedLLM:
                 stage=stage,
                 purpose=purpose,
                 route=route,
+                skill_records=_prepared_skill_records(prepared),
             )
             _publish_activity(self.run_dir, metadata, status="completed")
             return response, call_id
@@ -256,6 +260,7 @@ class TracedLLM:
         stage: str,
         purpose: str,
         route: Any = None,
+        skill_records: tuple[dict[str, Any], ...] = (),
     ) -> int:
         entries = _read_entries(self.run_dir / LLM_TRACE_JSON)
         entry = LLMTraceEntry(
@@ -280,6 +285,11 @@ class TracedLLM:
             task_type=_route_value(route, "stage") or _stage(stage),
             route_id=_route_value(route, "route_id"),
             skills=_route_list(route, "skills"),
+            skill_hashes=[
+                f"{record.get('skill_id', '')}:{str(record.get('sha256', ''))[:16]}"
+                for record in skill_records
+                if isinstance(record, dict)
+            ],
             mcp_servers=_route_list(route, "mcp_servers"),
             workflow_revision=_workflow_revision(self.run_dir),
             base_url=_redact_url(_entry_base_url(route, self.inner, self.config)),
@@ -288,6 +298,11 @@ class TracedLLM:
         write_json(self.run_dir / LLM_TRACE_JSON, report)
         write_text(self.run_dir / LLM_TRACE_MD, render_llm_trace_markdown(report))
         return entry.call_id
+
+
+def _prepared_skill_records(prepared: Any) -> tuple[dict[str, Any], ...]:
+    records = getattr(prepared, "skill_records", ())
+    return tuple(record for record in records if isinstance(record, dict))
 
 
 def trace_llm(llm: LLM, run_dir: Path, config: LLMConfig) -> LLM:
@@ -491,6 +506,7 @@ def _read_entries(path: Path) -> list[LLMTraceEntry]:
             "task_type": "",
             "route_id": "",
             "skills": [],
+            "skill_hashes": [],
             "mcp_servers": [],
             "workflow_revision": 0,
             **item,

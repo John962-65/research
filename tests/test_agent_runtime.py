@@ -7,6 +7,7 @@ import os
 import unittest
 from unittest import mock
 
+from research_agent.llm_trace import _read_entries, complete_with_purpose_detail, trace_llm
 from research_agent.agent_runtime import (
     DEFAULT_ROLE_SKILLS,
     AgentRoutedLLM,
@@ -35,6 +36,14 @@ def _skills_root(project_root: Path, skill_ids: list[str]) -> None:
         (directory / "SKILL.md").write_text(
             f"# {skill_id}\n\n- Follow the {skill_id} contract.\n", encoding="utf-8"
         )
+
+
+class _FakeLLM:
+    model = "fake-model"
+    base_url = LOCAL_BASE_URL
+
+    def complete(self, system: str, user: str) -> str:
+        return "输出"
 
 
 class RoleModelRouterTest(unittest.TestCase):
@@ -215,6 +224,76 @@ class AgentRoutedLLMTest(unittest.TestCase):
         client = routed._client_for(routed.router.resolve(stage="research_planning"))
         self.assertEqual(client.temperature, 0.3)
         self.assertEqual(client.max_tokens, 512)
+
+
+class SkillFingerprintTest(unittest.TestCase):
+    """SKILL-02: effective skill content is hashed into the checkpoint and the
+    per-call ledger, so changing skill content invalidates old checkpoints."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.project_root = Path(self._tmp.name)
+        self.run_dir = self.project_root / "run"
+        self.run_dir.mkdir()
+        _skills_root(self.project_root, ["evidence-grounding", "skeptical-review"])
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_checkpoint_includes_effective_default_skills_when_enabled(self) -> None:
+        import research_agent.pipeline as pipeline_module
+
+        config = AgentConfig(
+            llm=LLMConfig(base_url=LOCAL_BASE_URL, model="m"),
+            multi_agent=MultiAgentConfig(enabled=True, roles=[AgentRoleConfig(agent_id="skeptical_reviewer")]),
+        )
+        contract = pipeline_module._checkpoint_contract("主题", config)
+        skill_records = [
+            item
+            for item in contract["configured_inputs"]
+            if str(item.get("configured_path", "")).startswith("skill:")
+        ]
+        self.assertTrue(skill_records)
+        self.assertTrue(all(item.get("skill_source") == "default" for item in skill_records))
+        self.assertTrue(all(item.get("sha256") for item in skill_records))
+
+        # Changing which default skills bind to a role changes the fingerprint.
+        with mock.patch.dict(
+            "research_agent.agent_runtime.DEFAULT_ROLE_SKILLS",
+            {"skeptical_reviewer": ["evidence-grounding"]},
+        ):
+            changed = pipeline_module._checkpoint_contract("主题", config)
+        self.assertNotEqual(changed["fingerprint"], contract["fingerprint"])
+
+    def test_checkpoint_has_no_skill_records_when_multi_agent_disabled(self) -> None:
+        import research_agent.pipeline as pipeline_module
+
+        config = AgentConfig(llm=LLMConfig(base_url=LOCAL_BASE_URL, model="m"))
+        contract = pipeline_module._checkpoint_contract("主题", config)
+        skill_records = [
+            item
+            for item in contract["configured_inputs"]
+            if str(item.get("configured_path", "")).startswith("skill:")
+        ]
+        self.assertEqual(skill_records, [])
+
+    def test_ledger_records_skill_content_hashes(self) -> None:
+        config = AgentConfig(
+            llm=LLMConfig(base_url=LOCAL_BASE_URL, model="m"),
+            multi_agent=MultiAgentConfig(enabled=True, roles=[AgentRoleConfig(agent_id="skeptical_reviewer")]),
+        )
+        routed = AgentRoutedLLM(config, self.project_root, self.run_dir)
+        # Stub the client build: the ledger must record the skill content that
+        # prepare_request bound, regardless of what the endpoint returns.
+        with mock.patch.object(routed, "_client_for", return_value=_FakeLLM()):
+            traced = trace_llm(routed, self.run_dir, config.llm)
+            complete_with_purpose_detail(traced, "sys", "user", stage="paper_review_loop", purpose="review")
+        entries = _read_entries(self.run_dir / "run-llm-ledger.json")
+        self.assertTrue(entries)
+        hashes = entries[-1].skill_hashes
+        self.assertTrue(hashes)
+        self.assertTrue(all(item.startswith("skeptical-review:") for item in hashes))
+        self.assertTrue(all(len(item.split(":")[1]) == 16 for item in hashes))
 
 
 if __name__ == "__main__":

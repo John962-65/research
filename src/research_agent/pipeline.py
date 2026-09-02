@@ -4272,6 +4272,43 @@ def _configured_input_records(config: AgentConfig) -> list[dict[str, Any]]:
             }
         )
     project_root = Path(__file__).resolve().parents[2]
+    # SKILL-02: the fingerprint must cover the skills that will actually be
+    # injected, i.e. the effective binding (explicit role skills or the
+    # built-in defaults), not just explicitly configured ones. Skipped while
+    # multi_agent is disabled so legacy checkpoints stay resumable.
+    if config.multi_agent.enabled:
+        from .agent_runtime import DEFAULT_ROLE_SKILLS
+
+        role_map = {role.agent_id: role for role in config.multi_agent.roles}
+        for agent_id in sorted(set(role_map) | set(DEFAULT_ROLE_SKILLS)):
+            role = role_map.get(agent_id)
+            if role is not None and role.skills:
+                effective_skills = list(role.skills)
+                skill_source = "explicit"
+            else:
+                effective_skills = list(DEFAULT_ROLE_SKILLS.get(agent_id, []))
+                skill_source = "default"
+            for skill_id in effective_skills:
+                path = project_root / "skills" / str(skill_id) / "SKILL.md"
+                try:
+                    resolved_path = str(path.resolve())
+                except OSError:
+                    resolved_path = str(path)
+                if resolved_path in seen:
+                    continue
+                seen.add(resolved_path)
+                safe_file = path.is_file() and not path.is_symlink()
+                records.append(
+                    {
+                        "configured_path": f"skill:{skill_id}",
+                        "resolved_path": resolved_path,
+                        "exists": safe_file,
+                        "sha256": _file_sha256(path) if safe_file else "",
+                        "agent_id": agent_id,
+                        "skill_source": skill_source,
+                        "agent_dependency": True,
+                    }
+                )
     for role in config.multi_agent.roles:
         for skill_id in role.skills:
             path = project_root / "skills" / str(skill_id) / "SKILL.md"
