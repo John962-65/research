@@ -1158,6 +1158,15 @@ class RunStore:
         write_json(out_dir / RUN_DIAGNOSTIC_JSON, diagnostic)
         write_text(out_dir / RUN_DIAGNOSTIC_MD, render_diagnostic_markdown(diagnostic))
         write_run_recovery_plan_artifacts(out_dir, status="failed")
+        try:
+            from .workflow_graph import read_workflow_status
+            from .workflow_state import append_node_event
+
+            current_node = str(read_workflow_status(out_dir).get("current_node") or "")
+            if current_node:
+                append_node_event(out_dir, node_id=current_node, event_type="failed", detail=diagnostic.summary)
+        except Exception:
+            pass
         self._update(
             run_id,
             status="failed",
@@ -1249,6 +1258,12 @@ class RunStore:
         record["agent_trajectory"] = _read_public_agent_trajectory(out_dir)
         record["agent_observability"] = _read_public_agent_observability(out_dir)
         record["workflow"] = read_workflow_status(out_dir)
+        try:
+            from .workflow_state import read_node_states
+
+            record["node_states"] = read_node_states(out_dir)
+        except Exception:
+            record["node_states"] = {}
         record["llm_ledger_calls"] = _llm_ledger_call_count(out_dir)
         record["template_only"] = record.get("stage") == "completed" and record["llm_ledger_calls"] == 0
         record["human_gate_audit"] = _read_public_human_gate_audit(out_dir)

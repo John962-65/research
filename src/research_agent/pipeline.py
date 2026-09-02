@@ -225,6 +225,7 @@ from .submission_check import SUBMISSION_CHECK_JSON, SUBMISSION_CHECK_MD, render
 from .submission_package import SUBMISSION_PACKAGE_JSON, SUBMISSION_PACKAGE_MD, SUBMISSION_PACKAGE_ZIP, write_submission_package_artifacts
 from .writing import markdown_to_latex, write_paper_markdown
 from .run_lease import acquire_run_lease
+from .workflow_state import append_node_event, append_node_events, stage_to_node_events
 from .workflow_graph import begin_workflow_node, update_workflow_stage
 
 
@@ -2279,6 +2280,16 @@ def _run_after_review_approval(
             },
             notes=["论文 LLM、审稿 LLM 和后续投稿阶段均未调用。"],
         )
+        # STATE-01: writing and its downstream review/revision nodes are
+        # deliberately skipped in the writing-blocked branch.
+        try:
+            append_node_events(
+                out_dir,
+                [("paper_writing", "skipped"), ("paper_review", "skipped"), ("paper_revision", "skipped")],
+                detail="writing_blocked",
+            )
+        except Exception:
+            pass
         return
 
     paper_path = out_dir / "06-paper.md"
@@ -4062,11 +4073,39 @@ def _write_state(out_dir: Path, topic: str, stage: str) -> None:
     }
     write_json(out_dir / "state.json", state)
     update_workflow_stage(out_dir, topic, stage)
+    _emit_node_state_events(out_dir, stage)
+
+
+def _emit_node_state_events(out_dir: Path, stage: str) -> None:
+    """STATE-01: adapt pipeline state transitions into node events."""
+    try:
+        if stage in {"cancelled", "failed"}:
+            from .workflow_graph import read_workflow_status
+
+            current_node = str(read_workflow_status(out_dir).get("current_node") or "")
+            if current_node:
+                append_node_event(
+                    out_dir,
+                    node_id=current_node,
+                    event_type="cancelled" if stage == "cancelled" else "failed",
+                    detail=f"state={stage}",
+                )
+            return
+        pairs = stage_to_node_events(stage)
+        if pairs:
+            append_node_events(out_dir, pairs, detail=f"state={stage}")
+    except Exception:
+        # State bookkeeping must never break the pipeline.
+        return
 
 
 def _stage_begin(out_dir: Path, topic: str, node_id: str) -> None:
     """Mark a workflow node as running while its (possibly long) work executes."""
     begin_workflow_node(out_dir, topic, node_id)
+    try:
+        append_node_event(out_dir, node_id=node_id, event_type="started", detail=f"state={node_id}_started")
+    except Exception:
+        return
 
 
 def _write_run_config_snapshot(out_dir: Path, config: AgentConfig) -> None:

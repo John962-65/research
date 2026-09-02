@@ -594,6 +594,23 @@ def _apply_rollback_locked(
         moved_files=moved_files,
         moved_directories=moved_directories,
     )
+    # STATE-01: nodes from the target onward were invalidated by this rollback.
+    try:
+        from .workflow_state import append_node_event
+
+        target_index = _node_index(target)
+        for node in WORKFLOW_NODES[target_index:]:
+            if node.node_id == "completed":
+                continue
+            append_node_event(
+                run_dir,
+                node_id=node.node_id,
+                event_type="rolled_back",
+                revision=_safe_int(journal.get("revision"), 0),
+                detail=f"rollback archive {archive_id}",
+            )
+    except Exception:
+        pass
     journal["state"] = "completed"
     journal["metadata_committed"] = True
     journal["updated_at"] = _utc_now()

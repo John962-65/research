@@ -320,6 +320,7 @@ def build_run_integrity_audit(topic: str, run_dir: Path) -> dict[str, Any]:
         _artifact_inventory_check(run_dir),
         _json_validity_check(run_dir),
         _state_check(state),
+        _workflow_state_check(run_dir),
         *_human_gate_checks(run_dir, approval, manifest),
         *_execution_gate_checks(run_dir, execution_approval, runbook, manifest),
         *_freshness_checks(run_dir, manifest),
@@ -766,6 +767,27 @@ def _manifest_hash_issues(run_dir: Path, artifacts: list[Any]) -> list[str]:
         if digest != expected:
             issues.append(rel)
     return issues
+
+
+def _workflow_state_check(run_dir: Path) -> dict[str, Any] | None:
+    """STATE-01: node execution events must be graph-order consistent."""
+    try:
+        from .workflow_graph import WORKFLOW_NODES
+        from .workflow_state import read_node_states, validate_node_state_consistency
+
+        states = read_node_states(run_dir)
+        issues = validate_node_state_consistency(states, [node.node_id for node in WORKFLOW_NODES])
+    except Exception:
+        return None
+    if not issues:
+        return _item("workflow_state", "node_state_consistency", "pass", "节点执行事件与图顺序一致。", "无需处理。")
+    return _item(
+        "workflow_state",
+        "node_state_consistency",
+        "block",
+        "；".join(issues[:3]),
+        "核对 run-node-events.json 与产物归属；不要采信来源不明的完成状态。",
+    )
 
 
 def _active_events(run_dir: Path, manifest: dict[str, Any]) -> list[Any]:
