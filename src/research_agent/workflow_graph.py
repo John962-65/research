@@ -11,6 +11,7 @@ import os
 import secrets
 import shutil
 import time
+from fnmatch import fnmatch
 
 from .artifacts import write_json, sha256_file as _sha256_file, utc_now as _utc_now, read_json_dict as _read_json
 from .provenance import RunManifestRecorder
@@ -136,7 +137,18 @@ _LLM_STAGE_TO_NODE = {
 }
 
 _NODE_PATTERNS = {
-    "research_planning": ["00-research-plan.*"],
+    # ART-01: nodes own the artifacts they produce. A file that matches no
+    # node's ownership is reported by rollback previews as unowned and is
+    # never archived automatically.
+    "research_planning": [
+        "00-question.md",
+        "00-human-brief.*",
+        "00-prior-run-lessons.*",
+        "00-prior-run-library.*",
+        "00-open-source-lessons.*",
+        "00-research-plan.*",
+        "00-preflight.*",
+    ],
     "literature_review": ["01-*", "approval.json"],
     "literature_context": [
         "01-context.*",
@@ -173,6 +185,49 @@ _NODE_DIRECTORIES = {
     "paper_revision": ["submission-package"],
     "finalization": ["submission-package"],
 }
+
+# Run-level files belong to the run, not to any workflow node; they are never
+# part of a rollback archive and never reported as unowned.
+RUN_LEVEL_FILES = (
+    ".lease",
+    "state.json",
+    "workflow-status.json",
+    "run-manifest.json",
+    "run-manifest.md",
+    "run-llm-ledger.json",
+    "run-llm-ledger.md",
+    "run-config.json",
+    "run-checkpoint-contract.json",
+    "run-tool-receipts.json",
+    "cancel.json",
+)
+
+
+def node_artifact_registry() -> dict[str, Any]:
+    """The declared artifact ownership per workflow node (ART-01)."""
+    return {
+        "schema_version": 1,
+        "nodes": [
+            {
+                "node_id": node.node_id,
+                "patterns": list(_NODE_PATTERNS.get(node.node_id, [])),
+                "directories": list(_NODE_DIRECTORIES.get(node.node_id, [])),
+            }
+            for node in WORKFLOW_NODES
+        ],
+        "run_level_files": list(RUN_LEVEL_FILES),
+    }
+
+
+def owning_nodes_for_artifact(relative: str) -> list[str]:
+    """Which nodes claim an artifact path; empty means unowned."""
+    owners = [
+        node.node_id
+        for node in WORKFLOW_NODES
+        if any(fnmatch(relative, pattern) for pattern in _NODE_PATTERNS.get(node.node_id, []))
+        or any(relative == directory or relative.startswith(f"{directory}/") for directory in _NODE_DIRECTORIES.get(node.node_id, []))
+    ]
+    return owners
 
 _LOCKS_GUARD = Lock()
 _STATUS_LOCKS: dict[str, Lock] = {}
@@ -304,6 +359,7 @@ def build_rollback_preview(run_dir: Path, target: str) -> dict[str, Any]:
     patterns, directory_names = _rollback_patterns_and_directories(target_id)
     files = _matching_files(run_dir, patterns)
     directories = [name for name in directory_names if _safe_directory(run_dir, name).is_dir()]
+    unowned_files = _unowned_files(run_dir)
     artifact_index = [_file_record(run_dir, name) for name in files]
     directory_index = [_directory_record(run_dir, name) for name in directories]
     file_count = len(artifact_index) + sum(int(item["files"]) for item in directory_index)
@@ -344,6 +400,7 @@ def build_rollback_preview(run_dir: Path, target: str) -> dict[str, Any]:
         "directories_to_archive": directories,
         "artifact_index": artifact_index,
         "directory_index": directory_index,
+        "unowned_files": unowned_files,
         "file_count": file_count,
         "total_bytes": total_bytes,
         "review_reapproval_required": review_reapproval,
@@ -951,6 +1008,35 @@ def _matching_files(run_dir: Path, patterns: list[str]) -> list[str]:
             if path.is_file() and _is_relative_to(path, run_dir):
                 values.append(str(path.relative_to(run_dir)))
     return sorted(_unique(values))
+
+
+def _unowned_files(run_dir: Path, *, limit: int = 200) -> list[str]:
+    """Files present in the run that no node claims (ART-01, informational).
+
+    Unowned files are surfaced by rollback previews but never archived
+    automatically.
+    """
+    all_patterns = [pattern for node in WORKFLOW_NODES for pattern in _NODE_PATTERNS.get(node.node_id, [])]
+    owned_directories = [
+        directory for node in WORKFLOW_NODES for directory in _NODE_DIRECTORIES.get(node.node_id, [])
+    ]
+    unowned: list[str] = []
+    if not run_dir.is_dir():
+        return unowned
+    for path in sorted(run_dir.rglob("*")):
+        if len(unowned) >= limit:
+            break
+        if not path.is_file() or path.is_symlink() or not _is_relative_to(path, run_dir):
+            continue
+        relative = str(path.relative_to(run_dir))
+        if relative in RUN_LEVEL_FILES:
+            continue
+        if any(fnmatch(relative, pattern) for pattern in all_patterns):
+            continue
+        if any(relative == directory or relative.startswith(f"{directory}/") for directory in owned_directories):
+            continue
+        unowned.append(relative)
+    return unowned
 
 
 def _file_record(run_dir: Path, relative: str) -> dict[str, Any]:
