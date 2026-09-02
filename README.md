@@ -86,17 +86,24 @@ Web UI 的 run 详情页有同样的「回退重跑」按钮：选择目标 → 
 enabled = true
 task_models = { research_planning = "model-a", paper_review_loop = "model-b" }
 
-[multi_agent.roles.gap_analyst]
+# 角色是数组（array-of-tables）；agent_id 必须是内置角色之一。
+# 角色凭据只能来自环境变量：跨 origin 的 endpoint 必须成对声明
+# base_url_env / api_key_env，且两者解析出的 origin 一致，
+# 否则 preflight 直接拒绝（全局字面 API Key 不会发给其他域名）。
+[[multi_agent.roles]]
+agent_id = "gap_analyst"
 model = "model-a"
-base_url = "https://api.deepseek.com/v1"   # 可选：该角色使用独立 endpoint
-api_key_env = "DEEPSEEK_API_KEY"           # 角色凭据只能来自环境变量
+base_url_env = "DEEPSEEK_BASE_URL"   # 例如 https://api.deepseek.com/v1
+api_key_env = "DEEPSEEK_API_KEY"
 
-[multi_agent.roles.skeptical_reviewer]
+[[multi_agent.roles]]
+agent_id = "skeptical_reviewer"
 model = "model-b"
-skills = ["skeptical-review"]              # 不配置时使用内置默认绑定
+skills = ["skeptical-review"]        # 不配置时使用内置默认绑定
 mcp_servers = ["local-docs"]
 
-[multi_agent.mcp_servers.local-docs]
+[[multi_agent.mcp_servers]]
+server_id = "local-docs"
 transport = "streamable-http"
 url = "http://127.0.0.1:8000/mcp"
 allowed_tools = ["search_docs"]

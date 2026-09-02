@@ -7641,8 +7641,10 @@ def _multi_agent_config_from_payload(
         skills = _string_list_value(role_skills[agent_id]) if agent_id in role_skills else role.skills
         servers = _string_list_value(role_servers[agent_id]) if agent_id in role_servers else role.mcp_servers
         is_enabled = _bool_from_payload(role_enabled[agent_id]) if agent_id in role_enabled else role.enabled
-        existing_roles[normalized] = AgentRoleConfig(
-            agent_id=normalized,
+        # Partial patch: keep fields the payload does not mention, including the
+        # role's endpoint/credential binding (base_url, base_url_env, api_key_env).
+        existing_roles[normalized] = replace(
+            role,
             model=model,
             enabled=is_enabled,
             skills=skills,

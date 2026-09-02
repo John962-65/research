@@ -295,6 +295,88 @@ class RollbackApprovalInvalidationTest(unittest.TestCase):
             )
 
 
+class WebRolePatchRoundTripTest(unittest.TestCase):
+    """WEB-02: a partial web patch must keep the role's endpoint binding."""
+
+    def test_partial_patch_preserves_endpoint_fields(self) -> None:
+        import research_agent.web_server as web_server
+
+        current = MultiAgentConfig(
+            enabled=True,
+            roles=[
+                AgentRoleConfig(
+                    agent_id="gap_analyst",
+                    model="model-a",
+                    base_url="http://127.0.0.1:10/v1",
+                    base_url_env="ROLE_BASE_URL",
+                    api_key_env="ROLE_API_KEY",
+                    skills=["evidence-grounding"],
+                )
+            ],
+        )
+        patched = web_server._multi_agent_config_from_payload({"agent_models": {"gap_analyst": "model-a2"}}, current)
+        role = patched.roles[0]
+        self.assertEqual(role.model, "model-a2")
+        self.assertEqual(role.base_url, "http://127.0.0.1:10/v1")
+        self.assertEqual(role.base_url_env, "ROLE_BASE_URL")
+        self.assertEqual(role.api_key_env, "ROLE_API_KEY")
+        self.assertEqual(role.skills, ["evidence-grounding"])
+        self.assertTrue(role.enabled)
+
+
+class DocTomlFixtureTest(unittest.TestCase):
+    """DOC-01: every TOML snippet in the docs must parse as a real config."""
+
+    @staticmethod
+    def _toml_blocks(text: str) -> list[str]:
+        blocks = re.findall(r"```toml\n(.*?)```", text, re.DOTALL)
+        return [block for block in blocks if "multi_agent" in block]
+
+    def test_readme_multi_agent_toml_parses(self) -> None:
+        readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+        blocks = self._toml_blocks(readme)
+        self.assertTrue(blocks, "README must contain a multi_agent TOML example")
+        for index, block in enumerate(blocks):
+            with TemporaryDirectory() as tmp:
+                path = Path(tmp) / f"readme-block-{index}.toml"
+                path.write_text(block, encoding="utf-8")
+                config = load_config(path)
+            self.assertTrue(config.multi_agent.enabled)
+            self.assertTrue(config.multi_agent.roles)
+            for role in config.multi_agent.roles:
+                self.assertTrue(role.agent_id)
+
+    def test_examples_config_parses(self) -> None:
+        config = load_config(PROJECT_ROOT / "examples" / "config.toml")
+        self.assertFalse(config.multi_agent.enabled)
+
+    def test_examples_multi_agent_section_parses_when_enabled(self) -> None:
+        text = (PROJECT_ROOT / "examples" / "config.toml").read_text(encoding="utf-8")
+        lines = text.splitlines()
+        start = lines.index("[multi_agent]")
+        toml_shape = re.compile(r"^# (\[\[?[^\]]+\]\]?|\w[\w_]*\s*=.*)$")
+        activated_lines: list[str] = []
+        for line in lines[start:]:
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                match = toml_shape.match(stripped)
+                if match:
+                    activated_lines.append(match.group(1))
+            else:
+                activated_lines.append(line)
+        # The shipped example keeps multi_agent disabled; flip it on to prove
+        # the documented role/server syntax is valid for the real parser.
+        activated = "\n".join(activated_lines).replace("enabled = false", "enabled = true", 1)
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "activated.toml"
+            path.write_text(activated, encoding="utf-8")
+            config = load_config(path)
+        self.assertTrue(config.multi_agent.enabled)
+        role_ids = {role.agent_id for role in config.multi_agent.roles}
+        self.assertIn("gap_analyst", role_ids)
+        self.assertIn("skeptical_reviewer", role_ids)
+        self.assertTrue(config.multi_agent.mcp_servers)
+
 
 if __name__ == "__main__":
     unittest.main()

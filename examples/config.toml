@@ -80,19 +80,26 @@ enabled = false
 # tool_timeout_seconds = 15
 # max_tool_output_chars = 16000
 
-# [multi_agent.roles.gap_analyst]
+# Roles are an array of tables ([[multi_agent.roles]]), each with an agent_id.
+# A role endpoint that differs from the global one must declare a PAIRED
+# base_url_env / api_key_env (both env vars, same origin): the global literal
+# api_key is never sent to a different origin, and preflight rejects the run
+# when the credential origin cannot be proven.
+# [[multi_agent.roles]]
+# agent_id = "gap_analyst"
 # model = "model-a"
-# base_url = "https://api.deepseek.com/v1"   # optional per-role endpoint
-# base_url_env = "DEEPSEEK_BASE_URL"          # optional env var for the endpoint
-# api_key_env = "DEEPSEEK_API_KEY"            # role credentials must come from env
+# base_url_env = "DEEPSEEK_BASE_URL"          # e.g. https://api.deepseek.com/v1
+# api_key_env = "DEEPSEEK_API_KEY"            # must be sent to that same origin
 # skills = ["evidence-grounding"]
 # mcp_servers = ["local-docs"]
 
-# [multi_agent.roles.skeptical_reviewer]
+# [[multi_agent.roles]]
+# agent_id = "skeptical_reviewer"
 # model = "model-b"
 # skills = ["skeptical-review"]
 
-# [multi_agent.mcp_servers.local-docs]
+# [[multi_agent.mcp_servers]]
+# server_id = "local-docs"
 # transport = "streamable-http"   # only streamable-http is supported
 # url = "http://127.0.0.1:8000/mcp"
 # allowed_tools = ["search_docs"]
