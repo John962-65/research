@@ -59,6 +59,7 @@ def run_preflight(
     checks.extend(_execution_checks(config))
     checks.extend(_paper_grade_checks(config))
     checks.extend(_multi_agent_credential_checks(config))
+    checks.extend(_llm_route_checks(config))
     checks.extend(_release_checks(config))
     checks.extend(_run_memory_checks(config, run_memory))
     if ping_llm:
@@ -92,6 +93,39 @@ def write_preflight_artifacts(report: PreflightReport, out_dir: Path) -> tuple[P
     write_json(json_path, report)
     write_text(md_path, render_preflight_markdown(report))
     return json_path, md_path
+
+
+def _llm_route_checks(config: AgentConfig) -> list[PreflightCheck]:
+    """ROUTE-01: enumerate every (provider, endpoint, model, credential) route."""
+    from .llm import enumerate_llm_routes
+
+    checks: list[PreflightCheck] = []
+    try:
+        routes = enumerate_llm_routes(config)
+    except Exception as exc:
+        checks.append(PreflightCheck("llm_routes", "fail", f"无法枚举 LLM 路由：{exc}", action="检查 llm 与 multi_agent 配置。"))
+        return checks
+    problems: list[str] = []
+    for route in routes:
+        route_id = str(route.get("route_id") or "")
+        if not route.get("base_url"):
+            problems.append(f"{route_id}: endpoint 未解析")
+        if not route.get("model"):
+            problems.append(f"{route_id}: model 未配置")
+    if problems:
+        checks.append(
+            PreflightCheck(
+                "llm_routes",
+                "fail",
+                "；".join(problems[:4]),
+                detail=f"routes={len(routes)}",
+                action="为每个角色/任务路由补齐 model 与可证明的凭据来源。",
+            )
+        )
+    else:
+        summary = "；".join(f"{route['route_id']}→{route['model'] or '-'}" for route in routes[:4])
+        checks.append(PreflightCheck("llm_routes", "pass", f"{len(routes)} 条路由全部可解析", summary))
+    return checks
 
 
 def _multi_agent_credential_checks(config: AgentConfig) -> list[PreflightCheck]:

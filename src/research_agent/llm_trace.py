@@ -47,6 +47,9 @@ class LLMTraceEntry:
     skills: list[str] = field(default_factory=list)
     skill_hashes: list[str] = field(default_factory=list)
     mcp_servers: list[str] = field(default_factory=list)
+    usage_input_tokens: int = 0
+    usage_output_tokens: int = 0
+    usage_source: str = ""
     workflow_revision: int = 0
 
 
@@ -165,6 +168,7 @@ class TracedLLM:
                 purpose=purpose,
                 route=route,
                 skill_records=_prepared_skill_records(prepared),
+                route_usage=getattr(self.inner, "last_usage", None),
             )
             _publish_activity(self.run_dir, metadata, status="completed")
             return response, call_id
@@ -261,6 +265,7 @@ class TracedLLM:
         purpose: str,
         route: Any = None,
         skill_records: tuple[dict[str, Any], ...] = (),
+        route_usage: dict[str, Any] | None = None,
     ) -> int:
         entries = _read_entries(self.run_dir / LLM_TRACE_JSON)
         entry = LLMTraceEntry(
@@ -291,6 +296,9 @@ class TracedLLM:
                 if isinstance(record, dict)
             ],
             mcp_servers=_route_list(route, "mcp_servers"),
+            usage_input_tokens=_safe_usage_value((route_usage or {}).get("input_tokens")),
+            usage_output_tokens=_safe_usage_value((route_usage or {}).get("output_tokens")),
+            usage_source="provider" if route_usage else "",
             workflow_revision=_workflow_revision(self.run_dir),
             base_url=_redact_url(_entry_base_url(route, self.inner, self.config)),
         )
@@ -301,6 +309,15 @@ class TracedLLM:
 
 
 def _prepared_skill_records(prepared: Any) -> tuple[dict[str, Any], ...]:
+    records = getattr(prepared, "skill_records", ())
+    return tuple(record for record in records if isinstance(record, dict))
+
+
+def _safe_usage_value(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
     records = getattr(prepared, "skill_records", ())
     return tuple(record for record in records if isinstance(record, dict))
 
@@ -508,6 +525,9 @@ def _read_entries(path: Path) -> list[LLMTraceEntry]:
             "skills": [],
             "skill_hashes": [],
             "mcp_servers": [],
+            "usage_input_tokens": 0,
+            "usage_output_tokens": 0,
+            "usage_source": "",
             "workflow_revision": 0,
             **item,
         }

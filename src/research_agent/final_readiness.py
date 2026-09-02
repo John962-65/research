@@ -13,6 +13,7 @@ def build_final_readiness_report(
     submission_report: SubmissionCheckReport | None = None,
     traceability_report: ClaimTraceabilityReport | None = None,
     evidence_integrity: EvidenceIntegrity | None = None,
+    gate_decision: dict | None = None,
 ) -> FinalReadinessReport:
     unsupported_before = _count_support(original_review, "unsupported")
     unsupported_after = _count_support(revised_review, "unsupported")
@@ -51,7 +52,7 @@ def build_final_readiness_report(
         evidence_integrity,
         structured_audits_ready,
     )
-    return FinalReadinessReport(
+    report = FinalReadinessReport(
         topic=topic,
         status=status,
         score_before=original_review.score,
@@ -73,6 +74,34 @@ def build_final_readiness_report(
         traceability_status=traceability_report.status if traceability_report is not None else "",
         traceability_blocking_issues=traceability_report.blocking_issues if traceability_report is not None else [],
         traceability_manual_tasks=traceability_report.manual_tasks if traceability_report is not None else [],
+    )
+    return apply_gate_to_final_readiness(report, gate_decision)
+
+
+def apply_gate_to_final_readiness(
+    report: FinalReadinessReport,
+    gate_decision: dict | None,
+) -> FinalReadinessReport:
+    """GATE-02: a blocked aggregate decision forbids a publishable readiness."""
+    if not gate_decision:
+        return report
+    status = str(gate_decision.get("status") or "")
+    sources = [str(item) for item in gate_decision.get("blocking_sources") or []]
+    if status != "blocked" or not sources:
+        return report
+    blocking = list(dict.fromkeys([*report.blocking_issues, *(f"gate:{source}" for source in sources)]))
+    recommendation = report.recommendation
+    if not report.overridden:
+        recommendation = "最终 Gate 决策为 blocked：在完成修复或提供带 reviewer/reason/revision/verdict 哈希的人工 override 前，不允许 publishable handoff。"
+    from dataclasses import replace as _replace
+
+    return _replace(
+        report,
+        status="blocked",
+        blocking_issues=blocking,
+        recommendation=recommendation,
+        gate_status=status,
+        overridden=report.overridden or bool(gate_decision.get("overridden")),
     )
 
 

@@ -58,6 +58,7 @@ AGENT_TASKS = [
     AgentTask("paper_review_loop", "T07", "skeptical_reviewer", "独立审查论断、统计、引用和局限"),
     AgentTask("paper_revision", "T08", "manuscript_editor", "按复核意见修订且不扩大证据边界"),
     AgentTask("paper_deliberation", "T09", "skeptical_reviewer", "独立给出最终证据 verdict"),
+    AgentTask("statistical_review", "T10", "statistician", "独立审查统计设计、效应量、多重比较与结果边界"),
 ]
 
 _TASK_BY_STAGE = {task.stage: task for task in AGENT_TASKS}
@@ -183,9 +184,10 @@ class AgentRoutedLLM:
         self.run_dir = run_dir.resolve()
         self.router = RoleModelRouter(config)
         self.tool_runtime = ToolRuntime(self.project_root, self.run_dir, config.multi_agent)
-        self._clients: dict[str, LLM] = {}
+        self._clients: dict[tuple[str, str, str, str], LLM] = {}
         self.model = config.llm.model
         self.base_url = config.llm.base_url
+        self.last_usage: dict[str, Any] | None = None
 
     def complete(self, system: str, user: str) -> str:
         prepared = self.prepare_request(system, user, stage="", purpose="")
@@ -227,6 +229,10 @@ class AgentRoutedLLM:
     def complete_prepared(self, prepared: PreparedAgentRequest) -> str:
         client = self._client_for(prepared.route)
         response = client.complete(prepared.system, prepared.user)
+        # COST-01: remember the provider-reported usage of the last call so the
+        # ledger can record real token counts per route.
+        usage = getattr(client, "last_usage", None)
+        self.last_usage = ({**usage, "model": prepared.route.model} if isinstance(usage, dict) else None)
         if not prepared.route.multi_agent_enabled or not prepared.route.mcp_servers:
             return response
         user = prepared.user

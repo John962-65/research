@@ -107,6 +107,9 @@ from .llm_trace import LLM_TRACE_JSON, LLM_TRACE_MD
 from .llm_trace_audit import LLM_TRACE_AUDIT_JSON, LLM_TRACE_AUDIT_MD, write_llm_trace_audit_artifacts
 from .multi_agent_assignment import MULTI_AGENT_ASSIGNMENT_JSON, MULTI_AGENT_ASSIGNMENT_MD, agent_roles_for_text, render_multi_agent_assignment_markdown, write_multi_agent_assignment_artifacts
 from .multi_agent_deliberation import MULTI_AGENT_DELIBERATION_JSON, MULTI_AGENT_DELIBERATION_MD, render_multi_agent_deliberation_markdown, write_multi_agent_deliberation_artifacts
+from .agent_verdict import INDEPENDENT_DELIBERATION_JSON, ROLE_EVIDENCE_VIEWS, run_independent_deliberation
+from .provenance import active_revision
+from .gate_aggregator import aggregate_final_decision, load_human_override, write_gate_decision_artifacts
 from .multi_agent_handoff_audit import MULTI_AGENT_HANDOFF_AUDIT_JSON, MULTI_AGENT_HANDOFF_AUDIT_MD, write_multi_agent_handoff_audit_artifacts
 from .multi_agent_paper_audit import MULTI_AGENT_PAPER_AUDIT_JSON, MULTI_AGENT_PAPER_AUDIT_MD, render_multi_agent_paper_audit_markdown, write_multi_agent_paper_audit_artifacts
 from .query_execution_audit import QUERY_EXECUTION_AUDIT_JSON, QUERY_EXECUTION_AUDIT_MD, write_query_execution_audit_artifacts
@@ -339,6 +342,58 @@ def _run_literature_audit_chain(
         "evidence_mix_report": evidence_mix_report,
         "rescue_report": rescue_report,
     }
+
+
+def _finalize_gate_decision(
+    topic: str,
+    out_dir: Path,
+    config: AgentConfig,
+    llm,
+    *,
+    agent_deliberation: dict[str, Any],
+    claim_consistency: dict[str, Any],
+    citation_grounding: Any,
+    revised_review,
+    resume: bool,
+) -> tuple[dict[str, Any], list[str]]:
+    """GATE-02: aggregate deterministic audits, independent verdicts, and the
+    human override into the one final gate decision; returns (decision, outputs)."""
+    independent_report: dict[str, Any] | None = None
+    independent_outputs: list[str] = []
+    independent_path = out_dir / INDEPENDENT_DELIBERATION_JSON
+    if config.multi_agent.enabled:
+        if resume and independent_path.exists():
+            independent_report = _read_dict(independent_path)
+        else:
+            try:
+                independent_report = run_independent_deliberation(topic, out_dir, config, llm)
+                independent_outputs = [INDEPENDENT_DELIBERATION_JSON, "10-independent-deliberation.md"]
+            except Exception as exc:
+                independent_report = {
+                    "schema_version": 1,
+                    "independent_agent_execution": True,
+                    "verdicts": [],
+                    "status": "block",
+                    "error": str(exc)[:280],
+                }
+    gate_decision = aggregate_final_decision(
+        deterministic_audits={
+            "agent_deliberation": agent_deliberation if isinstance(agent_deliberation, dict) else {},
+            "claim_consistency": claim_consistency if isinstance(claim_consistency, dict) else {},
+            "citation_grounding": {"status": getattr(citation_grounding, "status", "")},
+            "revised_paper_review": {
+                "status": "pass" if getattr(revised_review, "decision", "") in {"accept", "accept_with_minor_revisions"} else "warn"
+            },
+        },
+        independent_deliberation=independent_report,
+        expected_roles=sorted(ROLE_EVIDENCE_VIEWS) if config.multi_agent.enabled else [],
+        revision=active_revision(out_dir),
+        human_override=load_human_override(out_dir),
+    )
+    write_gate_decision_artifacts(out_dir, gate_decision)
+    from dataclasses import asdict as _asdict
+
+    return _asdict(gate_decision), independent_outputs
 
 
 def run_pipeline(topic: str, out_dir: Path, config: AgentConfig) -> Path:
@@ -2519,7 +2574,22 @@ def _run_after_review_approval(
                 out_dir,
             )
             agent_deliberation_outputs = [MULTI_AGENT_DELIBERATION_JSON, MULTI_AGENT_DELIBERATION_MD]
+        gate_decision, gate_outputs = _finalize_gate_decision(
+            topic,
+            out_dir,
+            config,
+            llm,
+            agent_deliberation=agent_deliberation,
+            claim_consistency=claim_consistency if isinstance(claim_consistency, dict) else {},
+            citation_grounding=citation_grounding,
+            revised_review=revised_review,
+            resume=True,
+        )
+        agent_deliberation_outputs = [*agent_deliberation_outputs, *gate_outputs]
         final_readiness = _load_final_readiness_report(final_readiness_path)
+        from .final_readiness import apply_gate_to_final_readiness as _apply_gate
+
+        final_readiness = _apply_gate(final_readiness, gate_decision)
         if not (out_dir / REVISED_PAPER_REVIEW_MD).exists():
             write_text(out_dir / REVISED_PAPER_REVIEW_MD, render_paper_review_markdown(revised_review))
         if not (out_dir / CLAIM_TRACEABILITY_MD).exists():
@@ -2574,7 +2644,18 @@ def _run_after_review_approval(
         availability_report = write_code_data_availability_artifacts(topic, out_dir, revised_paper_md)
         ai_disclosure_report = write_ai_disclosure_artifacts(topic, out_dir)
         submission_report = write_submission_check_artifacts(topic, out_dir, config.paper)
-        final_readiness = build_final_readiness_report(topic, paper_review, revised_review, revision_report, availability_report, submission_report, claim_traceability, evidence_integrity=assess_evidence_integrity(out_dir))
+        gate_decision, gate_outputs = _finalize_gate_decision(
+            topic,
+            out_dir,
+            config,
+            llm,
+            agent_deliberation=agent_deliberation,
+            claim_consistency=claim_consistency if isinstance(claim_consistency, dict) else {},
+            citation_grounding=citation_grounding,
+            revised_review=revised_review,
+            resume=False,
+        )
+        final_readiness = build_final_readiness_report(topic, paper_review, revised_review, revision_report, availability_report, submission_report, claim_traceability, evidence_integrity=assess_evidence_integrity(out_dir), gate_decision=gate_decision)
         write_json(final_readiness_path, final_readiness)
         write_text(out_dir / FINAL_READINESS_MD, render_final_readiness_markdown(final_readiness))
         _write_state(out_dir, topic, "final_readiness_completed")

@@ -195,6 +195,8 @@ def _summary(ledger: dict[str, Any], budget: dict[str, Any], pricing: dict[str, 
     output_chars = _safe_int(ledger.get("total_response_chars"))
     input_tokens = _tokens(input_chars)
     output_tokens = _tokens(output_chars)
+    entries = [item for item in ledger.get("entries", []) if isinstance(item, dict)]
+    usage_calls = [item for item in entries if _safe_int(item.get("usage_input_tokens")) or _safe_int(item.get("usage_output_tokens"))]
     return {
         "total_calls": _safe_int(ledger.get("total_calls")),
         "successful_calls": _safe_int(ledger.get("successful_calls")),
@@ -204,6 +206,9 @@ def _summary(ledger: dict[str, Any], budget: dict[str, Any], pricing: dict[str, 
         "output_chars": output_chars,
         "input_tokens_estimated": input_tokens,
         "output_tokens_estimated": output_tokens,
+        "usage_input_tokens": sum(_safe_int(item.get("usage_input_tokens")) for item in usage_calls),
+        "usage_output_tokens": sum(_safe_int(item.get("usage_output_tokens")) for item in usage_calls),
+        "provider_usage_calls": len(usage_calls),
         "total_duration_seconds": round(sum(_safe_float(stage.get("duration_seconds")) for stage in stages), 3),
         "estimated_cost_usd": _estimated_cost(input_tokens, output_tokens, pricing),
         "call_utilization": budget.get("call_utilization", 0.0),

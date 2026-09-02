@@ -17,7 +17,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from .config import LLMConfig
+from .config import AgentConfig, LLMConfig
 
 
 LLM_MAX_CONCURRENCY_ENV = "RESEARCH_AGENT_LLM_MAX_CONCURRENCY"
@@ -59,6 +59,7 @@ class OpenAICompatibleLLM:
     model: str
     temperature: float | None = None
     max_tokens: int | None = None
+    last_usage: dict[str, int] | None = None
 
     def complete(self, system: str, user: str) -> str:
         base_url = validate_llm_base_url(self.base_url)
@@ -100,6 +101,8 @@ class OpenAICompatibleLLM:
                             ) as response:
                                 response_body = read_limited_response(response, context="LLM completion")
                             data = json.loads(response_body.decode("utf-8"))
+                            if isinstance(data, dict):
+                                self.last_usage = _provider_usage(data)
                             return data["choices"][0]["message"]["content"]
                         except urllib.error.HTTPError as exc:
                             detail = _http_error_detail(exc, secrets=[self.api_key])
@@ -730,6 +733,86 @@ def fetch_provider_models(provider: str, base_url: str, api_key: str, timeout_se
         "base_url": redact_url(resolved_base_url),
         "count": len(fallback)
     }
+
+
+def _provider_usage(data: dict[str, Any]) -> dict[str, int] | None:
+    """COST-01: keep the provider-reported token usage when the API returns it."""
+    usage = data.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    input_tokens = _safe_usage_int(usage.get("prompt_tokens"))
+    output_tokens = _safe_usage_int(usage.get("completion_tokens"))
+    if input_tokens is None and output_tokens is None:
+        return None
+    return {
+        "input_tokens": input_tokens or 0,
+        "output_tokens": output_tokens or 0,
+    }
+
+
+def _safe_usage_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def enumerate_llm_routes(config: AgentConfig) -> list[dict[str, Any]]:
+    """ROUTE-01: every (provider, endpoint, model, credential source) the run may call."""
+    routes: list[dict[str, Any]] = []
+    try:
+        global_base = resolve_llm_base_url(config.llm.provider, config.llm.base_url, config.llm.base_url_env)
+    except ValueError:
+        global_base = ""
+    default_model = config.llm.model or (
+        os.environ.get(config.llm.model_env, "") if config.llm.model_env else ""
+    )
+    routes.append(
+        {
+            "route_id": "global",
+            "provider": config.llm.provider,
+            "base_url": global_base,
+            "model": default_model,
+            "credential_source": "literal" if config.llm.api_key else ("env" if config.llm.api_key_env else "none"),
+            "env_name": "" if config.llm.api_key else config.llm.api_key_env,
+        }
+    )
+    role_map = {role.agent_id: role for role in config.multi_agent.roles}
+    for stage, model in sorted(config.multi_agent.task_models.items()):
+        if model:
+            routes.append(
+                {
+                    "route_id": f"task:{stage}",
+                    "provider": config.llm.provider,
+                    "base_url": global_base,
+                    "model": model,
+                    "credential_source": "global",
+                    "env_name": "",
+                }
+            )
+    for agent_id in sorted(role_map):
+        role = role_map[agent_id]
+        if not role.enabled:
+            continue
+        try:
+            role_base = resolve_llm_base_url(
+                config.llm.provider,
+                role.base_url or config.llm.base_url,
+                role.base_url_env or config.llm.base_url_env,
+            )
+        except ValueError:
+            role_base = ""
+        routes.append(
+            {
+                "route_id": f"role:{agent_id}",
+                "provider": config.llm.provider,
+                "base_url": role_base,
+                "model": role.model or default_model,
+                "credential_source": "env" if role.api_key_env else "global",
+                "env_name": role.api_key_env,
+            }
+        )
+    return routes
 
 
 def build_llm(config: LLMConfig) -> LLM:

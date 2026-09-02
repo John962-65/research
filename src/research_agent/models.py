@@ -698,6 +698,8 @@ class FinalReadinessReport:
     traceability_status: str = ""
     traceability_blocking_issues: list[str] = field(default_factory=list)
     traceability_manual_tasks: list[str] = field(default_factory=list)
+    gate_status: str = ""
+    overridden: bool = False
 
 
 @dataclass(frozen=True)

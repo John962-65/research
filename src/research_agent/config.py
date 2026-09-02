@@ -22,6 +22,10 @@ class LLMConfig:
     output_cost_per_million_tokens: float = 0.0
     temperature: float | None = None
     max_tokens: int | None = None
+    # COST-01: per-model price overrides, keyed by model name with
+    # input/output_cost_per_million_tokens entries; the global prices apply
+    # to models not listed here.
+    model_costs: dict[str, dict[str, float]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
