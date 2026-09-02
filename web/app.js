@@ -599,6 +599,10 @@ function configListValue(value, separator) {
   return String(value || '').trim();
 }
 
+function config_multi_agent(run) {
+  return (run?.config && typeof run.config === 'object') ? (run.config.multi_agent || {}) : {};
+}
+
 function publicRunConfigPayload(run) {
   const config = run?.config;
   if (!config || typeof config !== 'object') return null;
@@ -610,7 +614,9 @@ function publicRunConfigPayload(run) {
   const paperGrade = config.paper_grade || {};
   const release = config.release || {};
   const human = config.human || {};
+  const multiAgent = config.multi_agent || {};
   return {
+    multi_agent_enabled: multiAgent.enabled === true,
     paper_grade_enabled: paperGrade.enabled === true,
     execution_mode: String(execution.mode || 'simulated'),
     llm_provider: String(llm.provider || 'openai-compatible'),
@@ -675,6 +681,7 @@ function applyRunConfigToForm(run) {
   }
   const paperGradeField = els.form.elements.namedItem('paper_grade_enabled');
   if (paperGradeField && 'checked' in paperGradeField) paperGradeField.checked = payload.paper_grade_enabled;
+  loadAgentCatalog().then(() => applyAgentConfigToForm(config_multi_agent(run)));
   state.formConfigRunId = run.id;
   state.runActionBaseline = {...payload};
   syncPaperGradeSecretPolicy();
@@ -1680,7 +1687,20 @@ function runRefreshSignature(run) {
 
 function runStatusSignature(run) {
   if (!run) return '';
-  return JSON.stringify([run.id, run.status, run.stage, run.worker_active === true, run.updated_at || '']);
+  // LIVE-01: include the workflow revision/updated_at and activity status so
+  // agent/model/tool activity refreshes even inside one pipeline stage.
+  const workflow = run.workflow || {};
+  return JSON.stringify([
+    run.id,
+    run.status,
+    run.stage,
+    run.worker_active === true,
+    run.updated_at || '',
+    workflow.revision ?? '',
+    workflow.updated_at || '',
+    workflow.activity_status || '',
+    workflow.current_node || '',
+  ]);
 }
 
 async function refreshRuns(keepSelection = true, forceArtifact = false) {
@@ -3400,7 +3420,96 @@ function payloadFromForm() {
     release_notes: String(form.get('release_notes') || '').trim(),
     target_venue: form.get('target_venue'),
     paper_style: form.get('paper_style'),
+    ...multiAgentFormPayload(),
   };
+}
+
+function multiAgentFormPayload() {
+  const payload = { multi_agent_enabled: Boolean(els.form.elements.namedItem('multi_agent_enabled')?.checked) };
+  const rows = document.querySelectorAll('#agent-rows [data-agent-id]');
+  const models = {}, skills = {}, servers = {}, enabled = {};
+  rows.forEach((row) => {
+    const agentId = row.dataset.agentId;
+    const model = row.querySelector('[data-field="model"]').value.trim();
+    const skillList = row.querySelector('[data-field="skills"]').value.split(',').map(s => s.trim()).filter(Boolean);
+    const serverList = row.querySelector('[data-field="mcp"]').value.split(',').map(s => s.trim()).filter(Boolean);
+    enabled[agentId] = row.querySelector('[data-field="enabled"]').checked;
+    models[agentId] = model;
+    skills[agentId] = skillList;
+    servers[agentId] = serverList;
+  });
+  payload.agent_models = models;
+  payload.agent_skills = skills;
+  payload.agent_mcp_servers = servers;
+  payload.agent_enabled = enabled;
+  const serversText = String(els.form.elements.namedItem('multi_agent_mcp_servers')?.value || '').trim();
+  if (serversText) {
+    try {
+      const parsed = JSON.parse(serversText);
+      if (Array.isArray(parsed)) payload.multi_agent = { mcp_servers: parsed };
+    } catch (error) {
+      // invalid JSON is left to the backend to reject with a clear error
+      payload.multi_agent = { mcp_servers: serversText };
+    }
+  }
+  return payload;
+}
+
+async function loadAgentCatalog() {
+  if (state.agentCatalog) return state.agentCatalog;
+  try {
+    state.agentCatalog = await api('/api/agent-catalog');
+  } catch (error) {
+    state.agentCatalog = { agents: [], skills: [] };
+  }
+  renderAgentRows(state.agentCatalog);
+  return state.agentCatalog;
+}
+
+function renderAgentRows(catalog) {
+  const container = document.querySelector('#agent-rows');
+  if (!container) return;
+  const agents = Array.isArray(catalog.agents) ? catalog.agents : [];
+  const skillOptions = (Array.isArray(catalog.skills) ? catalog.skills : []).map(skill => skill.skill_id);
+  container.innerHTML = agents.map(agent => {
+    const agentId = agent.agent_id;
+    return `<div class="agent-row" data-agent-id="${agentId}" style="border:1px solid var(--line);border-radius:6px;padding:8px;margin-bottom:6px;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <label style="display:flex;align-items:center;gap:4px;font-size:12px;">
+          <input type="checkbox" data-field="enabled" checked> ${agentId}
+        </label>
+        <span style="font-size:11.5px;color:#6b7280;flex:1 1 160px;">${agent.role} · ${agent.responsibility}</span>
+        <input data-field="model" placeholder="模型覆盖（可空）" style="flex:0 1 180px;font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:4px;">
+      </div>
+      <div style="display:flex;gap:8px;margin-top:5px;flex-wrap:wrap;">
+        <input data-field="skills" list="agent-skill-options" placeholder="skills（逗号分隔，可空=默认绑定）" style="flex:1 1 220px;font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:4px;">
+        <input data-field="mcp" placeholder="MCP servers（逗号分隔，可空）" style="flex:1 1 180px;font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:4px;">
+      </div>
+    </div>`;
+  }).join('');
+  const datalist = document.getElementById('agent-skill-options')
+    || document.body.appendChild(Object.assign(document.createElement('datalist'), {id: 'agent-skill-options'}));
+  datalist.innerHTML = skillOptions.map(id => `<option value="${id}"></option>`).join('');
+}
+
+function applyAgentConfigToForm(multiAgent) {
+  const container = document.querySelector('#agent-rows');
+  if (!container) return;
+  const master = els.form.elements.namedItem('multi_agent_enabled');
+  if (master) master.checked = (multiAgent?.enabled === true);
+  const roleMap = {};
+  (Array.isArray(multiAgent?.roles) ? multiAgent.roles : []).forEach(role => { roleMap[role.agent_id] = role; });
+  container.querySelectorAll('[data-agent-id]').forEach((row) => {
+    const role = roleMap[row.dataset.agentId] || {};
+    row.querySelector('[data-field="enabled"]').checked = role.enabled !== false;
+    row.querySelector('[data-field="model"]').value = role.model || '';
+    row.querySelector('[data-field="skills"]').value = (role.skills || []).join(', ');
+    row.querySelector('[data-field="mcp"]').value = (role.mcp_servers || []).join(', ');
+  });
+  const serversField = els.form.elements.namedItem('multi_agent_mcp_servers');
+  if (serversField) serversField.value = Array.isArray(multiAgent?.mcp_servers) && multiAgent.mcp_servers.length
+    ? JSON.stringify(multiAgent.mcp_servers, null, 2)
+    : '';
 }
 
 function setFieldValue(name, value) {
@@ -3584,6 +3693,7 @@ els.tabs.forEach((tab) => {
 });
 
 renderStages('started');
+loadAgentCatalog();
 refreshRuns(false).then(startPolling).catch((error) => {
   els.artifactContent.textContent = `加载失败：${error.message}`;
 });

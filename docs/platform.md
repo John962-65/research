@@ -148,3 +148,16 @@ PYTHONPATH=src python3 -m research_agent approve-execution runs/<run-id> \
 - 统计检验与可视化
 - LaTeX 会议模板
 - 人类审核 gate 与复现实验
+
+## 部署拓扑（DEPLOY-01）
+
+Web 服务自身**不提供 TLS**。默认拓扑是仅回环监听（`127.0.0.1`）+ SSH 隧道访问；
+如果必须远程访问，必须把服务置于 TLS reverse proxy（nginx/Caddy 等）之后，
+由代理终结 TLS、校验来源并转发，且仍不应向不可信用户开放——当前版本的授权
+模型（单用户 Basic Auth 可选、无会话隔离）只适合单机、可信用户场景。
+
+SSE 活动流：`GET /api/runs/{id}/activity?cursor=N` 以 `text/event-stream`
+返回 `run-node-events.json` 中 cursor 之后的事件（`id` 为序号、`event: node`、
+`data` 含 node_id/type/revision），随后发送 `event: done` 并关闭。客户端可以
+携带上次收到的最大 id 作为 cursor 重新请求，实现不丢不重的活动增量；前端
+当前仍使用低频摘要轮询 + ETag 条件请求作为降级路径（WEB-03）。

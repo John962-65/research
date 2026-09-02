@@ -649,6 +649,24 @@
               <button id="release-metadata-lint" class="mini-button" type="button">校验 Release 元数据</button>
             </div>
 
+            <details id="multi-agent-config" style="margin-top:14px;">
+              <summary>智能体与工具（Multi-Agent / Skill / MCP）</summary>
+              <label class="field checkbox-inline" style="display:flex;align-items:center;gap:8px;margin:10px 0;">
+                <input id="multi-agent-enabled" name="multi_agent_enabled" type="checkbox">
+                <span>启用多智能体角色路由（按角色/任务分配模型、注入角色提示与 skill）</span>
+              </label>
+              <p class="field-hint" style="font-size:11.5px;color:#6b7280;margin:0 0 6px;">
+                模型优先级：任务覆盖 &gt; 角色覆盖 &gt; 全局 LLM。角色凭据只能来自环境变量（api_key_env），
+                跨 origin 的 endpoint 必须成对声明 base_url_env / api_key_env。Key 值永不出现在本页面。
+              </p>
+              <div id="agent-rows"></div>
+              <label class="field" style="margin-top:10px;">
+                <span>MCP Servers（JSON 数组；字段同 examples/config.toml 的 [[multi_agent.mcp_servers]]）</span>
+                <textarea id="multi-agent-mcp-servers" name="multi_agent_mcp_servers" rows="4"
+                  placeholder='[{"server_id":"local-docs","url":"http://127.0.0.1:8000/mcp","allowed_tools":["search_docs"],"auth_env":"RESEARCH_AGENT_MCP_LOCAL_DOCS_TOKEN"}]'></textarea>
+              </label>
+            </details>
+
             <div class="form-grid" style="margin-top:12px;">
               <label class="field">
                 <span>目标场景 (Target Venue)</span>

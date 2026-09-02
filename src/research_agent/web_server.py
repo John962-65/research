@@ -12,6 +12,7 @@ import base64
 import binascii
 import hmac
 import ipaddress
+import hashlib
 import json
 import math
 import mimetypes
@@ -1488,6 +1489,16 @@ class ResearchAgentHandler(BaseHTTPRequestHandler):
         if not self._validate_request(require_json=False):
             return
         parsed = urlparse(self.path)
+        if parsed.path == "/api/agent-catalog":
+            # WEB-01: the frontend renders its agent config view from this
+            # catalog instead of hardcoding the role/task collections.
+            from .multi_agent_assignment import AGENT_PROFILES
+
+            catalog = agent_runtime_catalog()
+            catalog["skills"] = list_project_skills(ROOT)
+            catalog["profiles"] = [dict(profile) for profile in AGENT_PROFILES]
+            self._send_json(catalog)
+            return
         if parsed.path == "/api/summary":
             dashboard = build_run_dashboard(RUNS_DIR, limit=100)
             memory = build_run_memory(RUNS_DIR, limit=100)
@@ -1557,9 +1568,9 @@ class ResearchAgentHandler(BaseHTTPRequestHandler):
             if not view and query.get("summary", [""])[0].strip().lower() in {"1", "true", "yes"}:
                 view = "summary"
             if view == "summary":
-                self._send_json({"runs": STORE.list_summary()})
+                self._send_json_with_etag({"runs": STORE.list_summary()})
             elif view in {"", "full", "detail"}:
-                self._send_json({"runs": STORE.list()})
+                self._send_json_with_etag({"runs": STORE.list()})
             else:
                 self._send_json({"error": "unsupported runs view"}, HTTPStatus.BAD_REQUEST)
             return
@@ -2196,7 +2207,10 @@ class ResearchAgentHandler(BaseHTTPRequestHandler):
             if record is None:
                 self._send_json({"error": "run not found"}, HTTPStatus.NOT_FOUND)
                 return
-            self._send_json(record)
+            self._send_json_with_etag(record)
+            return
+        if len(parts) == 4 and parts[3] == "activity":
+            self._send_activity_stream(run_id, parse_qs(query))
             return
         if len(parts) == 4 and parts[3] == "artifact":
             filename = parse_qs(query).get("file", [""])[0]
@@ -2232,6 +2246,42 @@ class ResearchAgentHandler(BaseHTTPRequestHandler):
             return
         self._send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
 
+    def _send_activity_stream(self, run_id: str, query: dict[str, list[str]]) -> None:
+        """WEB-03: activity stream with event ids and revision/attempt data.
+
+        One request returns the events after the cursor and closes; clients
+        that prefer long polling keep re-issuing it with the last event id,
+        which is the documented degradation path beside the summary polling.
+        """
+        try:
+            cursor = int(query.get("cursor", ["0"])[0] or 0)
+        except (TypeError, ValueError):
+            cursor = 0
+        out_dir = STORE.out_dir(run_id)
+        frames: list[str] = []
+        if out_dir is not None and _is_relative_to(out_dir, ROOT):
+            from .workflow_state import read_node_events
+
+            events = read_node_events(out_dir)
+            for index, event in enumerate(events, start=1):
+                if index <= cursor:
+                    continue
+                frames.append(
+                    "id: "
+                    + str(index)
+                    + "\nevent: node\ndata: "
+                    + json.dumps(event, ensure_ascii=False)
+                    + "\n\n"
+                )
+        frames.append("event: done\ndata: {}\n\n")
+        body = "".join(frames).encode("utf-8")
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _serve_static(self, path: str) -> None:
         filename = "index.html" if path in {"", "/"} else path.lstrip("/")
         static_path = (WEB_DIR / filename).resolve()
@@ -2250,6 +2300,18 @@ class ResearchAgentHandler(BaseHTTPRequestHandler):
         if not isinstance(data, dict):
             raise ValueError("JSON body must be an object")
         return data
+
+    def _send_json_with_etag(self, payload: Any) -> None:
+        """WEB-03: conditional GET support for pollers via weak ETag."""
+        body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+        etag = '"' + hashlib.sha256(body).hexdigest()[:16] + '"'
+        if self.headers.get("If-None-Match") == etag:
+            self.send_response(HTTPStatus.NOT_MODIFIED)
+            self.send_header("ETag", etag)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        self._send_bytes(body, "application/json", extra_headers={"ETag": etag})
 
     def _send_json(
         self,
