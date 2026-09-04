@@ -2092,6 +2092,7 @@ def _llm_ping_check(config: AgentConfig, timeout_seconds: float) -> PreflightChe
         request_deadline,
         resolve_llm_api_key,
         resolve_llm_base_url,
+        USER_AGENT,
         validate_llm_provider,
     )
     try:
@@ -2118,7 +2119,7 @@ def _llm_ping_check(config: AgentConfig, timeout_seconds: float) -> PreflightChe
         "model": model,
         "messages": [{"role": "user", "content": "Reply with exactly OK."}],
     }
-    headers = {"Content-Type": "application/json"}
+    headers = {"Content-Type": "application/json", "User-Agent": USER_AGENT}
     last_error = ""
     last_status: int | None = None
     try:

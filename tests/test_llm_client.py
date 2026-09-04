@@ -10,6 +10,7 @@ import urllib.request
 
 from research_agent.config import LLMConfig
 from research_agent.llm import (
+    USER_AGENT,
     OpenAICompatibleLLM,
     _open_url,
     fetch_provider_models,
@@ -101,6 +102,37 @@ class OpenAICompatibleLLMTest(unittest.TestCase):
         payload = json.loads(requests[0].data.decode("utf-8"))
         self.assertEqual(set(payload), {"model", "messages"})
         self.assertEqual(payload["messages"][0]["role"], "system")
+
+    def test_completion_sends_project_user_agent_not_urllib_default(self) -> None:
+        """Cloudflare-fronted gateways answer urllib's default signature with
+        HTTP 403 error code 1010 before the origin sees the request."""
+        captured: list[str] = []
+
+        def fake_urlopen(request, timeout):
+            captured.append(request.get_header("User-agent") or "")
+            return _Response(b'{"choices":[{"message":{"content":"OK"}}]}')
+
+        with patch("research_agent.llm._open_url", side_effect=fake_urlopen):
+            OpenAICompatibleLLM(
+                base_url="http://local.test/v1", api_key="secret", model="model"
+            ).complete("system instruction", "user request")
+
+        self.assertEqual(captured, [USER_AGENT])
+        self.assertNotIn("Python-urllib", captured[0])
+
+    def test_model_discovery_sends_project_user_agent(self) -> None:
+        captured: list[str] = []
+
+        def fake_urlopen(request, timeout):
+            captured.append(request.get_header("User-agent") or "")
+            return _Response(b'{"data":[{"id":"model-a"}]}')
+
+        with patch("research_agent.llm._open_url", side_effect=fake_urlopen):
+            result = fetch_provider_models("openai-compatible", "http://local.test/v1", "secret")
+
+        self.assertTrue(result["success"])
+        self.assertEqual(captured, [USER_AGENT])
+        self.assertNotIn("Python-urllib", captured[0])
 
     def test_retries_429_after_retry_after_delay(self) -> None:
         rate_limit_error = urllib.error.HTTPError(

@@ -27,6 +27,17 @@ DEFAULT_LLM_MAX_CONCURRENCY = 1
 DEFAULT_LLM_MAX_REQUEST_BYTES = 4 * 1024 * 1024
 DEFAULT_LLM_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 MAX_LLM_ATTEMPTS = 10
+
+# urllib's default "Python-urllib/3.x" signature is rejected outright by
+# Cloudflare-fronted OpenAI-compatible gateways with HTTP 403 "error code: 1010"
+# (banned browser signature) before the request reaches the origin. It surfaces as
+# "LLM model discovery exceeded its total timeout budget" rather than an auth
+# error, because every candidate URL and every retry is blocked identically.
+# Measured against such a gateway: no User-Agent -> 403/1010; any non-urllib
+# identifier -> 401 API_KEY_REQUIRED from the origin. Same string
+# literature_sources already sends, so the project presents one client identity.
+USER_AGENT = "research-agent/0.1 (+https://local.research-agent)"
+
 _LLM_SEMAPHORE_LOCK = Lock()
 _LLM_SEMAPHORES: dict[int, BoundedSemaphore] = {}
 _SECRET_QUERY_NAMES = {
@@ -90,7 +101,7 @@ class OpenAICompatibleLLM:
                         request = urllib.request.Request(
                             url,
                             data=body,
-                            headers={"Content-Type": "application/json"},
+                            headers={"Content-Type": "application/json", "User-Agent": USER_AGENT},
                             method="POST",
                         )
                         add_bearer_auth(request, self.api_key)
@@ -669,7 +680,7 @@ def fetch_provider_models(provider: str, base_url: str, api_key: str, timeout_se
     candidate_urls = _candidate_model_urls(resolved_base_url, provider_norm)
     deadline = request_deadline(timeout_seconds, "LLM model discovery")
     
-    headers = {"Content-Type": "application/json"}
+    headers = {"Content-Type": "application/json", "User-Agent": USER_AGENT}
     
     models = []
     error_msg = ""

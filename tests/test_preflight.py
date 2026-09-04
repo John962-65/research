@@ -440,6 +440,38 @@ class PreflightTest(unittest.TestCase):
         self.assertEqual(_MIN_RUN_CALLS_SINGLE_AGENT, len(REQUIRED_STAGE_SPECS))
         self.assertEqual(_MIN_RUN_CALLS_MULTI_AGENT, len(REQUIRED_STAGE_SPECS) + len(ROLE_EVIDENCE_VIEWS))
 
+    def test_llm_ping_sends_project_user_agent(self) -> None:
+        """The ping is the user's connectivity diagnostic, so a gateway that
+        blocks urllib's default signature must not make it report a false
+        connection failure."""
+        from research_agent.llm import USER_AGENT
+
+        captured: list[str] = []
+
+        class _PingResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return None
+
+            def read(self, size: int = -1) -> bytes:
+                body = b'{"choices":[{"message":{"content":"OK"}}]}'
+                return body if size < 0 else body[:size]
+
+        def fake_urlopen(request, timeout):
+            captured.append(request.get_header("User-agent") or "")
+            return _PingResponse()
+
+        config = _budget_config(max_calls=0, max_prompt_chars=0)
+
+        with patch("research_agent.llm._open_url", side_effect=fake_urlopen):
+            check = _llm_ping_check(config, timeout_seconds=5.0)
+
+        self.assertEqual(check.status, "pass")
+        self.assertEqual(captured, [USER_AGENT])
+        self.assertNotIn("Python-urllib", captured[0])
+
     def test_fulltext_paths_are_validated(self) -> None:
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "paper.txt"
