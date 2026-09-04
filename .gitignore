@@ -11,6 +11,13 @@ htmlcov/
 venv/
 env/
 
+# Local deployment credentials. Note `env/` above matches a directory, not a
+# file named `.env`, so these patterns are what actually keep keys out of git.
+.env
+.env.*
+*.env
+!.env.example
+
 logs/
 runs/
 runs-*.json

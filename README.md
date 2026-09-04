@@ -54,11 +54,19 @@ PYTHONPATH=src .venv/bin/python -m research_agent approve runs/demo
 
 如果 `01-review-gate.md` 的状态不是 `pass`，批准时必须填写审核意见；CLI 使用 `--notes`，Web UI 使用“审核意见/修复说明”。系统会同时生成 `01-review-feedback` 和 `01-review-constraints`，后者会把人工意见解析为 baseline、literature、metric、reproducibility、scope 或 safety 等结构化约束，并传给后续 idea 和实验计划阶段。
 
-Web UI（可选）：
+Web UI（可选）。`pip install -e .` 后可直接用 console script：
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m research_agent_web --port 8765
+research-agent-web --host 127.0.0.1 --port 8765
 ```
+
+未安装 console script 时用模块入口（注意是 `research_agent.web_server`，不是 `research_agent_web`）：
+
+```bash
+PYTHONPATH=src .venv/bin/python -m research_agent.web_server --host 127.0.0.1 --port 8765
+```
+
+默认只监听回环地址，此时不需要 token。绑定任何非回环地址都必须先设置至少 16 字符的 `RESEARCH_AGENT_WEB_TOKEN`，且服务自身不提供 TLS——受支持拓扑见 [`docs/platform.md`](docs/platform.md) 的「部署拓扑（DEPLOY-01）」。
 
 ## 回退到任意阶段重跑
 
