@@ -1,0 +1,119 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The documented developer flow installs the dev extra only; the MCP SDK is
+  # an optional extra and tool_runtime.py imports it lazily behind ImportError.
+  tests:
+    name: suite (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    env:
+      # Pin the interpreter so the entry point cannot fall back to a
+      # system python3 that differs from the one that installed the package.
+      RESEARCH_AGENT_PYTHON_BIN: python
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+
+      - name: Full test suite (isolated entry point)
+        run: bash scripts/run_tests.sh
+
+      - name: Docs link check
+        run: python scripts/check_docs.py
+
+  # Same suite with the optional MCP extra installed, so the streamable-http
+  # client paths are exercised against the real SDK rather than only against
+  # the ImportError fallback.
+  tests-with-mcp:
+    name: suite with mcp extra
+    runs-on: ubuntu-latest
+    env:
+      RESEARCH_AGENT_PYTHON_BIN: python
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev,mcp]'
+
+      - name: Full test suite (isolated entry point)
+        run: bash scripts/run_tests.sh
+
+  # The package claims zero third-party runtime dependencies. Assert it in CI
+  # so a future import cannot silently break the auditability argument.
+  zero-runtime-deps:
+    name: zero runtime dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install without extras
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Import every module using only the standard library
+        run: |
+          python - <<'PY'
+          import importlib
+          import pathlib
+          import sys
+
+          root = pathlib.Path("src/research_agent")
+          failures = []
+          for path in sorted(root.rglob("*.py")):
+              if path.name == "__init__.py":
+                  continue
+              module = "research_agent." + path.relative_to(root).with_suffix("").as_posix().replace("/", ".")
+              try:
+                  importlib.import_module(module)
+              except ImportError as exc:
+                  # The mcp extra is optional; its absence is expected here.
+                  if "mcp" in str(exc):
+                      continue
+                  failures.append(f"{module}: {exc}")
+              except Exception as exc:
+                  failures.append(f"{module}: {type(exc).__name__}: {exc}")
+
+          if failures:
+              print("modules failed to import on stdlib alone:")
+              for item in failures:
+                  print(f"  {item}")
+              sys.exit(1)
+          print(f"imported {len(list(root.rglob('*.py'))) - 1} modules with no third-party runtime dependency")
+          PY
