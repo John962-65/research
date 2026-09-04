@@ -48,6 +48,99 @@ class PerfectAgentReadinessTest(unittest.TestCase):
         self.assertEqual(capability.status, "review_required")
         self.assertIn("independent=False", " ".join(capability.evidence))
 
+    def test_independent_deliberation_with_publishable_gate_is_ready(self) -> None:
+        """Regression: only 10-agent-deliberation.json used to be read, so a real
+        independent run could never clear this capability."""
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir()
+            write_json(
+                run_dir / "10-agent-deliberation.json",
+                {
+                    "status": "review_required",
+                    "rules_status": "pass",
+                    "assessment_kind": "deterministic_role_projection",
+                    "independent_agent_execution": False,
+                    "independent_verdict_count": 0,
+                    "consensus": {"decision": "approve"},
+                    "agent_verdicts": [{"agent_id": agent_id, "verdict": "approve"} for agent_id in _DELIBERATION_ROLES],
+                },
+            )
+            write_json(run_dir / "10-independent-deliberation.json", _independent_deliberation_report("pass"))
+            write_json(run_dir / "10-gate-decision.json", {"status": "publishable", "blocking_sources": []})
+
+            capability = _agent_deliberation_check(
+                [SimpleNamespace(id="run")],
+                {"run": run_dir},
+            )
+
+        self.assertEqual(capability.status, "ready")
+        self.assertIn("independent_verdicts=6/6", " ".join(capability.evidence))
+        self.assertIn("gate=publishable", " ".join(capability.evidence))
+
+    def test_projection_claiming_independence_never_satisfies_consensus(self) -> None:
+        """The deterministic projection cannot impersonate independent verdicts,
+        even when its fields assert otherwise."""
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir()
+            write_json(
+                run_dir / "10-agent-deliberation.json",
+                {
+                    "status": "pass",
+                    "assessment_kind": "independent_agent_deliberation",
+                    "independent_agent_execution": True,
+                    "independent_verdict_count": 6,
+                    "consensus": {"decision": "approve", "approve": 6, "revise": 0, "block": 0},
+                    "agent_verdicts": [{"agent_id": f"agent-{index}", "verdict": "approve"} for index in range(6)],
+                },
+            )
+            write_json(run_dir / "10-gate-decision.json", {"status": "publishable", "blocking_sources": []})
+
+            capability = _agent_deliberation_check(
+                [SimpleNamespace(id="run")],
+                {"run": run_dir},
+            )
+
+        self.assertEqual(capability.status, "review_required")
+        self.assertIn("independent=False", " ".join(capability.evidence))
+
+    def test_verdicts_without_ledger_call_id_do_not_count_as_independent(self) -> None:
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir()
+            report = _independent_deliberation_report("pass")
+            for verdict in report["verdicts"]:
+                verdict["call_id"] = 0
+            write_json(run_dir / "10-independent-deliberation.json", report)
+            write_json(run_dir / "10-gate-decision.json", {"status": "publishable", "blocking_sources": []})
+
+            capability = _agent_deliberation_check(
+                [SimpleNamespace(id="run")],
+                {"run": run_dir},
+            )
+
+        self.assertEqual(capability.status, "review_required")
+        self.assertIn("independent_verdicts=0/6", " ".join(capability.evidence))
+
+    def test_blocked_final_gate_downgrades_passing_independent_verdicts(self) -> None:
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir()
+            write_json(run_dir / "10-independent-deliberation.json", _independent_deliberation_report("pass"))
+            write_json(
+                run_dir / "10-gate-decision.json",
+                {"status": "blocked", "blocking_sources": ["deterministic:claim_consistency"]},
+            )
+
+            capability = _agent_deliberation_check(
+                [SimpleNamespace(id="run")],
+                {"run": run_dir},
+            )
+
+        self.assertEqual(capability.status, "review_required")
+        self.assertIn("gate=blocked", " ".join(capability.evidence))
+
     def test_blocks_empty_project_without_gold_assets(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -2348,6 +2441,60 @@ def _write_statistics_run(run_dir: Path, *, design: bool) -> None:
     write_json(run_dir / "04-statistics.json", report)
 
 
+_DELIBERATION_ROLES = (
+    "evidence_curator",
+    "method_architect",
+    "benchmark_engineer",
+    "statistician",
+    "skeptical_reviewer",
+    "manuscript_editor",
+)
+
+
+def _independent_deliberation_report(status: str) -> dict:
+    """Mirror the report written by ``agent_verdict.run_independent_deliberation``.
+
+    Each verdict carries a distinct positive ``call_id`` so it is verifiable
+    against the LLM ledger, which is what makes it count as independent.
+    """
+    verdicts = []
+    for index, agent_id in enumerate(_DELIBERATION_ROLES):
+        blocked = status == "block" and agent_id == "statistician"
+        verdicts.append(
+            {
+                "agent_id": agent_id,
+                "role": agent_id,
+                "responsibility": f"{agent_id} responsibility",
+                "verdict": "block" if blocked else "pass",
+                "confidence": 0.8,
+                "evidence_refs": ["01-context.json"],
+                "counter_evidence": [],
+                "required_actions": ["repair statistics"] if blocked else [],
+                "summary": f"{agent_id} independent verdict",
+                "route_id": f"T09:{agent_id}",
+                "model": "test-model",
+                "call_id": index + 1,
+                "revision": 0,
+                "attempt_id": "deliberation-r0",
+                "prompt_sha256": "0" * 16,
+                "response_sha256": "1" * 16,
+                "independent": True,
+                "created_at": "2026-09-03T00:00:00+00:00",
+                "validation_error": "",
+            }
+        )
+    return {
+        "schema_version": 1,
+        "topic": "gold",
+        "independent_agent_execution": True,
+        "revision": 0,
+        "attempt_id": "deliberation-r0",
+        "verdicts": verdicts,
+        "status": status,
+        "created_at": "2026-09-03T00:00:00+00:00",
+    }
+
+
 def _write_gold_run(
     run_dir: Path,
     *,
@@ -2409,11 +2556,17 @@ def _write_gold_run(
     if claim_traceability:
         write_json(run_dir / "10-claim-traceability.json", {"status": "pass", "total_claims": 3, "traceability_score": 1.0, "blocked_claims": 0, "blocking_issues": []})
         write_json(run_dir / "10-agent-claim-audit.json", {"status": "pass", "claim_owner_summary": {"total_claims": 3, "mapped_claims": 3, "orphaned_claims": 0}, "blocking_issues": [], "manual_tasks": []})
-        write_json(run_dir / "10-agent-deliberation.json", {"status": "pass", "assessment_kind": "independent_agent_deliberation", "independent_agent_execution": True, "independent_verdict_count": 6, "consensus": {"decision": "approve", "approve": 6, "revise": 0, "block": 0}, "agent_verdicts": [{"agent_id": f"agent-{index}", "verdict": "approve"} for index in range(6)], "blocking_issues": [], "manual_tasks": []})
+        # The deterministic projection is what multi_agent_deliberation.py really
+        # emits: never status=pass, never claiming independence.
+        write_json(run_dir / "10-agent-deliberation.json", {"status": "review_required", "rules_status": "pass", "assessment_kind": "deterministic_role_projection", "independent_agent_execution": False, "independent_verdict_count": 0, "consensus": {"decision": "approve", "approve": 6, "revise": 0, "block": 0}, "agent_verdicts": [{"agent_id": agent_id, "verdict": "approve"} for agent_id in _DELIBERATION_ROLES], "blocking_issues": [], "manual_tasks": []})
+        write_json(run_dir / "10-independent-deliberation.json", _independent_deliberation_report("pass"))
+        write_json(run_dir / "10-gate-decision.json", {"status": "publishable", "blocking_sources": [], "warning_sources": [], "missing_verdict_roles": [], "overridden": False, "inputs": {"independent_deliberation": True, "verdict_count": len(_DELIBERATION_ROLES)}})
     else:
         write_json(run_dir / "10-claim-traceability.json", {"status": "block", "total_claims": 3, "traceability_score": 0.0, "blocked_claims": 1, "blocking_issues": ["trace blocked"]})
         write_json(run_dir / "10-agent-claim-audit.json", {"status": "review_required", "claim_owner_summary": {"total_claims": 3, "mapped_claims": 2, "orphaned_claims": 1}, "blocking_issues": [], "manual_tasks": ["repair claim owner"]})
-        write_json(run_dir / "10-agent-deliberation.json", {"status": "review_required", "consensus": {"decision": "revise", "approve": 3, "revise": 2, "block": 0}, "agent_verdicts": [{"agent_id": f"agent-{index}", "verdict": "revise"} for index in range(5)], "blocking_issues": [], "manual_tasks": ["repair verdict"]})
+        write_json(run_dir / "10-agent-deliberation.json", {"status": "review_required", "assessment_kind": "deterministic_role_projection", "independent_agent_execution": False, "independent_verdict_count": 0, "consensus": {"decision": "revise", "approve": 3, "revise": 2, "block": 0}, "agent_verdicts": [{"agent_id": agent_id, "verdict": "revise"} for agent_id in _DELIBERATION_ROLES[:5]], "blocking_issues": [], "manual_tasks": ["repair verdict"]})
+        write_json(run_dir / "10-independent-deliberation.json", _independent_deliberation_report("block"))
+        write_json(run_dir / "10-gate-decision.json", {"status": "blocked", "blocking_sources": ["verdict:statistician"], "warning_sources": [], "missing_verdict_roles": [], "overridden": False, "inputs": {"independent_deliberation": True, "verdict_count": len(_DELIBERATION_ROLES)}})
     write_json(
         run_dir / "13-run-economics-audit.json",
         {

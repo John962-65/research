@@ -12,9 +12,11 @@ import re
 import socket
 import tomllib
 
+from .agent_verdict import INDEPENDENT_DELIBERATION_JSON
 from .artifacts import write_json, write_text, cell as _cell, read_json_dict as _read_json
 from .benchmark_plan import _domain_candidates
 from .config import PaperGradeConfig, load_config
+from .gate_aggregator import GATE_DECISION_JSON
 from .gold_run_doctor import (
     _gold_manifest_inventory_check,
     _gold_required_artifact_hashes,
@@ -22,6 +24,7 @@ from .gold_run_doctor import (
     _gold_unsafe_required_artifacts,
     build_gold_environment_lint,
 )
+from .multi_agent_deliberation import MULTI_AGENT_DELIBERATION_JSON
 from .run_summary import RunSummary, build_run_dashboard
 from .submission_package_zip import submission_package_zip_blocking_issue
 
@@ -1016,22 +1019,43 @@ def _agent_claim_ownership_check(runs: list[RunSummary], run_dirs: dict[str, Pat
 
 
 def _agent_deliberation_check(runs: list[RunSummary], run_dirs: dict[str, Path]) -> PerfectAgentCapability:
+    """Score independent multi-agent deliberation.
+
+    Only the independent execution layer (``10-independent-deliberation.json``)
+    plus a non-blocked final gate can satisfy this capability. The deterministic
+    projection (``10-agent-deliberation.json``) hardcodes
+    ``independent_agent_execution=False`` and never reports ``status=pass``, so
+    it is surfaced as context only and can never be mistaken for consensus.
+    """
     pass_runs: list[str] = []
     review_runs: list[str] = []
     for run in runs:
-        audit = _read_json(run_dirs[run.id] / "10-agent-deliberation.json")
-        status = str(audit.get("status") or "")
-        consensus = audit.get("consensus") if isinstance(audit.get("consensus"), dict) else {}
-        decision = str(consensus.get("decision") or "")
-        agent_count = len(audit.get("agent_verdicts", [])) if isinstance(audit.get("agent_verdicts"), list) else 0
-        independent = audit.get("independent_agent_execution") is True
-        independent_count = int(audit.get("independent_verdict_count") or 0)
-        if status == "pass" and decision == "approve" and independent and independent_count >= 4:
-            pass_runs.append(f"{run.id}: agents={agent_count}, consensus={decision}")
-        elif status:
+        run_dir = run_dirs[run.id]
+        independent = _read_json(run_dir / INDEPENDENT_DELIBERATION_JSON)
+        projection = _read_json(run_dir / MULTI_AGENT_DELIBERATION_JSON)
+        gate = _read_json(run_dir / GATE_DECISION_JSON)
+        verdicts = independent.get("verdicts") if isinstance(independent.get("verdicts"), list) else []
+        # A verdict only counts as independent when it carries its own ledger
+        # call id; that is what makes it verifiable against run-llm-ledger.json.
+        verified = [
+            item
+            for item in verdicts
+            if isinstance(item, dict) and item.get("independent") is True and _int(item.get("call_id")) > 0
+        ]
+        executed = independent.get("independent_agent_execution") is True
+        status = str(independent.get("status") or "")
+        gate_status = str(gate.get("status") or "")
+        projection_status = str(projection.get("status") or "")
+        if executed and status == "pass" and len(verified) >= 4 and gate_status == "publishable":
+            pass_runs.append(
+                f"{run.id}: independent_verdicts={len(verified)}/{len(verdicts)}, "
+                f"status={status}, gate={gate_status}"
+            )
+        elif executed or status or projection_status:
             review_runs.append(
-                f"{run.id}: status={status}, decision={decision or '-'}, "
-                f"independent={independent}, independent_verdicts={independent_count}"
+                f"{run.id}: independent={executed}, status={status or '-'}, "
+                f"independent_verdicts={len(verified)}/{len(verdicts)}, gate={gate_status or '-'}, "
+                f"projection={projection_status or '-'}"
             )
     if pass_runs:
         return _capability(
@@ -1042,7 +1066,7 @@ def _agent_deliberation_check(runs: list[RunSummary], run_dirs: dict[str, Path])
             pass_runs[:3],
             [],
             ["继续把独立 Agent deliberation 接入更多 gold runs 和人工审阅界面。"],
-            ["10-agent-deliberation.json", "10-agent-claim-audit.json"],
+            [INDEPENDENT_DELIBERATION_JSON, GATE_DECISION_JSON, "10-agent-claim-audit.json"],
         )
     return _capability(
         "agent_deliberation_consensus",
@@ -1050,9 +1074,13 @@ def _agent_deliberation_check(runs: list[RunSummary], run_dirs: dict[str, Path])
         "review_required" if review_runs else "block",
         "确定性角色规则投影不能替代独立 Agent verdict；需要留下独立上下文与执行证据。",
         review_runs[:4] or ["agent_deliberation_runs=0"],
-        ["没有检测到带独立 Agent 执行证据的 10-agent-deliberation run。"],
+        [
+            "没有检测到带独立 Agent 执行证据的 "
+            f"{INDEPENDENT_DELIBERATION_JSON} run（需 status=pass、至少 4 条带 call id 的独立 verdict，"
+            f"且 {GATE_DECISION_JSON} 为 publishable）。"
+        ],
         ["接入独立 Agent 上下文与调用轨迹后再生成 deliberation；当前规则投影仅供人工复核。"],
-        ["10-agent-deliberation.json", "10-agent-claim-audit.json"],
+        [INDEPENDENT_DELIBERATION_JSON, GATE_DECISION_JSON, "10-agent-claim-audit.json"],
     )
 
 
