@@ -13,13 +13,31 @@
 | 阶段 A（SEC-01 / GATE-01 / DOC-01 / WEB-02） | ✅ 完成 | f675568、74f27e9、e4f8ad0 | SEC-01 与 GATE-01 各自独立提交并带行为级回归测试；README/examples 已作为 TOML fixture 进入测试 |
 | 阶段 B（LOCK-01 / TX-01 / ART-02 / ART-03） | ✅ 完成 | 02b0a85 | 跨进程 flock 租约 + 回退 journal + 幂等恢复 + reason/actor 持久化 + 磁盘余量检查；per-run/global 归档配额与 CLI 归档清理命令仍属后续（ART-03 的完整版） |
 | 阶段 C（REV-01 / TRACE-01 / SKILL-02 / ART-01） | ✅ 完成 | c2c5b95、b163674、f1146ce、d6f9011 | Manifest schema v2（revision/branch_id/node_id/attempt_id/event_id，v1 读兼容）；完整性审计按 active branch 过滤；call_id 贯穿 prepare→call→validate；effective skill 内容哈希进 checkpoint 与账本；节点归属 registry + 未归属文件报告 |
-| 阶段 D（ENGINE-01 / STATE-01） | ✅ 完成 | 5b33e0d | run-node-events.json 追加式事件日志 + 归约器（9 种节点状态、每 revision attempt 列表）；pipeline/rollback/web 失败路径全部接入发射适配器；WorkflowEngine 将 19 条声明边全部实现为可测试谓词（表驱动测试证明无死边）；完整性审计新增 node_state_consistency；API 暴露 node_states。遗留：引擎调度器真正驱动执行仍是阶段 E+ 的逐节点搬迁工作 |
-| 阶段 E（AGENT-01 / GATE-02 / ROUTE-01 / COST-01） | ✅ 完成 | cf74054 | agent_verdict.py 独立执行层（每角色最小证据视图、串行、verdict 绑定 call_id/model/revision/哈希，invalid 按 block）；statistician 获得独立 T10 统计审查任务；GateAggregator 聚合确定性审计 + 独立 verdict + 缺失角色 + 人工 override（需 reviewer/reason/revision/verdict 哈希），blocked 强制 final readiness 为 blocked；ROUTE-01 路由枚举 + preflight llm_routes；COST-01 provider usage 进账本与 economics 汇总，model_costs 价格表按模型计价（provider_cost_usd） |
+| 阶段 D（ENGINE-01 / STATE-01） | ⚠️ 部分完成 | 5b33e0d | run-node-events.json 追加式事件日志 + 归约器（9 种节点状态、每 revision attempt 列表）；pipeline/rollback/web 失败路径全部接入发射适配器；WorkflowEngine 将 19 条声明边全部实现为可测试谓词（表驱动测试证明无死边）；完整性审计新增 node_state_consistency；API 暴露 node_states。**STATE-01 已闭合，ENGINE-01 未闭合**：`workflow_state.WorkflowEngine` 在 `src/` 内被引用 0 次（仅 `tests/test_workflow_state.py` 导入），调度真相仍是 `_run_after_review_approval` 的顺序控制流 +「产物存在即复用」；逐节点搬迁尚未开始，§5 ENGINE-01 的验收标准未满足 |
+| 阶段 E（AGENT-01 / GATE-02 / ROUTE-01 / COST-01） | ✅ 完成 | cf74054 | agent_verdict.py 独立执行层（每角色最小证据视图、串行、verdict 绑定 call_id/model/revision/哈希，invalid 按 block）；statistician 获得独立 T10 统计审查任务；GateAggregator 聚合确定性审计 + 独立 verdict + 缺失角色 + 人工 override（需 reviewer/reason/revision/verdict 哈希），blocked 强制 final readiness 为 blocked；ROUTE-01 路由枚举 + preflight llm_routes；COST-01 provider usage 进账本与 economics 汇总，model_costs 价格表按模型计价（provider_cost_usd）。遗留：合入后尚无任何真实 run 产出 `10-gate-decision.json` / `10-independent-deliberation.json`，见 §0.2 |
 | 阶段 F（MCP-01 / MCP-02 / SANDBOX-01） | ✅ 完成 | 848e4f8 | tools/list 能力核验（工具存在 + readOnlyHint=False 拒绝）；意图级回执（requested/denied/started/success/failed/outcome_unknown，含 tool_call_id、参数 shape、脱敏错误）；超时记 outcome_unknown 不自动重试；README 改称受限本地执行 |
 | 阶段 G（WEB-01 / LIVE-01 / WEB-03 / DEPLOY-01） | ✅ 完成 | 9283edc | /api/agent-catalog + 前端智能体配置视图（角色开关/模型/skill/MCP，Key 永不进页面）；状态签名纳入 workflow revision/updated_at；/api/runs 与详情支持 ETag 304；/api/runs/{id}/activity SSE 事件流（cursor 增量）；docs/platform.md 记录 TLS 拓扑与 SSE 协议 |
-| 阶段 H（TEST-01 / 收尾） | ✅ 完成 | 本次提交 | scripts/run_tests.sh 隔离测试入口（PYTEST_DISABLE_PLUGIN_AUTOLOAD=1）；scripts/check_docs.py Markdown 链接检查；rollback-prune 归档清理 CLI（ART-03 完整版）；备份/恢复/保留策略文档 |
+| 阶段 H（TEST-01 / 收尾） | ⚠️ 部分完成 | b2140d0、CI-01 | scripts/run_tests.sh 隔离测试入口（PYTEST_DISABLE_PLUGIN_AUTOLOAD=1）；scripts/check_docs.py Markdown 链接检查；rollback-prune 归档清理 CLI（ART-03 完整版）；备份/恢复/保留策略文档。**TEST-01 的 CI 部分当时未交付**（无 `.github/`、无 Makefile/tox/nox），已由 CI-01 补齐，见 §0.1 |
 
-验证：阶段 A-H 合入后全量测试 1338 passed, 1 skipped, 72 subtests（经 scripts/run_tests.sh 隔离入口验证）。阶段 A/B 生效后即可解除 §4 的临时运行约束中与凭据和回退审批相关的两项；`local`/`benchmark` 回退后自动执行现在会正确停在执行审批门（批准文件已随回退归档失效）。
+### 0.1 阶段 A-H 之后的接线修复（2026-09-04）
+
+阶段 A-H 标记完成后重新做了一轮对抗式复核，发现五项缺陷。共同特征是：新层的产物写出来了，但下游消费者没有跟着改，而既有测试用伪造的 fixture 掩盖了这一点。
+
+| ID | 问题与证据 | 修复 | 提交 |
+| --- | --- | --- | --- |
+| READY-01 | `perfect_agent_readiness.py:1022` 只读 `10-agent-deliberation.json`。该文件由确定性投影写出：`multi_agent_deliberation.py:96` 把 `independent_agent_execution` 硬编码为 `false`，`:87` 决定 `status` 只会是 `review_required` 或 `block`。阶段 E 的独立层写的是另一个文件（`agent_verdict.py:23`）。`agent_deliberation_consensus` 因此是**永久假阴性**——两个方向都不可能满足。 | 改以独立层为主证据：需 `status=pass`、至少 4 条带正 ledger call id 的独立 verdict、且 `10-gate-decision.json` 为 `publishable`。确定性投影仅作上下文展示，永远不能单独满足该能力（§11 的诚实标注规则）。文件名改为从归属模块导入常量而非字面量，使漂移在导入层就暴露。gold run fixture 原先在投影文件里伪造 `independent_agent_execution=True`，改为写流水线真实产出的三个产物。 | f01699d |
+| PKG-01 | `submission_package.py` 是显式白名单、无 glob，缺 `10-gate-decision.*` 与 `10-independent-deliberation.*`。投稿包携带了备注为"不代表独立 Agent verdict"的确定性投影，却没有真正决定能否 publishable 的裁决。 | 三层按序入包（投影 → 独立 verdict → 最终裁决）。gate decision 设为 `required`：`_finalize_gate_decision` 在 `_run_after_review_approval` 的两次打包（`:2718` 与 `:3011` 的 `submission_package_refresh`）之前都会执行；独立 deliberation 保持 optional，因为仅 `multi_agent` 启用时存在。 | 5a47bef |
+| CFG-01 | `examples/paper-grade-config.toml:5` 有字面 `api_key = "replace-for-real-run"`，与 SEC-01 立场矛盾；`docs/phases/01-literature.md:40` 称该示例"可直接预检"，但命令在修改前后都以退出码 2 结束。 | 示例不再声明任何凭据。写 `api_key_env` 并非更安全而是更误导：`resolve_llm_api_key`（`llm.py:535`）只在 effective endpoint 与可信来源同源时释放 env key，而该文件 `base_url` 指向 discard 端口，key 永远解析不出来。文档改为如实列出两项无条件 fail 与一项环境相关 fail；新增测试扫描全部 example TOML 的未注释 `api_key` 赋值与解析结果。 | 96b19eb |
+| CI-01 | TEST-01 只交付了 `scripts/run_tests.sh`，未交付其明确要求的"在 CI 使用全新环境"；仓库无 `.github/`、无 Makefile/tox/nox。"某个提交上测试通过过"因此只有文档里一行手写记录。 | 三个 job：3.11/3.12 矩阵（仅 dev extra，`RESEARCH_AGENT_PYTHON_BIN` 固定解释器）、mcp extra 全量（让 streamable-http 路径跑在真实 SDK 而非只有 ImportError 回退）、以及"143 个模块纯标准库导入"的零依赖断言（design-notes §5 把该性质作为可信度论据，需被 CI 锁住）。 | aa79d0e |
+| DOC-02 | `README.md:80` 与 `design-notes.md:15` 称"9 个 LLM 任务（T01-T09）"，实际 `agent_runtime.py:52-61` 为 10 个（T10 = statistician 独立统计审查，AGENT-01 引入）；`design-notes.md:16` 称"LLM 侧只有角色化提示 + 模型路由"，已不符两层结构；§0 表把阶段 D 记为 ✅ 完成。 | 任务数改为 T01-T10；design-notes 补两层审计与 `gate_aggregator` 汇总裁决；阶段 D 降级为 ⚠️ 部分完成并注明 ENGINE-01 未闭合；阶段 H 降级为 ⚠️ 部分完成（CI 由 CI-01 补齐）；README 阶段 10 产物清单补入三个新产物，并新增"角色审计分两层"与最终门禁的说明段落。 | 本次提交 |
+
+### 0.2 仍未闭合（阻断 §11 的 M2 对外声明）
+
+- **ENGINE-01 未闭合。** `workflow_state.WorkflowEngine` 在 `src/` 内被引用 **0 次**，仅 `tests/test_workflow_state.py` 导入它。追加式事件日志、状态归约器和 19 条边谓词都已实现并有表驱动测试，但调度真相仍是 `_run_after_review_approval` 的顺序控制流加「产物存在即复用」。§5 ENGINE-01 的验收标准（"把节点定义升级为可执行 registry，由 scheduler 根据状态和条件选边；产物复用成为节点 checkpoint 策略，而不是隐式控制流"）未满足。§12 主张把逐节点搬迁延后到 revision-aware Manifest 与产物契约稳定之后，该判断仍然成立；不成立的是把阶段 D 记为完成。当前状态是**两个执行模型并存，只有一个是真的**。
+- **阶段 E-H 零 live-run 证据。** 截至 2026-09-04，`runs/` 下 95 个 run 中没有任何一个产出 `10-gate-decision.json` 或 `10-independent-deliberation.json`；run 产物的最新修改时间停在 2026-09-02，而阶段 E-H 的提交都在 2026-09-03。阶段 H 验收中的"生成一次真实但低成本的端到端 canary Run，人工核对 revision、角色调用、MCP receipt、审批、成本和最终 gate"尚未执行。因此 READY-01 修好的只是评分器的读取路径：`agent_deliberation_consensus` 要真正变为 ready，仍需一次真实的 multi-agent run。
+- 结论：M2（可信工作流版）的代码与契约测试已到位，但没有端到端运行证据，仍不可对外声明。
+
+验证：阶段 A-H 与 §0.1 五项修复合入后，三种配置各自跑完全量，结果一致为 **1345 passed, 1 skipped, 72 subtests**：Python 3.12 + dev extra（经 `scripts/run_tests.sh` 隔离入口）、Python 3.11 + dev extra、Python 3.12 + dev,mcp extra。CI 定义见 `.github/workflows/ci.yml`。阶段 A/B 生效后即可解除 §4 的临时运行约束中与凭据和回退审批相关的两项；`local`/`benchmark` 回退后自动执行现在会正确停在执行审批门（批准文件已随回退归档失效）。
 
 ## 1. 结论
 

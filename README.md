@@ -22,7 +22,7 @@
 | 07 | 独立复核 | `07-paper-review`、`07-paper-review-calibration` |
 | 08 | 修订计划 | `08-revision-plan` |
 | 09 | 修订稿 | `09-revised-paper`、`09-revision-report`、`09-revision-response-audit` |
-| 10 | 修订后审计 | `10-revised-paper-review`、`10-claim-traceability`、`10-citation-grounding/-coverage`、`10-claim-consistency`、`10-release-metadata`、`10-code-data-availability`、`10-submission-check`、`10-final-readiness` |
+| 10 | 修订后审计 | `10-revised-paper-review`、`10-claim-traceability`、`10-citation-grounding/-coverage`、`10-claim-consistency`、`10-agent-deliberation`（确定性角色投影）、`10-independent-deliberation`（独立角色 verdict，仅 multi_agent 启用时）、`10-gate-decision`（最终门禁裁决）、`10-release-metadata`、`10-code-data-availability`、`10-submission-check`、`10-final-readiness` |
 | 11 | 投稿/归档包 | `11-submission-package.zip` |
 | 12 | 迭代与修复 | `12-next-iteration-plan`、`12-repair-queue`、`12-repair-resolution-audit`、`12-repair-resume-plan` |
 | 13 | 平台审计 | `13-agent-stage-contract`、`13-agent-trajectory`、`13-llm-trace-audit`、`13-run-economics-audit`、`13-agent-observability-audit`、`13-open-source-compliance`、`13-research-scorecard` |
@@ -77,7 +77,14 @@ Web UI 的 run 详情页有同样的「回退重跑」按钮：选择目标 → 
 
 ## 多智能体：角色、模型路由、skill 与 MCP
 
-流水线的 9 个 LLM 任务（T01-T09）绑定到 8 个固定角色画像（literature_scout、evidence_curator、gap_analyst、method_architect、benchmark_engineer、statistician、skeptical_reviewer、manuscript_editor）。`multi_agent.enabled = true` 时，每次 LLM 调用都会注入角色系统提示（你是谁、职责、当前任务），并在账本中记录 agent/task/model。
+流水线的 10 个 LLM 任务（T01-T10）绑定到 8 个固定角色画像（literature_scout、evidence_curator、gap_analyst、method_architect、benchmark_engineer、statistician、skeptical_reviewer、manuscript_editor）。`multi_agent.enabled = true` 时，每次 LLM 调用都会注入角色系统提示（你是谁、职责、当前任务），并在账本中记录 agent/task/model。T10 是 statistician 的独立统计审查任务，审查统计设计、效应量、多重比较与结果边界。
+
+角色审计分两层，彼此独立保存、互不冒充：
+
+- **确定性角色投影**（`10-agent-deliberation`）：用纯规则从既有审计产物重算各角色 verdict，不发起 LLM 调用，`independent_agent_execution` 恒为 `false`，状态只会是 `review_required` 或 `block`。它是第一层安全检查，不能当作多智能体共识。
+- **独立执行层**（`10-independent-deliberation`）：6 个角色（evidence_curator、method_architect、benchmark_engineer、statistician、skeptical_reviewer、manuscript_editor）各自只拿到职责范围内的最小证据视图，串行发起一次角色化 LLM 调用并返回强类型 verdict；每条 verdict 绑定 ledger call id、model、revision 与 prompt/response 哈希，无效或调用失败的角色按 `block` 处理。
+
+两层结果连同确定性审计、缺失角色和人工 override 汇入唯一的最终门禁裁决 `10-gate-decision`：任一来源 block 即为 `blocked`，此时不允许生成 publishable 交付；人工 override 必须记录 reviewer、reason、revision 与被覆盖 verdict 的哈希。
 
 模型路由优先级：`multi_agent.task_models[stage]`（按任务/阶段） > `roles[agent_id].model`（按智能体类型） > `[llm].model`（全局默认）。
 
@@ -171,6 +178,25 @@ read -rsp "OPENAI_API_KEY: " k; printf '\n'; printf '%s\n' "$k" > "$fifo"; unset
 rm -f "$fifo"; rmdir "$fifo_dir"
 ```
 
+## 测试与 CI
+
+本地跑全量测试必须走隔离入口。宿主机可能自动加载 pytest 插件（例如 ROS 测试工具链）并因缺失依赖在收集阶段就中断——那时还没进入项目测试，报错看起来却像业务失败：
+
+```bash
+bash scripts/run_tests.sh      # PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 + 优先使用项目 venv
+python scripts/check_docs.py   # Markdown 相对链接检查
+```
+
+`.github/workflows/ci.yml` 在每次 push 与 PR 上跑三个 job：
+
+| Job | 内容 |
+| --- | --- |
+| `tests` | Python 3.11 / 3.12 矩阵，只装 dev extra（对应文档化的开发流程），跑全量测试与文档链接检查。`RESEARCH_AGENT_PYTHON_BIN` 固定解释器，避免脚本回退到与安装包不同的 `python3` |
+| `tests-with-mcp` | 装上可选 mcp extra 再跑全量，让 streamable-http 客户端路径跑在真实 SDK 上，而不是只覆盖 `tool_runtime` 的 ImportError 回退 |
+| `zero-runtime-deps` | 不装任何 extra，逐个导入 `src/research_agent` 下 143 个模块。零第三方运行时依赖是本项目的可信度论据之一（见 [`docs/design-notes.md`](docs/design-notes.md) §5），这个 job 防止后续某次 import 悄悄破坏它 |
+
+当前基线：三种配置（3.12 + dev、3.11 + dev、3.12 + dev,mcp）各自跑完全量，结果一致为 1345 passed, 1 skipped, 72 subtests。
+
 ## 文档索引
 
 - [`docs/phases/00-planning.md`](docs/phases/00-planning.md) — 研究规划与领域画像
@@ -185,6 +211,7 @@ rm -f "$fifo"; rmdir "$fifo_dir"
 - [`docs/phases/13-14-platform-audits.md`](docs/phases/13-14-platform-audits.md) — 平台审计与完整性交付
 - [`docs/platform.md`](docs/platform.md) — 诊断、溯源、Web UI、LLM 与本地执行
 - [`docs/design-notes.md`](docs/design-notes.md) — 设计借鉴与开源项目对照
+- [`docs/improvement-plan.md`](docs/improvement-plan.md) — 分级 gap register（P0/P1/P2，带 file:line 证据）、阶段 A-H 实施进度，以及 §0.2 明确列出的**尚未闭合项**
 
 ## Scope
 

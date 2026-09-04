@@ -12,8 +12,8 @@
 
 - **CrewAI 的做法**：每个 Agent 声明 role/goal/backstory 与独立的 `llm`；Task 绑定 agent。
 - **AutoGen 的做法**：每个 agent 携带自己的 `model_client` 配置，可在同一个对话中混合不同厂商的模型。
-- **本项目的对应实现**：`multi_agent_assignment.py` 定义 8 个角色画像（agent_id/name/role/responsibility）；`agent_runtime.py` 的 `AGENT_TASKS` 把 9 个流水线任务绑定到角色；`RoleModelRouter` 按优先级路由模型：`task_models[stage]`（按任务） > `roles[id].model`（按角色） > 全局默认；`AgentRoleConfig` 还可为单个角色指定独立 `base_url`（凭据仍只能来自环境变量）。`AgentRoutedLLM` 在每次调用前注入角色 system prompt，账本按 agent/task/model/base_url 记录。
-- **有意的差异**：不做自由的多 agent 对话（AutoGen 的 group chat）；角色是结构化分工 + 规则审计器（`multi_agent_deliberation` 等按角色视角检查既有产物），LLM 侧只有"角色化提示 + 模型路由"。这保证了每条审计结论都能追溯到确定性规则或单次可记账的 LLM 调用。
+- **本项目的对应实现**：`multi_agent_assignment.py` 定义 8 个角色画像（agent_id/name/role/responsibility）；`agent_runtime.py` 的 `AGENT_TASKS` 把 10 个流水线任务（T01-T10）绑定到角色，其中 T10 是为 statistician 增加的独立统计审查任务；`RoleModelRouter` 按优先级路由模型：`task_models[stage]`（按任务） > `roles[id].model`（按角色） > 全局默认；`AgentRoleConfig` 还可为单个角色指定独立 `base_url`（凭据仍只能来自环境变量）。`AgentRoutedLLM` 在每次调用前注入角色 system prompt，账本按 agent/task/model/base_url 记录。
+- **有意的差异**：不做自由的多 agent 对话（AutoGen 的 group chat）。角色协作是两层结构化审计：`multi_agent_deliberation` 用确定性规则按角色视角重算既有产物（不发起调用），`agent_verdict` 再让 6 个角色各自拿最小证据视图独立发起一次 LLM 调用并返回强类型 verdict。两层分开保存、互不冒充，最终由 `gate_aggregator` 汇成唯一裁决。这保证了每条审计结论都能追溯到确定性规则或单次可记账的 LLM 调用。
 
 ## 3. MCP（Model Context Protocol）：只读工具通道
 
