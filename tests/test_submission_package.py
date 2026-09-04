@@ -55,6 +55,10 @@ class SubmissionPackageTest(unittest.TestCase):
             self.assertIn("submission-package/audits/claim-traceability.md", names)
             self.assertIn("submission-package/audits/agent-claim-audit.md", names)
             self.assertIn("submission-package/audits/agent-deliberation.md", names)
+            self.assertIn("submission-package/audits/independent-deliberation.md", names)
+            self.assertIn("submission-package/audits/independent-deliberation.json", names)
+            self.assertIn("submission-package/audits/gate-decision.md", names)
+            self.assertIn("submission-package/audits/gate-decision.json", names)
             self.assertIn("submission-package/audits/citation-grounding.md", names)
             self.assertIn("submission-package/audits/citation-coverage.md", names)
             self.assertIn("submission-package/audits/results-presentation.md", names)
@@ -68,6 +72,35 @@ class SubmissionPackageTest(unittest.TestCase):
             self.assertIn("submission-package/reproducibility/benchmark-readiness.md", names)
             self.assertIn("submission-package/reproducibility/environment-snapshot.md", names)
             self.assertIn("submission-package/provenance/llm-ledger.md", names)
+
+    def test_missing_final_gate_decision_blocks_the_package(self) -> None:
+        """The gate ruling is what authorizes a publishable handoff; building a
+        package without it must block rather than ship silently."""
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            _write_required_artifacts(run_dir)
+            (run_dir / "10-gate-decision.json").unlink()
+            (run_dir / "10-gate-decision.md").unlink()
+
+            report = write_submission_package_artifacts("投稿包测试", run_dir)
+
+        blocked = " ".join(report.blocking_issues)
+        self.assertIn("10-gate-decision.json", blocked)
+        self.assertIn("10-gate-decision.md", blocked)
+
+    def test_independent_deliberation_is_optional_when_multi_agent_disabled(self) -> None:
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            _write_required_artifacts(run_dir)
+            (run_dir / "10-independent-deliberation.json").unlink()
+            (run_dir / "10-independent-deliberation.md").unlink()
+
+            report = write_submission_package_artifacts("投稿包测试", run_dir)
+
+        self.assertFalse(report.blocking_issues)
+        statuses = {item.source_path: item.status for item in report.files}
+        self.assertEqual(statuses["10-independent-deliberation.json"], "optional_missing")
+        self.assertEqual(statuses["10-independent-deliberation.md"], "optional_missing")
 
     def test_submission_package_arcname_guard_rejects_unsafe_paths(self) -> None:
         self.assertEqual(_safe_package_arcname("submission-package/audits/report.json"), "submission-package/audits/report.json")
@@ -221,10 +254,47 @@ def _write_required_artifacts(run_dir: Path) -> None:
         run_dir / "10-agent-claim-audit.json",
         {"status": "pass", "claim_owner_summary": {"total_claims": 0, "mapped_claims": 0, "orphaned_claims": 0}, "blocking_issues": [], "manual_tasks": []},
     )
-    write_text(run_dir / "10-agent-deliberation.md", "# 多智能体 Deliberation")
+    write_text(run_dir / "10-agent-deliberation.md", "# 角色规则审计（非独立 Agent）")
     write_json(
         run_dir / "10-agent-deliberation.json",
-        {"status": "pass", "consensus": {"decision": "approve"}, "agent_verdicts": [], "blocking_issues": [], "manual_tasks": []},
+        {
+            "status": "review_required",
+            "rules_status": "pass",
+            "assessment_kind": "deterministic_role_projection",
+            "independent_agent_execution": False,
+            "independent_verdict_count": 0,
+            "consensus": {"decision": "approve"},
+            "agent_verdicts": [],
+            "blocking_issues": [],
+            "manual_tasks": [],
+        },
+    )
+    write_text(run_dir / "10-independent-deliberation.md", "# 独立多智能体 Deliberation")
+    write_json(
+        run_dir / "10-independent-deliberation.json",
+        {
+            "schema_version": 1,
+            "independent_agent_execution": True,
+            "revision": 0,
+            "attempt_id": "deliberation-r0",
+            "verdicts": [
+                {"agent_id": "statistician", "verdict": "pass", "confidence": 0.8, "call_id": 1, "independent": True}
+            ],
+            "status": "pass",
+        },
+    )
+    write_text(run_dir / "10-gate-decision.md", "# 最终 Gate 决策")
+    write_json(
+        run_dir / "10-gate-decision.json",
+        {
+            "status": "publishable",
+            "blocking_sources": [],
+            "warning_sources": [],
+            "missing_verdict_roles": [],
+            "overridden": False,
+            "override": {},
+            "inputs": {"revision": 0, "independent_deliberation": True, "verdict_count": 1},
+        },
     )
     write_text(run_dir / "10-citation-grounding.md", "# Citation Grounding")
     write_json(
