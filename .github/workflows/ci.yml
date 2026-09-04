@@ -44,7 +44,29 @@ jobs:
         run: bash scripts/prepare_gold_support_runs.sh
 
       - name: Full test suite (isolated entry point)
-        run: bash scripts/run_tests.sh
+        run: |
+          set -o pipefail
+          bash scripts/run_tests.sh --junitxml=pytest-results.xml 2>&1 | tee pytest-output.log
+
+      - name: Publish failure digest to the job summary
+        if: failure()
+        run: |
+          {
+            echo "## Pytest failure digest (${{ github.job }})"
+            echo
+            echo '```'
+            grep -E '^(FAILED|ERROR)' pytest-output.log | head -40 || echo "(no FAILED/ERROR lines captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload full pytest log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-log-${{ github.job }}
+          path: |
+            pytest-output.log
+            pytest-results.xml
 
       - name: Docs link check
         run: python scripts/check_docs.py
@@ -74,7 +96,29 @@ jobs:
         run: bash scripts/prepare_gold_support_runs.sh
 
       - name: Full test suite (isolated entry point)
-        run: bash scripts/run_tests.sh
+        run: |
+          set -o pipefail
+          bash scripts/run_tests.sh --junitxml=pytest-results.xml 2>&1 | tee pytest-output.log
+
+      - name: Publish failure digest to the job summary
+        if: failure()
+        run: |
+          {
+            echo "## Pytest failure digest (${{ github.job }})"
+            echo
+            echo '```'
+            grep -E '^(FAILED|ERROR)' pytest-output.log | head -40 || echo "(no FAILED/ERROR lines captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload full pytest log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-log-${{ github.job }}
+          path: |
+            pytest-output.log
+            pytest-results.xml
 
   # The package claims zero third-party runtime dependencies. Assert it in CI
   # so a future import cannot silently break the auditability argument.
