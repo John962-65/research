@@ -21,7 +21,7 @@
 
 ### 0.1 阶段 A-H 之后的接线修复（2026-09-04）
 
-阶段 A-H 标记完成后重新做了一轮对抗式复核，发现五项缺陷。共同特征是：新层的产物写出来了，但下游消费者没有跟着改，而既有测试用伪造的 fixture 掩盖了这一点。
+阶段 A-H 标记完成后重新做了一轮对抗式复核，共发现七项缺陷。前四项（READY-01 / PKG-01 / CFG-01 / CI-01）共享同一个模式：新层的产物写出来了，但下游消费者没有跟着改，而既有测试用伪造的 fixture 掩盖了这一点。DOC-02 / DOC-03 是文档与代码脱节。BUDGET-01 性质不同——它不是读代码读出来的，而是一次真实 run 失败后从 `run-diagnostics.json` 倒查出来的，说明纯静态复核会漏掉"校验器接受了数学上不可能成功的配置"这一类问题。
 
 | ID | 问题与证据 | 修复 | 提交 |
 | --- | --- | --- | --- |
@@ -29,15 +29,17 @@
 | PKG-01 | `submission_package.py` 是显式白名单、无 glob，缺 `10-gate-decision.*` 与 `10-independent-deliberation.*`。投稿包携带了备注为"不代表独立 Agent verdict"的确定性投影，却没有真正决定能否 publishable 的裁决。 | 三层按序入包（投影 → 独立 verdict → 最终裁决）。gate decision 设为 `required`：`_finalize_gate_decision` 在 `_run_after_review_approval` 的两次打包（`:2718` 与 `:3011` 的 `submission_package_refresh`）之前都会执行；独立 deliberation 保持 optional，因为仅 `multi_agent` 启用时存在。 | 5a47bef |
 | CFG-01 | `examples/paper-grade-config.toml:5` 有字面 `api_key = "replace-for-real-run"`，与 SEC-01 立场矛盾；`docs/phases/01-literature.md:40` 称该示例"可直接预检"，但命令在修改前后都以退出码 2 结束。 | 示例不再声明任何凭据。写 `api_key_env` 并非更安全而是更误导：`resolve_llm_api_key`（`llm.py:535`）只在 effective endpoint 与可信来源同源时释放 env key，而该文件 `base_url` 指向 discard 端口，key 永远解析不出来。文档改为如实列出两项无条件 fail 与一项环境相关 fail；新增测试扫描全部 example TOML 的未注释 `api_key` 赋值与解析结果。 | 96b19eb |
 | CI-01 | TEST-01 只交付了 `scripts/run_tests.sh`，未交付其明确要求的"在 CI 使用全新环境"；仓库无 `.github/`、无 Makefile/tox/nox。"某个提交上测试通过过"因此只有文档里一行手写记录。 | 三个 job：3.11/3.12 矩阵（仅 dev extra，`RESEARCH_AGENT_PYTHON_BIN` 固定解释器）、mcp extra 全量（让 streamable-http 路径跑在真实 SDK 而非只有 ImportError 回退）、以及"143 个模块纯标准库导入"的零依赖断言（design-notes §5 把该性质作为可信度论据，需被 CI 锁住）。 | aa79d0e |
-| DOC-02 | `README.md:80` 与 `design-notes.md:15` 称"9 个 LLM 任务（T01-T09）"，实际 `agent_runtime.py:52-61` 为 10 个（T10 = statistician 独立统计审查，AGENT-01 引入）；`design-notes.md:16` 称"LLM 侧只有角色化提示 + 模型路由"，已不符两层结构；§0 表把阶段 D 记为 ✅ 完成。 | 任务数改为 T01-T10；design-notes 补两层审计与 `gate_aggregator` 汇总裁决；阶段 D 降级为 ⚠️ 部分完成并注明 ENGINE-01 未闭合；阶段 H 降级为 ⚠️ 部分完成（CI 由 CI-01 补齐）；README 阶段 10 产物清单补入三个新产物，并新增"角色审计分两层"与最终门禁的说明段落。 | 本次提交 |
+| DOC-02 | `README.md:80` 与 `design-notes.md:15` 称"9 个 LLM 任务（T01-T09）"，实际 `agent_runtime.py:52-61` 为 10 个（T10 = statistician 独立统计审查，AGENT-01 引入）；`design-notes.md:16` 称"LLM 侧只有角色化提示 + 模型路由"，已不符两层结构；§0 表把阶段 D 记为 ✅ 完成。 | 任务数改为 T01-T10；design-notes 补两层审计与 `gate_aggregator` 汇总裁决；阶段 D 降级为 ⚠️ 部分完成并注明 ENGINE-01 未闭合；阶段 H 降级为 ⚠️ 部分完成（CI 由 CI-01 补齐）；README 阶段 10 产物清单补入三个新产物，并新增"角色审计分两层"与最终门禁的说明段落。 | e437bcb |
+| DOC-03 | `README.md:60` 让读者运行 `python -m research_agent_web`，该模块不存在（pyproject 声明的是 console script `research-agent-web`，模块是 `research_agent.web_server`），照文档第一次部署就 ModuleNotFoundError。`.gitignore` 只有 `env/`，匹配的是名为 env 的**目录**，因此仓库根目录的 `.env` 凭据文件是可提交的。 | README 给出两种可用入口并说明回环默认与非回环 token 要求；`.gitignore` 补 `.env` / `.env.*` / `*.env` 并保留 `!.env.example`；`git check-ignore` 实测确认生效。 | 3d8ac56 |
+| BUDGET-01 | 由真实故障发现，不是读代码发现：`runs/注意力机制-20260904-063644` 在第一个阶段就死于 `LLM budget exceeded: max_prompt_chars=1, next_prompt_chars=5340`，账本 3 条全为 `budget_exceeded`、`response_chars=0`、耗时约 9ms——从未出网。而它自己的 `00-preflight.json` 里 `llm_max_prompt_chars` 是 `pass`「LLM prompt 字符上限已配置」，因为 `preflight.py:243-259` 只区分负数（fail）、0（pass 不限制）和任意正数（pass）。同一次报告里 4 条 `memory_*` 检查确实警告了预算偏低，但紧挨着一条说 pass 的直接检查，警告读不出来。 | 采用一条原则性不对称：**无法容纳任何一次调用 → fail；能调用但不足以完成端到端 run → warn**。正数 prompt 上限低于 8192 判 fail（首个也是最小的研究计划阶段实测约 5.3k 字符），低于推荐值 20000 判 warn。`max_calls` 的下限改为**推导**而非硬编码：`len(REQUIRED_STAGE_SPECS)`，启用 multi_agent 时再加 `len(ROLE_EVIDENCE_VIEWS)`，即单智能体 7、多智能体 13——下限随规格自动跟进（避免 READY-01/PKG-01 那类漂移），也不会误判合法的单智能体预算。对同一份 `run-config.json` 实测：旧代码 `pass/pass`（overall warn，放行），新代码 `warn/fail` 并在 action 里指名预算拦截点。 | 357b0bd |
 
 ### 0.2 仍未闭合（阻断 §11 的 M2 对外声明）
 
 - **ENGINE-01 未闭合。** `workflow_state.WorkflowEngine` 在 `src/` 内被引用 **0 次**，仅 `tests/test_workflow_state.py` 导入它。追加式事件日志、状态归约器和 19 条边谓词都已实现并有表驱动测试，但调度真相仍是 `_run_after_review_approval` 的顺序控制流加「产物存在即复用」。§5 ENGINE-01 的验收标准（"把节点定义升级为可执行 registry，由 scheduler 根据状态和条件选边；产物复用成为节点 checkpoint 策略，而不是隐式控制流"）未满足。§12 主张把逐节点搬迁延后到 revision-aware Manifest 与产物契约稳定之后，该判断仍然成立；不成立的是把阶段 D 记为完成。当前状态是**两个执行模型并存，只有一个是真的**。
-- **阶段 E-H 零 live-run 证据。** 截至 2026-09-04，`runs/` 下 95 个 run 中没有任何一个产出 `10-gate-decision.json` 或 `10-independent-deliberation.json`；run 产物的最新修改时间停在 2026-09-02，而阶段 E-H 的提交都在 2026-09-03。阶段 H 验收中的"生成一次真实但低成本的端到端 canary Run，人工核对 revision、角色调用、MCP receipt、审批、成本和最终 gate"尚未执行。因此 READY-01 修好的只是评分器的读取路径：`agent_deliberation_consensus` 要真正变为 ready，仍需一次真实的 multi-agent run。
+- **阶段 E-H 零 live-run 证据。** 截至 2026-09-04，`runs/` 下 96 个 run 中没有任何一个产出 `10-gate-decision.json` 或 `10-independent-deliberation.json`（实测 `find` 计数均为 0）。阶段 E-H 的提交在 2026-09-03；此后唯一一次尝试是 `runs/注意力机制-20260904-063644`，它在 `stage=started` 就死于 BUDGET-01 的预算拦截，从未到达门禁阶段。阶段 H 验收中的"生成一次真实但低成本的端到端 canary Run，人工核对 revision、角色调用、MCP receipt、审批、成本和最终 gate"尚未执行。因此 READY-01 修好的只是评分器的读取路径：`agent_deliberation_consensus` 要真正变为 ready，仍需一次真实的 multi-agent run。
 - 结论：M2（可信工作流版）的代码与契约测试已到位，但没有端到端运行证据，仍不可对外声明。
 
-验证：阶段 A-H 与 §0.1 五项修复合入后，三种配置各自跑完全量，结果一致为 **1345 passed, 1 skipped, 72 subtests**：Python 3.12 + dev extra（经 `scripts/run_tests.sh` 隔离入口）、Python 3.11 + dev extra、Python 3.12 + dev,mcp extra。CI 定义见 `.github/workflows/ci.yml`。阶段 A/B 生效后即可解除 §4 的临时运行约束中与凭据和回退审批相关的两项；`local`/`benchmark` 回退后自动执行现在会正确停在执行审批门（批准文件已随回退归档失效）。
+验证：BUDGET-01 合入后在 Python 3.12 + dev extra 下经 `scripts/run_tests.sh` 跑完全量，**1349 passed, 1 skipped, 72 subtests**。Python 3.11 + dev 与 Python 3.12 + dev,mcp 两种配置最近一次实测是在 BUDGET-01 之前，均为 1345 passed（READY-01 至 DOC-03 合入后）；BUDGET-01 只改 `preflight.py` 与其测试，但本文件不用推断代替实测——这两种配置由 `.github/workflows/ci.yml` 的矩阵在每次 push 上覆盖，此后不再依赖手写数字。阶段 A/B 生效后即可解除 §4 的临时运行约束中与凭据和回退审批相关的两项；`local`/`benchmark` 回退后自动执行现在会正确停在执行审批门（批准文件已随回退归档失效）。
 
 ## 1. 结论
 
