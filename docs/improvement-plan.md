@@ -21,7 +21,7 @@
 
 ### 0.1 阶段 A-H 之后的接线修复（2026-09-04）
 
-阶段 A-H 标记完成后重新做了一轮对抗式复核，共发现七项缺陷。前四项（READY-01 / PKG-01 / CFG-01 / CI-01）共享同一个模式：新层的产物写出来了，但下游消费者没有跟着改，而既有测试用伪造的 fixture 掩盖了这一点。DOC-02 / DOC-03 是文档与代码脱节。BUDGET-01 性质不同——它不是读代码读出来的，而是一次真实 run 失败后从 `run-diagnostics.json` 倒查出来的，说明纯静态复核会漏掉"校验器接受了数学上不可能成功的配置"这一类问题。
+阶段 A-H 标记完成后重新做了一轮对抗式复核，共发现八项缺陷。前四项（READY-01 / PKG-01 / CFG-01 / CI-01）共享同一个模式：新层的产物写出来了，但下游消费者没有跟着改，而既有测试用伪造的 fixture 掩盖了这一点。DOC-02 / DOC-03 是文档与代码脱节。BUDGET-01 与 UA-01 性质不同——两者都不是读代码读出来的，而是真实故障后从 `run-diagnostics.json` 与线上响应倒查出来的：前者是校验器把数学上不可能成功的配置判为健康，后者是报错信息（超时）指向了与真因（客户端签名被封）完全不同的方向。静态复核会系统性漏掉这两类问题。
 
 | ID | 问题与证据 | 修复 | 提交 |
 | --- | --- | --- | --- |
@@ -32,6 +32,7 @@
 | DOC-02 | `README.md:80` 与 `design-notes.md:15` 称"9 个 LLM 任务（T01-T09）"，实际 `agent_runtime.py:52-61` 为 10 个（T10 = statistician 独立统计审查，AGENT-01 引入）；`design-notes.md:16` 称"LLM 侧只有角色化提示 + 模型路由"，已不符两层结构；§0 表把阶段 D 记为 ✅ 完成。 | 任务数改为 T01-T10；design-notes 补两层审计与 `gate_aggregator` 汇总裁决；阶段 D 降级为 ⚠️ 部分完成并注明 ENGINE-01 未闭合；阶段 H 降级为 ⚠️ 部分完成（CI 由 CI-01 补齐）；README 阶段 10 产物清单补入三个新产物，并新增"角色审计分两层"与最终门禁的说明段落。 | e437bcb |
 | DOC-03 | `README.md:60` 让读者运行 `python -m research_agent_web`，该模块不存在（pyproject 声明的是 console script `research-agent-web`，模块是 `research_agent.web_server`），照文档第一次部署就 ModuleNotFoundError。`.gitignore` 只有 `env/`，匹配的是名为 env 的**目录**，因此仓库根目录的 `.env` 凭据文件是可提交的。 | README 给出两种可用入口并说明回环默认与非回环 token 要求；`.gitignore` 补 `.env` / `.env.*` / `*.env` 并保留 `!.env.example`；`git check-ignore` 实测确认生效。 | 3d8ac56 |
 | BUDGET-01 | 由真实故障发现，不是读代码发现：`runs/注意力机制-20260904-063644` 在第一个阶段就死于 `LLM budget exceeded: max_prompt_chars=1, next_prompt_chars=5340`，账本 3 条全为 `budget_exceeded`、`response_chars=0`、耗时约 9ms——从未出网。而它自己的 `00-preflight.json` 里 `llm_max_prompt_chars` 是 `pass`「LLM prompt 字符上限已配置」，因为 `preflight.py:243-259` 只区分负数（fail）、0（pass 不限制）和任意正数（pass）。同一次报告里 4 条 `memory_*` 检查确实警告了预算偏低，但紧挨着一条说 pass 的直接检查，警告读不出来。 | 采用一条原则性不对称：**无法容纳任何一次调用 → fail；能调用但不足以完成端到端 run → warn**。正数 prompt 上限低于 8192 判 fail（首个也是最小的研究计划阶段实测约 5.3k 字符），低于推荐值 20000 判 warn。`max_calls` 的下限改为**推导**而非硬编码：`len(REQUIRED_STAGE_SPECS)`，启用 multi_agent 时再加 `len(ROLE_EVIDENCE_VIEWS)`，即单智能体 7、多智能体 13——下限随规格自动跟进（避免 READY-01/PKG-01 那类漂移），也不会误判合法的单智能体预算。对同一份 `run-config.json` 实测：旧代码 `pass/pass`（overall warn，放行），新代码 `warn/fail` 并在 action 里指名预算拦截点。 | 357b0bd |
+| UA-01 | 同样由真实故障发现：三条 LLM 出站路径（chat completion `llm.py:101`、model discovery `llm.py:682`、preflight ping `preflight.py:2121`）都不设 User-Agent，urllib 因此发 `Python-urllib/3.12`。Cloudflare 前置的 OpenAI 兼容网关按客户端签名直接回 **HTTP 403 error code 1010**，请求根本到不了源站。由于每个候选 URL 和每次重试都被同样拦掉，deadline 耗尽，用户看到的是「LLM model discovery exceeded its total timeout budget」——**一个指向错误方向的超时**，而不是鉴权错误。ping 受影响最严重：它是 UI「Ping」按钮和 `gold-run-doctor --ping-llm` 的连通性诊断，凭据有效时也会报连通失败。 | 三条路径统一发送 `llm.USER_AGENT`，复用 `literature_sources` 已在用的标识（另三个出站模块各自设了 UA，只有 llm.py 漏）。实测双向对照：`curl -A Python-urllib/3.12` → 403/1010，`curl` 默认 UA → 401 `API_KEY_REQUIRED`；Python 不设 UA → 403/1010，设任意非 urllib UA → 401 `API_KEY_REQUIRED`。经真实端点对真实网关：修复前 403/1010 耗时 7.08s，修复后 401 `API_KEY_REQUIRED` 耗时 1.27s。三个测试从 request 对象上抓取 header，修复前记录为 `None`。 | ba2ced7 |
 
 ### 0.2 仍未闭合（阻断 §11 的 M2 对外声明）
 
@@ -39,7 +40,7 @@
 - **阶段 E-H 零 live-run 证据。** 截至 2026-09-04，`runs/` 下 96 个 run 中没有任何一个产出 `10-gate-decision.json` 或 `10-independent-deliberation.json`（实测 `find` 计数均为 0）。阶段 E-H 的提交在 2026-09-03；此后唯一一次尝试是 `runs/注意力机制-20260904-063644`，它在 `stage=started` 就死于 BUDGET-01 的预算拦截，从未到达门禁阶段。阶段 H 验收中的"生成一次真实但低成本的端到端 canary Run，人工核对 revision、角色调用、MCP receipt、审批、成本和最终 gate"尚未执行。因此 READY-01 修好的只是评分器的读取路径：`agent_deliberation_consensus` 要真正变为 ready，仍需一次真实的 multi-agent run。
 - 结论：M2（可信工作流版）的代码与契约测试已到位，但没有端到端运行证据，仍不可对外声明。
 
-验证：BUDGET-01 合入后在 Python 3.12 + dev extra 下经 `scripts/run_tests.sh` 跑完全量，**1349 passed, 1 skipped, 72 subtests**。Python 3.11 + dev 与 Python 3.12 + dev,mcp 两种配置最近一次实测是在 BUDGET-01 之前，均为 1345 passed（READY-01 至 DOC-03 合入后）；BUDGET-01 只改 `preflight.py` 与其测试，但本文件不用推断代替实测——这两种配置由 `.github/workflows/ci.yml` 的矩阵在每次 push 上覆盖，此后不再依赖手写数字。阶段 A/B 生效后即可解除 §4 的临时运行约束中与凭据和回退审批相关的两项；`local`/`benchmark` 回退后自动执行现在会正确停在执行审批门（批准文件已随回退归档失效）。
+验证：UA-01 合入后在 Python 3.12 + dev extra 下经 `scripts/run_tests.sh` 跑完全量，**1352 passed, 1 skipped, 72 subtests**。Python 3.11 + dev 与 Python 3.12 + dev,mcp 两种配置最近一次实测是在 BUDGET-01 之前，均为 1345 passed（READY-01 至 DOC-03 合入后）；BUDGET-01 与 UA-01 只改 `preflight.py`、`llm.py` 与对应测试，但本文件不用推断代替实测——这两种配置由 `.github/workflows/ci.yml` 的矩阵在每次 push 上覆盖，此后不再依赖手写数字。阶段 A/B 生效后即可解除 §4 的临时运行约束中与凭据和回退审批相关的两项；`local`/`benchmark` 回退后自动执行现在会正确停在执行审批门（批准文件已随回退归档失效）。
 
 ## 1. 结论
 

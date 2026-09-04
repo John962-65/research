@@ -203,7 +203,7 @@ python scripts/check_docs.py   # Markdown 相对链接检查
 | `tests-with-mcp` | 装上可选 mcp extra 再跑全量，让 streamable-http 客户端路径跑在真实 SDK 上，而不是只覆盖 `tool_runtime` 的 ImportError 回退 |
 | `zero-runtime-deps` | 不装任何 extra，逐个导入 `src/research_agent` 下 143 个模块。零第三方运行时依赖是本项目的可信度论据之一（见 [`docs/design-notes.md`](docs/design-notes.md) §5），这个 job 防止后续某次 import 悄悄破坏它 |
 
-当前基线：Python 3.12 + dev extra 为 1349 passed, 1 skipped, 72 subtests（BUDGET-01 合入后实测）；Python 3.11 + dev 与 3.12 + dev,mcp 最近一次实测为 1345 passed（BUDGET-01 之前）。三种配置由 CI 矩阵在每次 push 上覆盖，以 CI 结果为准。
+当前基线：Python 3.12 + dev extra 为 1352 passed, 1 skipped, 72 subtests（UA-01 合入后实测）；Python 3.11 + dev 与 3.12 + dev,mcp 最近一次实测为 1345 passed（BUDGET-01 之前）。三种配置由 CI 矩阵在每次 push 上覆盖，以 CI 结果为准。
 
 ## 文档索引
 
