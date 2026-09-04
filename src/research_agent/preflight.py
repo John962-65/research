@@ -2156,7 +2156,7 @@ def _llm_ping_check(config: AgentConfig, timeout_seconds: float) -> PreflightChe
                         if exc.code in {404, 405}:
                             break
                         action = (
-                            "网关并发槽已满；等待现有请求结束后重试，或提高 sub2api 用户并发上限。"
+                            "网关并发槽已满；等待现有请求结束后重试，或提高网关用户并发上限。"
                             if exc.code == 429
                             else "检查 Base URL、模型名、API Key 和服务状态。"
                         )
@@ -2167,7 +2167,7 @@ def _llm_ping_check(config: AgentConfig, timeout_seconds: float) -> PreflightChe
     except (TimeoutError, ValueError) as exc:
         last_error = redact_sensitive_text(str(exc), secrets=[api_key])
     action = (
-        "网关并发槽已满；等待现有请求结束后重试，或提高 sub2api 用户并发上限。"
+        "网关并发槽已满；等待现有请求结束后重试，或提高网关用户并发上限。"
         if last_status == 429
         else "检查 Base URL、模型名、API Key 和服务状态。"
     )

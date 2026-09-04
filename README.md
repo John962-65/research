@@ -224,3 +224,9 @@ python scripts/check_docs.py   # Markdown 相对链接检查
 ## Scope
 
 本平台是科研自动化原型：它保证流程可审计、证据可溯源、边界诚实呈现，但不替代研究者的科学判断；所有最终 gate 都保留人工确认，论文级产出默认标注为需要人工润色与投稿前检查。
+
+## 许可证
+
+Apache License 2.0，全文见 [`LICENSE`](LICENSE)。
+
+例外：`benchmarks/uci-iris-classification/` 下的冻结数据（`data/iris.data`）与数据集描述（`fulltext/iris.names.txt`）来自 UCI Machine Learning Repository 的 Iris 数据集（官方页 https://archive.ics.uci.edu/dataset/53/iris ，DOI `10.24432/C56C76`），按 UCI 报告的 **CC BY 4.0** 许可保留，版权归原数据集作者所有，不在本项目许可证范围内。其余文件均为 Apache-2.0。

@@ -214,7 +214,7 @@ class OpenAICompatibleLLMTest(unittest.TestCase):
         with patch.dict(os.environ, {"OPENAI_API_KEY": "environment-secret"}, clear=True):
             self.assertEqual(resolve_llm_api_key(config), "")
 
-    def test_explicit_matching_sub2api_environment_url_can_receive_environment_key(self) -> None:
+    def test_explicit_matching_custom_http_environment_url_can_receive_environment_key(self) -> None:
         config = LLMConfig(
             provider="custom-http",
             base_url="http://192.0.2.1:8080/v1",

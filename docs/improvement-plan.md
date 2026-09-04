@@ -241,7 +241,7 @@ flowchart LR
 交付：
 
 - 定义 `AgentVerdict` schema：角色、职责、证据引用、结论、置信度、反证、required actions、route/revision/attempt。
-- evidence、method、benchmark、statistics、review、editing 等角色各自执行独立任务；默认串行或按 endpoint 限流，避免再次放大 sub2api 429。
+- evidence、method、benchmark、statistics、review、editing 等角色各自执行独立任务；默认串行或按 endpoint 限流，避免放大共享网关的 429（该网关按用户限并发）。
 - 独立上下文最小化：每个角色只读完成职责所需的产物，禁止把其他角色 verdict 当作自己的原始判断。
 - `GateAggregator` 把规则审计、独立 verdict、冲突解析和人工 override 汇总为唯一最终决策。
 - 记录 provider usage，并支持按 route/model 的价格表。
