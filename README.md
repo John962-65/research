@@ -195,12 +195,18 @@ bash scripts/run_tests.sh      # PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 + 优先使用
 python scripts/check_docs.py   # Markdown 相对链接检查
 ```
 
+gold 路径的测试会断言 `runs/uci-iris-expanded-baseline-pack-run` 与 `runs/uci-iris-fulltext-grounding` 两个目录，而它们属于 gitignore 的本地产物——**全新克隆里不存在，相关测试会失败，尽管代码没有问题**。先跑一次离线且确定性的生成步骤（只消费仓库内的 UCI Iris benchmark pack 与冻结全文）：
+
+```bash
+bash scripts/prepare_gold_support_runs.sh
+```
+
 `.github/workflows/ci.yml` 在每次 push 与 PR 上跑三个 job：
 
 | Job | 内容 |
 | --- | --- |
-| `tests` | Python 3.11 / 3.12 矩阵，只装 dev extra（对应文档化的开发流程），跑全量测试与文档链接检查。`RESEARCH_AGENT_PYTHON_BIN` 固定解释器，避免脚本回退到与安装包不同的 `python3` |
-| `tests-with-mcp` | 装上可选 mcp extra 再跑全量，让 streamable-http 客户端路径跑在真实 SDK 上，而不是只覆盖 `tool_runtime` 的 ImportError 回退 |
+| `tests` | Python 3.11 / 3.12 矩阵，只装 dev extra（对应文档化的开发流程）；先跑 `prepare_gold_support_runs.sh` 生成 gold 测试所需的两个 support run，再跑全量测试与文档链接检查。`RESEARCH_AGENT_PYTHON_BIN` 固定解释器，避免脚本回退到与安装包不同的 `python3` |
+| `tests-with-mcp` | 装上可选 mcp extra，同样先生成 support run 再跑全量，让 streamable-http 客户端路径跑在真实 SDK 上，而不是只覆盖 `tool_runtime` 的 ImportError 回退 |
 | `zero-runtime-deps` | 不装任何 extra，逐个导入 `src/research_agent` 下 143 个模块。零第三方运行时依赖是本项目的可信度论据之一（见 [`docs/design-notes.md`](docs/design-notes.md) §5），这个 job 防止后续某次 import 悄悄破坏它 |
 
 当前基线：Python 3.12 + dev extra 为 1352 passed, 1 skipped, 72 subtests（UA-01 合入后实测）；Python 3.11 + dev 与 3.12 + dev,mcp 最近一次实测为 1345 passed（BUDGET-01 之前）。三种配置由 CI 矩阵在每次 push 上覆盖，以 CI 结果为准。

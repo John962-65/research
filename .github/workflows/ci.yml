@@ -40,6 +40,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e '.[dev]'
 
+      - name: Prepare gold support runs (offline, deterministic)
+        run: bash scripts/prepare_gold_support_runs.sh
+
       - name: Full test suite (isolated entry point)
         run: bash scripts/run_tests.sh
 
@@ -66,6 +69,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e '.[dev,mcp]'
+
+      - name: Prepare gold support runs (offline, deterministic)
+        run: bash scripts/prepare_gold_support_runs.sh
 
       - name: Full test suite (isolated entry point)
         run: bash scripts/run_tests.sh
