@@ -12,11 +12,32 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from .agent_verdict import ROLE_EVIDENCE_VIEWS
 from .artifacts import write_json, write_text, cell as _cell
 from .benchmark_adapter import audit_benchmark_adapter_config, formal_benchmark_provenance_issues
 from .config import AgentConfig
 from .credential_validation import placeholder_secret as _placeholder_secret
 from .credential_validation import valid_contact_email as _valid_contact_email
+from .llm_trace_audit import REQUIRED_STAGE_SPECS
+
+
+# A complete run needs one successful call per required stage, plus one
+# independent verdict per role when the independent deliberation layer is on.
+# Derived from the specs that define those sets so the floor tracks them instead
+# of drifting.
+_MIN_RUN_CALLS_SINGLE_AGENT = len(REQUIRED_STAGE_SPECS)
+_MIN_RUN_CALLS_MULTI_AGENT = len(REQUIRED_STAGE_SPECS) + len(ROLE_EVIDENCE_VIEWS)
+
+# The first and smallest stage (research planning) sends about 5.3k characters --
+# system 922 + user 4418, measured on a real run -- and prompts only grow from
+# there as prior-run lessons and literature context are added. A positive cap
+# below this floor cannot admit a single call, so it disables the LLM entirely
+# while still looking like a configured budget.
+_MIN_USABLE_PROMPT_CHARS = 8192
+
+# Literature synthesis, paper writing and revision carry the largest prompts;
+# this is the floor the cross-run memory checks already recommend.
+_RECOMMENDED_PROMPT_CHARS = 20000
 
 
 @dataclass(frozen=True)
@@ -242,10 +263,30 @@ def _llm_static_checks(config: AgentConfig) -> list[PreflightCheck]:
 def _llm_budget_checks(config: AgentConfig) -> list[PreflightCheck]:
     llm = config.llm
     checks: list[PreflightCheck] = []
+    multi_agent = config.multi_agent.enabled
+    min_calls = _MIN_RUN_CALLS_MULTI_AGENT if multi_agent else _MIN_RUN_CALLS_SINGLE_AGENT
     if llm.max_calls < 0:
         checks.append(PreflightCheck("llm_max_calls", "fail", "LLM 调用上限不能为负数", action="设置 max_calls >= 0；0 表示不限制。"))
     elif llm.max_calls == 0:
         checks.append(PreflightCheck("llm_max_calls", "pass", "LLM 调用数不限制"))
+    elif llm.max_calls < min_calls:
+        checks.append(
+            PreflightCheck(
+                "llm_max_calls",
+                "warn",
+                f"LLM 调用上限 {llm.max_calls} 不足以完成一次端到端 run",
+                str(llm.max_calls),
+                action=(
+                    f"当前配置下一次完整 run 至少需要 {min_calls} 次成功调用"
+                    + (
+                        f"（{len(REQUIRED_STAGE_SPECS)} 个必需阶段 + {len(ROLE_EVIDENCE_VIEWS)} 个独立角色 verdict，multi_agent 已启用）"
+                        if multi_agent
+                        else f"（{len(REQUIRED_STAGE_SPECS)} 个必需阶段；启用 multi_agent 后还需 {len(ROLE_EVIDENCE_VIEWS)} 次独立角色 verdict）"
+                    )
+                    + "；设为 0 表示不限制。单阶段探针可保留较小值。"
+                ),
+            )
+        )
     else:
         checks.append(PreflightCheck("llm_max_calls", "pass", "LLM 调用上限已配置", str(llm.max_calls)))
     if llm.max_prompt_chars < 0:
@@ -254,6 +295,35 @@ def _llm_budget_checks(config: AgentConfig) -> list[PreflightCheck]:
         )
     elif llm.max_prompt_chars == 0:
         checks.append(PreflightCheck("llm_max_prompt_chars", "pass", "LLM prompt 字符数不限制"))
+    elif llm.max_prompt_chars < _MIN_USABLE_PROMPT_CHARS:
+        # Any positive cap this small rejects every stage, so the run cannot make
+        # a single LLM call: llm_trace raises the budget error before the request
+        # is built. Reporting it as configured is what let a doomed run start.
+        checks.append(
+            PreflightCheck(
+                "llm_max_prompt_chars",
+                "fail",
+                f"LLM prompt 字符上限 {llm.max_prompt_chars} 低于任何阶段的最小 prompt，等价于禁用 LLM",
+                str(llm.max_prompt_chars),
+                action=(
+                    f"设为 0（不限制）或 >= {_RECOMMENDED_PROMPT_CHARS}。首个研究计划阶段的 prompt 实测约 5340 字符，"
+                    "当前上限会在构造请求之前拦截每一次调用（llm_trace 抛 LLM budget exceeded）。"
+                ),
+            )
+        )
+    elif llm.max_prompt_chars < _RECOMMENDED_PROMPT_CHARS:
+        checks.append(
+            PreflightCheck(
+                "llm_max_prompt_chars",
+                "warn",
+                f"LLM prompt 字符上限 {llm.max_prompt_chars} 偏低，较大阶段会被拦截",
+                str(llm.max_prompt_chars),
+                action=(
+                    f"研究计划阶段可以通过，但文献综合、论文写作与修订的 prompt 更大；"
+                    f"建议 >= {_RECOMMENDED_PROMPT_CHARS}，或设为 0 表示不限制。"
+                ),
+            )
+        )
     else:
         checks.append(PreflightCheck("llm_max_prompt_chars", "pass", "LLM prompt 字符上限已配置", str(llm.max_prompt_chars)))
     if llm.input_cost_per_million_tokens < 0 or llm.output_cost_per_million_tokens < 0:

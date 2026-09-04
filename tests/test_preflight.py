@@ -15,8 +15,17 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from research_agent.artifacts import write_json
-from research_agent.config import AgentConfig, ExecutionConfig, HumanConfig, LiteratureConfig, LLMConfig, PaperGradeConfig, ReleaseConfig, load_config
-from research_agent.preflight import _llm_ping_check, render_preflight_markdown, run_preflight, write_preflight_artifacts
+from research_agent.config import AgentConfig, ExecutionConfig, HumanConfig, LiteratureConfig, LLMConfig, MultiAgentConfig, PaperGradeConfig, ReleaseConfig, load_config
+from research_agent.preflight import (
+    _MIN_RUN_CALLS_MULTI_AGENT,
+    _MIN_RUN_CALLS_SINGLE_AGENT,
+    _RECOMMENDED_PROMPT_CHARS,
+    _llm_budget_checks,
+    _llm_ping_check,
+    render_preflight_markdown,
+    run_preflight,
+    write_preflight_artifacts,
+)
 from research_agent.run_memory import build_run_memory
 from research_agent.web_server import _config_from_payload
 
@@ -386,6 +395,50 @@ class PreflightTest(unittest.TestCase):
         self.assertTrue(any(check.name == "llm_max_calls" and check.status == "pass" for check in good.checks))
         self.assertTrue(any(check.name == "llm_max_prompt_chars" and check.status == "pass" for check in good.checks))
         self.assertTrue(any(check.name == "llm_token_cost" and check.status == "pass" for check in good.checks))
+
+    def test_prompt_cap_too_small_to_admit_any_call_fails_preflight(self) -> None:
+        """Regression from a real run: max_prompt_chars=1 reported pass
+        ("已配置") while guaranteeing llm_trace rejected every call before the
+        request was built, so the run died on its first stage."""
+        report = run_preflight("注意力机制", _budget_config(max_calls=1, max_prompt_chars=1), ping_llm=False)
+
+        self.assertEqual(report.status, "fail")
+        check = next(c for c in report.checks if c.name == "llm_max_prompt_chars")
+        self.assertEqual(check.status, "fail")
+        self.assertIn("等价于禁用 LLM", check.summary)
+        self.assertIn("budget exceeded", check.action)
+
+    def test_prompt_cap_bands(self) -> None:
+        def status(chars: int) -> str:
+            checks = _llm_budget_checks(_budget_config(max_prompt_chars=chars))
+            return next(c.status for c in checks if c.name == "llm_max_prompt_chars")
+
+        self.assertEqual(status(0), "pass")  # unlimited
+        self.assertEqual(status(1), "fail")
+        self.assertEqual(status(8191), "fail")
+        self.assertEqual(status(8192), "warn")
+        self.assertEqual(status(_RECOMMENDED_PROMPT_CHARS - 1), "warn")
+        self.assertEqual(status(_RECOMMENDED_PROMPT_CHARS), "pass")
+
+    def test_call_floor_moves_with_multi_agent(self) -> None:
+        """The independent role verdicts only run when multi_agent is enabled, so
+        a legitimate single-agent budget must not be flagged."""
+        def status(calls: int, multi_agent: bool) -> str:
+            checks = _llm_budget_checks(_budget_config(max_calls=calls, multi_agent=multi_agent))
+            return next(c.status for c in checks if c.name == "llm_max_calls")
+
+        self.assertEqual(status(_MIN_RUN_CALLS_SINGLE_AGENT, False), "pass")
+        self.assertEqual(status(_MIN_RUN_CALLS_SINGLE_AGENT - 1, False), "warn")
+        self.assertEqual(status(_MIN_RUN_CALLS_SINGLE_AGENT, True), "warn")
+        self.assertEqual(status(_MIN_RUN_CALLS_MULTI_AGENT, True), "pass")
+        self.assertEqual(status(0, True), "pass")  # unlimited
+
+    def test_call_floors_stay_derived_from_the_specs(self) -> None:
+        from research_agent.agent_verdict import ROLE_EVIDENCE_VIEWS
+        from research_agent.llm_trace_audit import REQUIRED_STAGE_SPECS
+
+        self.assertEqual(_MIN_RUN_CALLS_SINGLE_AGENT, len(REQUIRED_STAGE_SPECS))
+        self.assertEqual(_MIN_RUN_CALLS_MULTI_AGENT, len(REQUIRED_STAGE_SPECS) + len(ROLE_EVIDENCE_VIEWS))
 
     def test_fulltext_paths_are_validated(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -1971,6 +2024,20 @@ def _complete_release_config() -> ReleaseConfig:
         data_access_statement="All benchmark data are available from the archived public record.",
         environment_url="https://github.com/example/research-agent/releases/tag/v0.1.0",
         release_notes="First reproducibility release for audit testing.",
+    )
+
+
+def _budget_config(*, max_calls: int = 0, max_prompt_chars: int = 0, multi_agent: bool = False) -> AgentConfig:
+    return AgentConfig(
+        llm=LLMConfig(
+            base_url="http://127.0.0.1:9/v1",
+            model="fake-model",
+            api_key="test-key",
+            max_calls=max_calls,
+            max_prompt_chars=max_prompt_chars,
+        ),
+        multi_agent=MultiAgentConfig(enabled=multi_agent),
+        release=_complete_release_config(),
     )
 
 
