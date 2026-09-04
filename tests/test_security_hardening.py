@@ -377,6 +377,26 @@ class DocTomlFixtureTest(unittest.TestCase):
         self.assertIn("skeptical_reviewer", role_ids)
         self.assertTrue(config.multi_agent.mcp_servers)
 
+    def test_no_example_config_declares_a_literal_api_key(self) -> None:
+        """A shipped example is documentation: a literal key in one teaches
+        readers to do what SEC-01 forbids at runtime."""
+        literal = re.compile(r"^\s*api_key\s*=", re.MULTILINE)
+        offenders: list[str] = []
+        examples = sorted((PROJECT_ROOT / "examples").rglob("*.toml"))
+        self.assertTrue(examples, "expected example TOML files to scan")
+        for path in examples:
+            text = path.read_text(encoding="utf-8")
+            uncommented = [
+                line
+                for line in text.splitlines()
+                if literal.match(line) and not line.lstrip().startswith("#")
+            ]
+            if uncommented:
+                offenders.append(f"{path.relative_to(PROJECT_ROOT)}: {uncommented[0].strip()}")
+            if load_config(path).llm.api_key:
+                offenders.append(f"{path.relative_to(PROJECT_ROOT)}: parsed [llm] api_key is non-empty")
+        self.assertEqual(offenders, [])
+
 
 if __name__ == "__main__":
     unittest.main()

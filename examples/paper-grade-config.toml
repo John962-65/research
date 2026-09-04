@@ -1,8 +1,14 @@
 [llm]
 provider = "openai-compatible"
+# 结构性预检示例：端口 9 是 discard 服务，即使漏掉 --no-llm-ping 也不可能有真实
+# LLM 调用成功。
 base_url = "http://127.0.0.1:9/v1"
 model = "paper-grade-preflight-only"
-api_key = "replace-for-real-run"
+# 本文件故意不声明任何凭据，preflight 会如实报 llm_api_key fail（退出码非 0）。
+# SEC-01 下 env key 只在 effective endpoint 与可信来源同源时才释放，而上面的
+# base_url 指向 discard 端口，所以在这里写 api_key_env 也永远解析不出 key。
+# 正式 run 请改用成对的 base_url_env / api_key_env 形式，见
+# examples/uci-iris-paper-grade-config.toml。
 
 [literature]
 provider = "online"

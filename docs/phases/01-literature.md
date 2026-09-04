@@ -37,7 +37,7 @@ PYTHONPATH=src python3 -m research_agent preflight \
   --no-llm-ping
 ```
 
-仓库内提供了一个可直接预检的结构性示例：
+仓库内提供了一个结构性预检示例。它**按设计以非 0 退出码结束**（下面说明哪两项必然 fail），用途是展示论文级门槛链路如何逐项判定，不是一条应当通过的命令：
 
 ```bash
 PYTHONPATH=src python3 -m research_agent preflight \
@@ -46,7 +46,14 @@ PYTHONPATH=src python3 -m research_agent preflight \
   --no-llm-ping
 ```
 
-这个示例会启用 online 文献、多源配置、3 条 DOI/URL seed，以及 `examples/rrt-2d-benchmark/manifest-candidate.json`、`manifest-baseline.json`、`manifest-ablation.json` 三角色 benchmark manifest。它用于证明 agent 的论文级门槛链路可预检、可审计、可修复；其中 RRT 2D benchmark 是仓库内可复现 fixture，不是正式投稿的领域公开基准。因此这个示例的 `paper_grade_benchmark_manifests` 会失败，提示把 fixture 替换成公开外部 benchmark manifest。正式 paper run 应把 seed、manifest、release URL 和 LLM 配置替换成真实课题资产。
+这个示例会启用 online 文献、多源配置、3 条 DOI/URL seed，以及 `examples/rrt-2d-benchmark/manifest-candidate.json`、`manifest-baseline.json`、`manifest-ablation.json` 三角色 benchmark manifest。它用于证明 agent 的论文级门槛链路可预检、可审计、可修复。有两项**无条件** `fail`：
+
+- `paper_grade_benchmark_manifests`：RRT 2D benchmark 是仓库内可复现 fixture（`benchmark_kind=fixture`、`procedural://` dataset_url），不是正式投稿的领域公开基准，检查会提示把 fixture 替换成公开外部 benchmark manifest。
+- `llm_api_key`：示例配置故意不声明任何凭据，且 `base_url` 指向 discard 端口（`127.0.0.1:9`）。SEC-01 下环境变量里的 key 只在 effective endpoint 与可信来源同源时才释放，所以即使设置了 `OPENAI_API_KEY` 也不会被解析出来——这是预期行为，不是配置错误。
+
+另有一项取决于本机环境：未设置 `RESEARCH_AGENT_CONTACT_EMAIL` 时 `contact_email` 也会 `fail`。
+
+正式 paper run 应把 seed、manifest、release URL 和 LLM 配置替换成真实课题资产，LLM 段改用成对的 `base_url_env` / `api_key_env` 形式，参照 `examples/uci-iris-paper-grade-config.toml`。
 如果本机没有配置 Semantic Scholar key、contact email 或历史 `runs-memory` 里仍有继承风险，整体 preflight 也可能出现其他 `warn`；此时应先确认 online/seed 检查达标，再补齐外部 benchmark provenance。
 
 如果要在正式 run 前验证在线源和 DOI seed 真的可用，可运行轻量探针：
