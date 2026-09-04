@@ -1,5 +1,7 @@
 # Research Agent
 
+[![CI](https://github.com/John962-65/research/actions/workflows/ci.yml/badge.svg)](https://github.com/John962-65/research/actions/workflows/ci.yml)
+
 一个可审计的科研自动化流水线原型：输入一个研究主题，自动完成文献调研、idea 生成、实验计划、实验执行、统计分析、论文草稿、审稿式复核、修订、投稿/归档包生成与下一轮迭代计划。每一步都落盘为带编号的产物文件，全程留痕、默认安全。
 
 第一版的原则是“全流程自动、每步留痕、默认安全”。LLM 只支持 OpenAI-compatible 在线接口，未配置模型会直接失败；可选配置 LLM 调用预算，超额会在真实请求前拦截。文献默认可用离线种子库，实验默认使用模拟执行器。配置 `execution.mode = "local"` 且设置命令白名单后，才会执行本地实验命令。
