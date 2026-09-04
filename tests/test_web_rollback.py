@@ -57,10 +57,26 @@ class WebRollbackTest(unittest.TestCase):
             time.sleep(0.05)
         raise AssertionError(f"run did not reach workflow node {node_id}")
 
+    def _wait_for_worker_idle(self, run_id: str, timeout: float = 5.0) -> None:
+        # The worker thread's last write clears worker_active, so observing it
+        # False means no further store writes are in flight. Acting before that
+        # races in both directions: preview rejects while the worker is still
+        # active, and the worker's final write clears a flag the test just set.
+        import time
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            detail = web_server.STORE.get(run_id) or {}
+            if detail.get("worker_active") is not True:
+                return
+            time.sleep(0.05)
+        raise AssertionError(f"worker for run {run_id} did not finish within {timeout}s")
+
     def test_store_preview_rejects_active_worker(self) -> None:
         record = self._create_run()
         run_id = record["id"]
         self._wait_for_node(run_id, "ideation")
+        self._wait_for_worker_idle(run_id)
         web_server.STORE._update(run_id, worker_active=True, status="running")
         with self.assertRaises(RuntimeError):
             web_server.STORE.preview_rollback(run_id, "ideation")
@@ -69,6 +85,7 @@ class WebRollbackTest(unittest.TestCase):
         record = self._create_run()
         run_id = record["id"]
         self._wait_for_node(run_id, "ideation")
+        self._wait_for_worker_idle(run_id)
         run_dir = web_server.ROOT / record["out_dir"]
         self.assertTrue((run_dir / "02-ideas.json").exists())
 
@@ -103,6 +120,7 @@ class WebRollbackTest(unittest.TestCase):
         record = self._create_run()
         run_id = record["id"]
         self._wait_for_node(run_id, "ideation")
+        self._wait_for_worker_idle(run_id)
         web_server.resume_pipeline_from_checkpoint = lambda topic, out_dir, config: Path(out_dir)
         server = ThreadingHTTPServer(("127.0.0.1", 0), web_server.ResearchAgentHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
