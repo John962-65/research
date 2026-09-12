@@ -5,8 +5,9 @@ from tempfile import TemporaryDirectory
 import json
 import unittest
 from unittest import mock
+from types import SimpleNamespace
 
-from research_agent.agent_runtime import AgentRoutedLLM
+from research_agent.agent_runtime import AgentRoutedLLM, DEFAULT_ROLE_SKILLS
 from research_agent.agent_verdict import (
     ROLE_EVIDENCE_VIEWS,
     _parse_verdict,
@@ -66,6 +67,27 @@ class ParseVerdictTest(unittest.TestCase):
 
 
 class GateAggregatorTest(unittest.TestCase):
+    def test_pipeline_rechecks_override_file_against_current_evidence(self) -> None:
+        from research_agent.pipeline import _finalize_gate_decision
+        with TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            kwargs = dict(agent_deliberation={"status": "pass"},
+                          claim_consistency={"status": "block", "reason": "unmatched split"},
+                          citation_grounding=SimpleNamespace(status="pass"),
+                          revised_review=SimpleNamespace(decision="accept"), resume=True)
+            def finalize():
+                return _finalize_gate_decision("test", out, AgentConfig(), None, **kwargs)[0]
+            initial = finalize()
+            override = dict(reviewer="reviewer", reason="Accepted limitation", approved=False,
+                            revision=0, verdict_sha256=initial["inputs"]["verdict_sha256"])
+            path = out / "10-gate-override.json"
+            path.write_text(json.dumps(override))
+            self.assertEqual(finalize()["status"], "blocked")
+            path.write_text(json.dumps(override | {"approved": True}))
+            self.assertEqual(finalize()["status"], "publishable")
+            kwargs["claim_consistency"]["reason"] = "different evidence"
+            self.assertEqual(finalize()["status"], "blocked")
+
     def test_all_pass_is_publishable(self) -> None:
         decision = aggregate_final_decision(
             deterministic_audits={"agent_deliberation": {"status": "pass"}},
@@ -133,13 +155,36 @@ class GateAggregatorTest(unittest.TestCase):
                 "reviewer": "amy",
                 "reason": "已知限制，人工接受",
                 "revision": 0,
-                "verdict_sha256": "a" * 64,
+                "verdict_sha256": partial.inputs["verdict_sha256"],
                 "approved": True,
             },
         )
         self.assertEqual(full.status, "publishable")
         self.assertTrue(full.overridden)
         self.assertEqual(full.override["reviewer"], "amy")
+
+    def test_override_rejects_invalid_semantics_and_changed_evidence(self) -> None:
+        inputs = dict(deterministic_audits={"audit": {"status": "block", "evidence": "original"}},
+                      independent_deliberation=None, revision=3)
+        digest = aggregate_final_decision(**inputs).inputs["verdict_sha256"]
+        valid = dict(reviewer="reviewer", reason="Accepted limitation", revision=3,
+                     verdict_sha256=digest, approved=True)
+        for change in ({"approved": False}, {"approved": "true"}, {"approved": 1},
+                       {"revision": 2}, {"revision": "3"}, {"revision": True},
+                       {"verdict_sha256": "a" * 64}, {"verdict_sha256": "哈希"},
+                       {"reviewer": " "}, {"reason": "\n"}):
+            with self.subTest(change=change):
+                decision = aggregate_final_decision(**inputs, human_override=valid | change)
+                self.assertEqual(decision.status, "blocked")
+                self.assertFalse(decision.overridden)
+        inputs["deterministic_audits"]["audit"]["evidence"] = "changed"
+        self.assertEqual(aggregate_final_decision(**inputs, human_override=valid).status, "blocked")
+
+    def test_missing_independent_report_cannot_satisfy_required_roles(self) -> None:
+        decision = aggregate_final_decision(deterministic_audits={},
+            independent_deliberation=None, expected_roles=["statistician"])
+        self.assertEqual(decision.status, "blocked")
+        self.assertEqual(decision.missing_verdict_roles, ["statistician"])
 
     def test_blocked_final_readiness_cannot_be_publishable(self) -> None:
         from research_agent.models import FinalReadinessReport
@@ -174,9 +219,10 @@ class IndependentDeliberationTest(unittest.TestCase):
         self.project_root = Path(self._tmp.name)
         self.run_dir = self.project_root / "run"
         self.run_dir.mkdir()
-        skills = self.project_root / "skills" / "skeptical-review"
-        skills.mkdir(parents=True)
-        (skills / "SKILL.md").write_text("# skeptical-review\n", encoding="utf-8")
+        for skill_id in {skill for skills in DEFAULT_ROLE_SKILLS.values() for skill in skills}:
+            skills = self.project_root / "skills" / skill_id
+            skills.mkdir(parents=True)
+            (skills / "SKILL.md").write_text(f"# {skill_id}\n", encoding="utf-8")
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -206,6 +252,9 @@ class IndependentDeliberationTest(unittest.TestCase):
         entries = _read_entries(self.run_dir / "run-llm-ledger.json")
         self.assertEqual(len(entries), len(ROLE_EVIDENCE_VIEWS))
         self.assertEqual({entry.agent_id for entry in entries}, set(ROLE_EVIDENCE_VIEWS))
+        for entry in entries:
+            self.assertEqual(entry.skills, DEFAULT_ROLE_SKILLS[entry.agent_id])
+            self.assertTrue(entry.skill_hashes)
 
     def test_role_failure_becomes_block(self) -> None:
         class _BrokenLLM:

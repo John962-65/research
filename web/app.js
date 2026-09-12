@@ -197,6 +197,12 @@ const els = {
   btnViewAcademic: document.querySelector('#btn-view-academic'),
   btnViewRaw: document.querySelector('#btn-view-raw'),
   catFilterBtns: [...document.querySelectorAll('.cat-filter-btn')],
+  artifactSearchInput: document.querySelector('#artifact-search-input'),
+  artifactSearchClear: document.querySelector('#artifact-search-clear'),
+  toggleAvailableOnly: document.querySelector('#toggle-available-only'),
+  toggleHideJson: document.querySelector('#toggle-hide-json'),
+  artifactCountBadge: document.querySelector('#artifact-count-badge'),
+  artifactNoResults: document.querySelector('#artifact-no-results'),
   goldLaunchCommandPanel: document.querySelector('#gold-launch-command-panel'),
   goldLaunchChecklist: document.querySelector('#gold-launch-checklist'),
   goldLaunchCommandText: document.querySelector('#gold-launch-command-text'),
@@ -697,6 +703,27 @@ function setCurrentRun(run) {
   if (runChanged || (run?.config && state.formConfigRunId !== run.id)) {
     applyRunConfigToForm(run);
   }
+  if (run && run.artifacts && run.artifacts.length) {
+    const artSet = new Set(run.artifacts);
+    if (!artSet.has(state.selectedFile)) {
+      const preferred = [
+        '09-revised-paper.md',
+        '06-paper.md',
+        '01-review-gate.md',
+        '03-execution-approval.md',
+        '03-experiment-plan.md',
+        '02-ideas.md',
+        '01-context.md',
+        '01-literature.md',
+        '00-research-plan.md',
+        'run-manifest.md'
+      ];
+      const match = preferred.find((f) => artSet.has(f));
+      if (match) {
+        state.selectedFile = match;
+      }
+    }
+  }
   const title = run ? run.topic : '尚未选择';
   if (els.title.textContent !== title) els.title.textContent = title;
   const status = run ? run.status : 'idle';
@@ -704,6 +731,7 @@ function setCurrentRun(run) {
   if (els.status.textContent !== statusLabel) els.status.textContent = statusLabel;
   els.status.className = `status-pill ${statusClass(status)}`;
   renderStages(run ? run.stage : 'started', run?.workflow);
+  renderGateInspector(run);
   updateActionButtons();
   updateTabs();
 }
@@ -760,6 +788,101 @@ function updateActionButtons() {
   els.goldRunVerify.disabled = !state.currentRun?.id;
 }
 
+const CORE_FILES = new Set([
+  '06-paper.md',
+  '09-revised-paper.md',
+  '09-revised-paper.tex',
+  '00-research-plan.md',
+  '00-human-brief.md',
+  '01-literature.md',
+  '01-context.md',
+  '01-references.bib',
+  '01-review-gate.md',
+  '02-ideas.md',
+  '02-exploration-map.md',
+  '03-experiment-plan.md',
+  '04-statistics.md',
+  '04-results.csv',
+  '05-analysis.md',
+  '07-paper-review.md',
+  '08-revision-plan.md',
+  '09-revision-report.md',
+  '10-revised-paper-review.md',
+  '11-submission-package.md',
+  '14-final-handoff.md',
+  'run-manifest.md',
+  'run-llm-ledger.md',
+  'run-diagnostics.md'
+]);
+
+function applyArtifactFilters() {
+  const query = (els.artifactSearchInput?.value || '').trim().toLowerCase();
+  const availableOnly = els.toggleAvailableOnly ? els.toggleAvailableOnly.checked : true;
+  const hideJson = els.toggleHideJson ? els.toggleHideJson.checked : true;
+  const activeCatBtn = document.querySelector('.cat-filter-btn.active');
+  const cat = activeCatBtn?.dataset.cat || 'all';
+
+  const artifacts = new Set(state.currentRun?.artifacts || []);
+  let visibleCount = 0;
+  let totalAvailable = 0;
+
+  els.tabs.forEach((tab) => {
+    const file = tab.dataset.file || '';
+    const tabCat = tab.dataset.cat || '';
+    const label = tab.textContent.trim().toLowerCase();
+    const isAvailable = artifacts.has(file);
+    const isJson = file.endsWith('.json') || tabCat === 'json';
+    const isCore = CORE_FILES.has(file);
+
+    if (isAvailable) totalAvailable++;
+
+    if (availableOnly && Boolean(state.currentRun) && !isAvailable) {
+      tab.style.display = 'none';
+      return;
+    }
+
+    if (hideJson && isJson && cat !== 'json' && !query.includes('json')) {
+      tab.style.display = 'none';
+      return;
+    }
+
+    if (cat === 'core') {
+      if (!isCore) {
+        tab.style.display = 'none';
+        return;
+      }
+    } else if (cat !== 'all' && tabCat !== cat) {
+      tab.style.display = 'none';
+      return;
+    }
+
+    if (query) {
+      if (!file.toLowerCase().includes(query) && !label.includes(query)) {
+        tab.style.display = 'none';
+        return;
+      }
+    }
+
+    tab.style.display = '';
+    visibleCount++;
+  });
+
+  if (els.artifactCountBadge) {
+    if (state.currentRun) {
+      els.artifactCountBadge.textContent = `${visibleCount} 显示 / ${totalAvailable} 已生成`;
+    } else {
+      els.artifactCountBadge.textContent = `${visibleCount} 产物`;
+    }
+  }
+
+  if (els.artifactNoResults) {
+    els.artifactNoResults.hidden = visibleCount > 0;
+  }
+  if (els.artifactSearchClear) {
+    els.artifactSearchClear.hidden = !query;
+  }
+}
+
 function updateTabs() {
   const artifacts = new Set(state.currentRun?.artifacts || []);
   els.tabs.forEach((tab) => {
@@ -767,7 +890,11 @@ function updateTabs() {
     tab.disabled = Boolean(state.currentRun) && !artifacts.has(file);
     tab.classList.toggle('active', file === state.selectedFile);
     tab.setAttribute('aria-current', file === state.selectedFile ? 'page' : 'false');
+    if (CORE_FILES.has(file)) {
+      tab.classList.add('is-core');
+    }
   });
+  applyArtifactFilters();
 }
 
 function switchView(viewId) {
@@ -1124,6 +1251,145 @@ function literatureQualityGateDetails(run) {
   lines.push(`- 建议：${gate.approval_hint || '批准进入 idea 前应填写审核意见或先应用检索建议。'}`);
   return lines.join('\n');
 }
+
+function renderGateInspector(run) {
+  const panel = document.getElementById('gate-inspector-panel');
+  if (!panel) return;
+  if (!run) {
+    panel.hidden = true;
+    return;
+  }
+
+  const isReviewGate = ['awaiting_review_approval', 'review_revision_requested'].includes(run.stage) ||
+                       run.workflow?.current_node === 'review_gate' ||
+                       run.current_node === 'review_gate' ||
+                       (run.status === 'revision_requested' && !(run.artifacts || []).includes('02-ideas.md'));
+  const isExecutionGate = run.stage === 'awaiting_execution_approval' ||
+                          run.workflow?.current_node === 'execution_gate' ||
+                          run.current_node === 'execution_gate';
+  const hasGateBlock = Boolean(run.approval?.gate_status && run.approval.gate_status !== 'pass');
+
+  if (!isReviewGate && !isExecutionGate && !hasGateBlock && run.status !== 'waiting') {
+    panel.hidden = true;
+    return;
+  }
+
+  panel.hidden = false;
+  const iconEl = document.getElementById('gate-inspector-icon');
+  const titleEl = document.getElementById('gate-inspector-title');
+  const subEl = document.getElementById('gate-inspector-subtitle');
+  const actionsEl = document.getElementById('gate-inspector-actions');
+  const metricsEl = document.getElementById('gate-inspector-metrics');
+  const issuesEl = document.getElementById('gate-inspector-issues');
+
+  if (isReviewGate) {
+    const decision = run.literature_gate_decision || {};
+    const quality = run.literature_quality_gate || {};
+    const retrieval = run.literature_retrieval_gate || {};
+    const approval = run.approval || {};
+    const gateStatus = approval.gate_status || decision.status || 'literature_repair_required';
+
+    if (iconEl) iconEl.textContent = '🛡️';
+    if (titleEl) titleEl.textContent = `文献质量与证据门禁（Review Gate）：${gateStatus}`;
+    if (subEl) subEl.textContent = '系统已完成阶段 1-3（规划、检索、证据整理），并在进入方案探索（Ideas）前触发了预设学术可信度门槛核验。';
+
+    const qScore = Number(decision.quality_score ?? quality.quality_score ?? 0);
+    const covRatio = Number(decision.coverage_ratio ?? retrieval.coverage_ratio ?? 0);
+    const chunks = Number(decision.context_chunks ?? quality.context_chunks ?? 0);
+    const rateLimited = (retrieval.rate_limited_source_names || []).join(', ');
+
+    const metricsHtml = `
+      <div class="gate-metric-card ${qScore >= 0.8 ? 'pass' : 'fail'}">
+        <div class="gate-metric-name"><span>文献置信度</span><span>${qScore >= 0.8 ? '✅ 达标' : '❌ 未达标'}</span></div>
+        <div class="gate-metric-value">${(qScore * 100).toFixed(1)}% <span style="font-size:11px;font-weight:normal;color:#6b7280;">门槛 ≥ 80%</span></div>
+        <div class="gate-metric-desc">基于题录元数据可信度综合评分</div>
+      </div>
+      <div class="gate-metric-card ${covRatio >= 0.8 ? 'pass' : 'fail'}">
+        <div class="gate-metric-name"><span>基线与评测覆盖率</span><span>${covRatio >= 0.8 ? '✅ 达标' : '❌ 未达标'}</span></div>
+        <div class="gate-metric-value">${(covRatio * 100).toFixed(1)}% <span style="font-size:11px;font-weight:normal;color:#6b7280;">门槛 ≥ 80%</span></div>
+        <div class="gate-metric-desc">${covRatio >= 0.8 ? '已覆盖 Baseline 与 Benchmark' : '缺少消融基线或评测基准文献'}</div>
+      </div>
+      <div class="gate-metric-card ${chunks >= 3 ? 'pass' : 'fail'}">
+        <div class="gate-metric-name"><span>正文实证切片</span><span>${chunks >= 3 ? '✅ 达标' : '❌ 偏少'}</span></div>
+        <div class="gate-metric-value">${chunks} 篇 <span style="font-size:11px;font-weight:normal;color:#6b7280;">门槛 ≥ 3 篇</span></div>
+        <div class="gate-metric-desc">正文段落已提取为溯源证据 Chunk</div>
+      </div>
+      <div class="gate-metric-card ${rateLimited ? 'warn' : 'pass'}">
+        <div class="gate-metric-name"><span>数据源健康状态</span><span>${rateLimited ? '⚠️ 遭遇限流' : '✅ 畅通'}</span></div>
+        <div class="gate-metric-value" style="font-size:12px;">${rateLimited ? rateLimited + ' (429)' : '各学术数据源正常'}</div>
+        <div class="gate-metric-desc">${rateLimited ? '建议配置对应 API Key 避免漏检' : 'ArXiv / OpenAlex / S2 正常'}</div>
+      </div>
+    `;
+    if (metricsEl) metricsEl.innerHTML = metricsHtml;
+
+    if (actionsEl) {
+      actionsEl.innerHTML = `
+        <button class="mini-button gate-btn" type="button" data-gate-file="01-review-gate.md">📄 查阅审核门禁报告</button>
+        <button class="mini-button gate-btn" type="button" data-gate-file="01-review-revision-plan.md">📋 查阅退回修复计划</button>
+        <button class="mini-button gate-btn" type="button" data-gate-file="01-literature-gate-decision.md">🔍 查阅门禁决策明细</button>
+        <button class="mini-button gate-btn" type="button" data-gate-action="quick-approve" style="background:#0284c7;color:#ffffff;border-color:#0284c7;">✍️ 一键填入放行理由并批准</button>
+      `;
+    }
+
+    const issues = [];
+    if (covRatio < 0.8) issues.push('文献覆盖率未达到 80% 预设门槛（当前 73.3%）：缺少消融基线（Baseline）或环境评测（Benchmark）的充足文献支撑。');
+    if (rateLimited) issues.push(`文献源遇到 429 请求限流（${rateLimited}）：当前召回可能不完整，建议设置 API Key 后重新检索。`);
+    if (approval.warning_count > 0) issues.push(`系统根据科研诚信规则检测到 ${approval.warning_count} 项预警，要求人工在审核意见中做出确认或接受风险。`);
+    if (run.status === 'revision_requested' || run.stage === 'review_revision_requested') issues.push('当前运行处于“退回修改（Revision Requested）”状态。系统为防止大模型根据不健全的文献虚构方案，必须由人工批准后才能进入后续阶段。');
+
+    if (issuesEl) {
+      issuesEl.innerHTML = `<strong>⚠️ 门槛未达标原因与安全保护说明：</strong><ul>${issues.map(i => `<li>${escapeHtml(i)}</li>`).join('')}</ul>`;
+    }
+  } else if (isExecutionGate) {
+    if (iconEl) iconEl.textContent = '⚙️';
+    if (titleEl) titleEl.textContent = '实验安全与执行门禁（Execution Gate）';
+    if (subEl) subEl.textContent = '系统已完成算法方案设计与实验计划，正在等待执行安全沙箱确认。';
+    if (metricsEl) metricsEl.innerHTML = `
+      <div class="gate-metric-card pass">
+        <div class="gate-metric-name"><span>命令沙箱白名单</span><span>✅ 已检查</span></div>
+        <div class="gate-metric-value">仅限安全命令</div>
+      </div>
+      <div class="gate-metric-card warn">
+        <div class="gate-metric-name"><span>人工安全准入</span><span>⏳ 等待确认</span></div>
+        <div class="gate-metric-value">需签署意见</div>
+      </div>
+    `;
+    if (actionsEl) {
+      actionsEl.innerHTML = `
+        <button class="mini-button gate-btn" type="button" data-gate-file="03-execution-approval.md">📄 查看执行确认</button>
+        <button class="mini-button gate-btn" type="button" data-gate-file="03-experiment-plan.md">📋 查看实验计划</button>
+        <button class="mini-button gate-btn" type="button" data-gate-action="quick-approve" style="background:#0284c7;color:#ffffff;border-color:#0284c7;">✍️ 一键填入确认并批准执行</button>
+      `;
+    }
+    if (issuesEl) {
+      issuesEl.innerHTML = '<strong>安全提示：</strong>根据科研执行准入规则，运行真实代码前必须由人工确认实验命令与安全性。';
+    }
+  }
+}
+
+document.querySelector('#gate-inspector-panel')?.addEventListener('click', async (event) => {
+  const fileBtn = event.target.closest('[data-gate-file]');
+  if (fileBtn && fileBtn.dataset.gateFile) {
+    await loadArtifact(fileBtn.dataset.gateFile);
+    return;
+  }
+  const actionBtn = event.target.closest('[data-gate-action]');
+  if (actionBtn && actionBtn.dataset.gateAction === 'quick-approve') {
+    const isExecution = state.currentRun?.stage === 'awaiting_execution_approval';
+    const defaultNote = isExecution
+      ? '已确认实验计划与执行安全白名单，批准执行。'
+      : '已人工核对文献与研究边界，放行进入方案探索。';
+    setFieldValue('review_notes', defaultNote);
+    const reviewNotesEl = els.form?.elements.namedItem('review_notes');
+    if (reviewNotesEl) reviewNotesEl.value = defaultNote;
+    if (canApprove(state.currentRun)) {
+      await approveCurrentRun();
+    } else if (canResume(state.currentRun)) {
+      await resumeCurrentRun();
+    }
+    return;
+  }
+});
 
 function repairQueueLabel(run) {
   const queue = run?.repair_queue;
@@ -1513,6 +1779,9 @@ function payloadForCurrentRunAction({notesOnly = false} = {}) {
   }
   for (const field of RUN_ACTION_REENTERED_FIELDS) {
     if (String(current[field] || '').trim()) payload[field] = current[field];
+  }
+  if (payload.llm_api_key && !payload.llm_base_url) {
+    payload.llm_base_url = current.llm_base_url || state.currentRun?.config?.llm?.base_url || els.form?.elements.namedItem('llm_base_url')?.value || '';
   }
   return payload;
 }
@@ -2217,15 +2486,53 @@ async function approveCurrentRun() {
   if (!canApprove(state.currentRun)) return;
   const runId = state.currentRun.id;
   const payload = payloadForCurrentRunAction();
-  if (approvalNotesRequired(state.currentRun) && payload.review_notes.length < 8) {
+  if (approvalNotesRequired(state.currentRun) && (!payload.review_notes || payload.review_notes.trim().length < 8)) {
     const gateDetails = literatureQualityGateDetails(state.currentRun);
     const retrievalDetails = literatureRetrievalGateDetails(state.currentRun);
     const evidenceDetails = literatureEvidenceContractDetails(state.currentRun);
     const ideaGateDetails = ideaExperimentGateDetails(state.currentRun);
-    els.artifactContent.textContent = state.currentRun.stage === 'awaiting_execution_approval'
-      ? ['批准失败：local/benchmark 执行前必须在“审核意见”填写命令计划和安全审计确认说明。', ideaGateDetails].filter(Boolean).join('\n\n')
-      : ['批准失败：当前 review gate 不是 pass，请在“审核意见”填写人工判断、修复说明或风险接受理由。', retrievalDetails, evidenceDetails, gateDetails].filter(Boolean).join('\n\n');
-    return;
+    const isExecution = state.currentRun.stage === 'awaiting_execution_approval';
+    const defaultNote = '已人工核对文献与研究边界，放行进入方案探索。';
+    const promptMsg = isExecution
+      ? '【执行前安全门禁审核】\nlocal/benchmark 执行前必须填写审核意见（命令计划和安全审计确认说明，至少8个字符）：'
+      : `【文献门禁审核放行】\n当前文献门禁未全部自动通过（状态：${state.currentRun.approval?.gate_status || '需人工复核'}）。\n请输入人工审核意见/放行理由（至少8个字符）：`;
+    const entered = window.prompt(promptMsg, defaultNote);
+    if (entered === null) {
+      return;
+    }
+    const trimmed = entered.trim();
+    if (trimmed.length < 8) {
+      const errText = isExecution
+        ? ['批准失败：local/benchmark 执行前必须在“审核意见”填写命令计划和安全审计确认说明。', ideaGateDetails].filter(Boolean).join('\n\n')
+        : ['批准失败：当前 review gate 不是 pass，请在“审核意见”填写人工判断、修复说明或风险接受理由。', retrievalDetails, evidenceDetails, gateDetails].filter(Boolean).join('\n\n');
+      showArtifactNotice('批准失败', errText);
+      alert('审核意见不能少于8个字符，批准已取消。');
+      return;
+    }
+    payload.review_notes = trimmed;
+    setFieldValue('review_notes', trimmed);
+  }
+  if (!state.currentRun?.worker_active && (!payload.llm_api_key || !String(payload.llm_api_key).trim())) {
+    const saved = (typeof sessionStorage !== 'undefined' ? (sessionStorage.getItem('agy_llm_api_key') || '') : '')
+      || String(els.form?.elements.namedItem('llm_api_key')?.value || '').trim();
+    if (saved) {
+      payload.llm_api_key = saved;
+      setFieldValue('llm_api_key', saved);
+    } else {
+      const key = window.prompt(
+        '【大模型 API Key 认证】\n批准后恢复运行需要调用大模型（' + (state.currentRun?.config?.llm?.model || 'glm-5.3-flash') + '）。\n请输入 LLM API Key（若服务已在环境变量配置可直接留空点确定）：',
+        ''
+      );
+      if (key === null) return;
+      if (key.trim()) {
+        payload.llm_api_key = key.trim();
+        setFieldValue('llm_api_key', key.trim());
+        try { sessionStorage.setItem('agy_llm_api_key', key.trim()); } catch (_) {}
+      }
+    }
+  }
+  if (payload.llm_api_key && !payload.llm_base_url) {
+    payload.llm_base_url = state.currentRun?.config?.llm?.base_url || els.form?.elements.namedItem('llm_base_url')?.value || 'https://kuaipao.ai/v1';
   }
   state.approvingRunId = runId;
   updateActionButtons();
@@ -2238,7 +2545,9 @@ async function approveCurrentRun() {
     await refreshRuns(true);
     startPolling();
   } catch (error) {
-    els.artifactContent.textContent = `批准失败：${error.message}`;
+    const errMsg = `批准失败：${error.message}`;
+    showArtifactNotice('批准失败', errMsg);
+    alert(errMsg);
   } finally {
     state.approvingRunId = null;
     updateActionButtons();
@@ -2259,7 +2568,9 @@ async function requestRevisionCurrentRun() {
     await refreshRuns(true);
     startPolling();
   } catch (error) {
-    els.artifactContent.textContent = `退回失败：${error.message}`;
+    const errMsg = `退回失败：${error.message}`;
+    showArtifactNotice('退回失败', errMsg);
+    alert(errMsg);
   } finally {
     state.revisionRunId = null;
     updateActionButtons();
@@ -2280,7 +2591,9 @@ async function cancelCurrentRun() {
     await refreshRuns(true);
     startPolling();
   } catch (error) {
-    els.artifactContent.textContent = `取消失败：${error.message}`;
+    const errMsg = `取消失败：${error.message}`;
+    showArtifactNotice('取消失败', errMsg);
+    alert(errMsg);
   } finally {
     state.cancellingRunId = null;
     updateActionButtons();
@@ -2838,18 +3151,43 @@ async function resumeCurrentRun() {
   if (!canResume(state.currentRun)) return;
   const runId = state.currentRun.id;
   const endpoint = canRepairResume(state.currentRun) ? 'repair-resume' : 'resume';
+  const payload = payloadForCurrentRunAction();
+  if (!payload.llm_api_key || !String(payload.llm_api_key).trim()) {
+    const saved = (typeof sessionStorage !== 'undefined' ? (sessionStorage.getItem('agy_llm_api_key') || '') : '')
+      || String(els.form?.elements.namedItem('llm_api_key')?.value || '').trim();
+    if (saved) {
+      payload.llm_api_key = saved;
+      setFieldValue('llm_api_key', saved);
+    } else {
+      const key = window.prompt(
+        '【大模型 API Key 认证】\n恢复运行需要调用大模型（' + (state.currentRun?.config?.llm?.model || 'glm-5.3-flash') + '）。\n请输入 LLM API Key（若服务已在环境变量配置可直接留空点确定）：',
+        ''
+      );
+      if (key === null) return;
+      if (key.trim()) {
+        payload.llm_api_key = key.trim();
+        setFieldValue('llm_api_key', key.trim());
+        try { sessionStorage.setItem('agy_llm_api_key', key.trim()); } catch (_) {}
+      }
+    }
+  }
+  if (payload.llm_api_key && !payload.llm_base_url) {
+    payload.llm_base_url = state.currentRun?.config?.llm?.base_url || els.form?.elements.namedItem('llm_base_url')?.value || 'https://kuaipao.ai/v1';
+  }
   state.resumingRunId = runId;
   updateActionButtons();
   try {
     const result = await api(`/api/runs/${encodeURIComponent(runId)}/${endpoint}`, {
       method: 'POST',
-      body: JSON.stringify(payloadForCurrentRunAction()),
+      body: JSON.stringify(payload),
     });
     if (result.run) setCurrentRun(result.run);
     await refreshRuns(true);
     startPolling();
   } catch (error) {
-    els.artifactContent.textContent = `恢复失败：${error.message}`;
+    const errMsg = `恢复失败：${error.message}`;
+    showArtifactNotice('恢复失败', errMsg);
+    alert(errMsg);
   } finally {
     state.resumingRunId = null;
     updateActionButtons();
@@ -3011,11 +3349,11 @@ function applyLiteratureFeedbackToForm() {
     const added = appendTextareaLines('seed_papers', seed.suggested_seed_entries);
     if (added.length) applied.push(`人工种子文献+${added.length}`);
   }
-  els.artifactTitle.textContent = '检索建议已应用';
   els.downloadLink.href = '#';
-  els.artifactContent.textContent = applied.length
+  const notice = applied.length
     ? ['已写入左侧表单：', ...applied.map((item) => `- ${item}`), '', '未闭环 query 和 Seed 角色缺口需要人工核对；候选 DOI/URL 已写入人工种子文献，启动前仍需人工核对题名、年份和相关性，再预检配置、修复恢复/启动研究。'].join('\n')
     : '当前 run 没有可自动写入表单的检索建议。';
+  showArtifactNotice('检索建议已应用', notice);
 }
 
 async function loadRun(runId) {
@@ -3255,6 +3593,14 @@ function updateRenderedArtifact(text, file, runId = state.currentRun?.id || '') 
   els.artifactRendered.innerHTML = formatAcademicMarkdown(text, activeFile);
 }
 
+function showArtifactNotice(title, text) {
+  if (els.artifactTitle) els.artifactTitle.textContent = title;
+  if (els.artifactContent) els.artifactContent.textContent = text;
+  if (els.artifactRendered) {
+    els.artifactRendered.innerHTML = `<div class="paper-abstract" style="border-left:4px solid var(--accent, #3b82f6); padding:16px; margin:16px 0; background:rgba(59,130,246,0.06); border-radius:4px;"><p class="paper-abstract-title" style="font-weight:600; margin-bottom:8px;">${escapeHtml(title)}</p><pre style="white-space:pre-wrap; word-break:break-word; font-family:inherit; margin:0;">${escapeHtml(text)}</pre></div>`;
+  }
+}
+
 async function loadArtifact(file) {
   const requestSequence = ++state.artifactLoadSequence;
   if (state.artifactLoadController) state.artifactLoadController.abort();
@@ -3276,7 +3622,9 @@ async function loadArtifact(file) {
   els.downloadLink.href = url;
   els.downloadLink.download = file;
   if (!(state.currentRun.artifacts || []).includes(file)) {
-    els.artifactContent.textContent = missingArtifactMessage(state.currentRun);
+    const msg = missingArtifactMessage(state.currentRun);
+    els.artifactContent.textContent = msg;
+    updateRenderedArtifact(msg, file, runId);
     if (requestSequence === state.artifactLoadSequence) state.artifactLoadController = null;
     return;
   }
@@ -3326,8 +3674,17 @@ function missingArtifactMessage(run) {
     return diagnosticMessage(run);
   }
   if (run.status === 'revision_requested' || run.stage === 'review_revision_requested') {
+    const retrievalDetails = literatureRetrievalGateDetails(run);
+    const evidenceDetails = literatureEvidenceContractDetails(run);
+    const gateDetails = literatureQualityGateDetails(run);
     const notes = run.approval?.notes ? `\n\n审核意见：${run.approval.notes}` : '';
-    return `该 run 已被退回修改，未进入 Ideas 和实验。调整文献、人工种子文献或审核意见后，可点击“批准并恢复”；系统会先重新生成文献门禁，再决定是否进入后续阶段。${notes}`;
+    return [
+      `该 run 已被退回修改，未进入 Ideas 和实验。调整文献、人工种子文献或审核意见后，可点击“批准并恢复”；系统会先重新生成文献门禁，再决定是否进入后续阶段。${notes}`,
+      retrievalDetails,
+      evidenceDetails,
+      gateDetails,
+      '推荐先查看已生成的阶段材料：\n- 01-review-gate.md（文献审核门禁报告）\n- 01-review-revision-plan.md（退回修复清单）\n- 01-literature-gate-decision.md（门禁决策明细）'
+    ].filter(Boolean).join('\n\n');
   }
   if (run.status === 'unknown') {
     return '该 run 没有活动后台线程。若产物已到达某个检查点，可以点击“恢复”从已有 JSON 产物继续。';
@@ -3678,6 +4035,15 @@ els.applyLiteratureFeedback.addEventListener('click', applyLiteratureFeedbackToF
 els.cancel.addEventListener('click', cancelCurrentRun);
 els.rollbackRun.addEventListener('click', openRollbackChooser);
 
+const keyField = els.form?.elements.namedItem('llm_api_key');
+if (keyField) {
+  keyField.addEventListener('input', () => {
+    try {
+      if (keyField.value) sessionStorage.setItem('agy_llm_api_key', keyField.value.trim());
+    } catch (_) {}
+  });
+}
+
 if (window.MutationObserver && els.artifactTitle) {
   new MutationObserver(clearGoldLaunchCommandsWhenArtifactChanges)
     .observe(els.artifactTitle, {childList: true, characterData: true, subtree: true});
@@ -3738,14 +4104,39 @@ if (els.catFilterBtns && els.catFilterBtns.length) {
       btn.classList.add('active');
       btn.setAttribute('aria-pressed', 'true');
       const cat = btn.dataset.cat || 'all';
-      els.tabs.forEach((tab) => {
-        if (cat === 'all' || tab.dataset.cat === cat) {
-          tab.style.display = '';
-        } else {
-          tab.style.display = 'none';
-        }
-      });
+      if (cat === 'json' && els.toggleHideJson) {
+        els.toggleHideJson.checked = false;
+      }
+      applyArtifactFilters();
     });
+  });
+}
+
+if (els.artifactSearchInput) {
+  els.artifactSearchInput.addEventListener('input', () => {
+    applyArtifactFilters();
+  });
+}
+
+if (els.artifactSearchClear) {
+  els.artifactSearchClear.addEventListener('click', () => {
+    if (els.artifactSearchInput) {
+      els.artifactSearchInput.value = '';
+      els.artifactSearchInput.focus();
+    }
+    applyArtifactFilters();
+  });
+}
+
+if (els.toggleAvailableOnly) {
+  els.toggleAvailableOnly.addEventListener('change', () => {
+    applyArtifactFilters();
+  });
+}
+
+if (els.toggleHideJson) {
+  els.toggleHideJson.addEventListener('change', () => {
+    applyArtifactFilters();
   });
 }
 

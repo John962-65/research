@@ -54,6 +54,22 @@ def diagnose_exception(exc: BaseException, topic: str = "", stage: str = "", tra
             details=str(exc),
             traceback=traceback_text,
         )
+    if "execution safety audit blocked execution" in lowered or "timeout_seconds 不得超过" in text:
+        return RunDiagnostic(
+            category="execution_safety",
+            severity="blocking",
+            summary="实验安全沙箱拦截：执行超时或命令不符合安全沙箱规则。",
+            likely_cause="配置的 timeout_seconds 超过了系统沙箱硬上限（最大 3600 秒），或命令不在白名单中。",
+            recommended_actions=[
+                "将执行超时 (timeout_seconds) 调整为不超过 3600 秒（如默认 300 秒）。",
+                "核对实验命令是否在白名单 (python3, pytest) 中。",
+                "修改后点击“恢复”继续流水线执行。",
+            ],
+            topic=topic,
+            stage=stage,
+            details=str(exc),
+            traceback=traceback_text,
+        )
     if "openai-compatible endpoint failed" in lowered or "urlerror" in lowered or "timed out" in lowered or "timeout" in lowered:
         return RunDiagnostic(
             category="llm_connection",

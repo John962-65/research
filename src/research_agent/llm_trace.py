@@ -4,7 +4,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
-from typing import Any
+from typing import Any, Callable
 import hashlib
 import json
 import os
@@ -113,65 +113,112 @@ class TracedLLM:
         """
         with _ledger_lock(self.run_dir):
             prepared = _prepare_request(self.inner, system, user, stage=stage, purpose=purpose, agent_id=agent_id)
-            traced_system = str(getattr(prepared, "system", system))
-            traced_user = str(getattr(prepared, "user", user))
-            route = getattr(prepared, "route", None)
-            metadata = _route_metadata(route, stage=stage, agent_id=agent_id)
-            started_at = _utc_now()
-            started = time.monotonic()
-            _publish_activity(self.run_dir, metadata, status="running")
-            budget_error, budget_status = self._budget_error(traced_system, traced_user)
-            if budget_error:
-                call_id = self._append(
-                    traced_system,
-                    traced_user,
-                    "",
-                    started_at,
-                    started,
-                    budget_status,
-                    budget_error,
-                    stage=stage,
-                    purpose=purpose,
-                    route=route,
-                    skill_records=_prepared_skill_records(prepared),
-                )
-                _publish_activity(self.run_dir, metadata, status="failed", detail=budget_error)
-                raise RuntimeError(budget_error)
-            try:
-                response = _complete_prepared(self.inner, prepared, traced_system, traced_user)
-            except Exception as exc:
-                self._append(
-                    traced_system,
-                    traced_user,
-                    "",
-                    started_at,
-                    started,
-                    "failed",
-                    str(exc),
-                    stage=stage,
-                    purpose=purpose,
-                    route=route,
-                    skill_records=_prepared_skill_records(prepared),
-                )
-                _publish_activity(self.run_dir, metadata, status="failed", detail=str(exc))
-                raise
-            status = "validation_pending" if requires_validation else "success"
+            conversation = getattr(self.inner, "complete_prepared_with_trace", None)
+            if prepared is not None and callable(conversation):
+                final_call_id = 0
+
+                def complete_request(request: Any) -> str:
+                    nonlocal final_call_id
+                    response, final_call_id = self._complete_request(
+                        request, system, user, stage=stage, purpose=purpose,
+                        requires_validation=False, agent_id=agent_id,
+                        complete=self.inner.complete_request,
+                    )
+                    return response
+
+                try:
+                    response = conversation(prepared, complete_request)
+                except Exception as exc:
+                    metadata = _route_metadata(getattr(prepared, "route", None), stage=stage, agent_id=agent_id)
+                    _publish_activity(self.run_dir, metadata, status="failed", detail=str(exc))
+                    raise
+                if requires_validation:
+                    # Intermediate tool requests succeeded; only the final answer needs schema validation.
+                    entries = _read_entries(self.run_dir / LLM_TRACE_JSON)
+                    entries = [
+                        replace(entry, status="validation_pending") if entry.call_id == final_call_id else entry
+                        for entry in entries
+                    ]
+                    report = _report(entries)
+                    write_json(self.run_dir / LLM_TRACE_JSON, report)
+                    write_text(self.run_dir / LLM_TRACE_MD, render_llm_trace_markdown(report))
+                return response, final_call_id
+            return self._complete_request(
+                prepared, system, user, stage=stage, purpose=purpose,
+                requires_validation=requires_validation, agent_id=agent_id,
+            )
+
+    def _complete_request(
+        self,
+        prepared: Any,
+        system: str,
+        user: str,
+        *,
+        stage: str,
+        purpose: str,
+        requires_validation: bool,
+        agent_id: str,
+        complete: Callable[[Any], str] | None = None,
+    ) -> tuple[str, int]:
+        traced_system = str(getattr(prepared, "system", system))
+        traced_user = str(getattr(prepared, "user", user))
+        route = getattr(prepared, "route", None)
+        metadata = _route_metadata(route, stage=stage, agent_id=agent_id)
+        started_at = _utc_now()
+        started = time.monotonic()
+        _publish_activity(self.run_dir, metadata, status="running")
+        budget_error, budget_status = self._budget_error(traced_system, traced_user)
+        if budget_error:
             call_id = self._append(
                 traced_system,
                 traced_user,
-                response,
+                "",
                 started_at,
                 started,
-                status,
-                "",
+                budget_status,
+                budget_error,
                 stage=stage,
                 purpose=purpose,
                 route=route,
                 skill_records=_prepared_skill_records(prepared),
-                route_usage=getattr(self.inner, "last_usage", None),
             )
-            _publish_activity(self.run_dir, metadata, status="completed")
-            return response, call_id
+            _publish_activity(self.run_dir, metadata, status="failed", detail=budget_error)
+            raise RuntimeError(budget_error)
+        try:
+            response = complete(prepared) if complete is not None else _complete_prepared(self.inner, prepared, traced_system, traced_user)
+        except Exception as exc:
+            self._append(
+                traced_system,
+                traced_user,
+                "",
+                started_at,
+                started,
+                "failed",
+                str(exc),
+                stage=stage,
+                purpose=purpose,
+                route=route,
+                skill_records=_prepared_skill_records(prepared),
+            )
+            _publish_activity(self.run_dir, metadata, status="failed", detail=str(exc))
+            raise
+        status = "validation_pending" if requires_validation else "success"
+        call_id = self._append(
+            traced_system,
+            traced_user,
+            response,
+            started_at,
+            started,
+            status,
+            "",
+            stage=stage,
+            purpose=purpose,
+            route=route,
+            skill_records=_prepared_skill_records(prepared),
+            route_usage=getattr(self.inner, "last_usage", None),
+        )
+        _publish_activity(self.run_dir, metadata, status="completed")
+        return response, call_id
 
     def complete_as_agent(
         self,
@@ -649,5 +696,4 @@ def _workflow_revision(run_dir: Path) -> int:
 
 def _redact_url(value: str) -> str:
     return value.replace("@", "@***")
-
 

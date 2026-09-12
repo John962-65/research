@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 import json
 import uuid
 
@@ -244,11 +244,20 @@ class EdgeDecision:
     satisfied: bool
 
 
-class WorkflowEngine:
-    """Edge predicates over the reduced node state (ENGINE-01).
+@dataclass(frozen=True)
+class NodeOutcome:
+    status: str = "completed"
 
-    The declared ``WORKFLOW_EDGES`` are only a display model until each
-    condition is a testable predicate. Every edge gets a predicate over
+
+class WorkflowDispatchError(RuntimeError):
+    """The graph cannot select a unique, registered continuation."""
+
+
+class WorkflowEngine:
+    """Executable handler dispatch over reduced node state (ENGINE-01).
+
+    The pipeline registers executable handlers with ``run``. Every edge has a
+    predicate over
     ``(node_states, facts)``; ``facts`` carries the artifact-level decisions
     (mode requires approval, writing blocked, revisions required) that the
     pipeline and audits supply. Table-driven tests prove each predicate is
@@ -258,6 +267,60 @@ class WorkflowEngine:
     def __init__(self, node_ids: list[str]) -> None:
         self.node_ids = list(node_ids)
         self._predicates = self._build_predicates()
+
+    def run(
+        self, run_dir: Path, *, start: str,
+        handlers: dict[str, Callable[[], NodeOutcome | None]],
+        facts: Callable[[], dict[str, bool]],
+        terminal_nodes: set[str],
+        before_node: Callable[[str], None] | None = None,
+        on_edge: Callable[[str, str], None] | None = None,
+        max_steps: int = 128,
+        from_node: str | None = None,
+    ) -> str:
+        """Execute registered handlers; predicates, not file presence, select edges.
+
+        A handler owns loading/validating its checkpoint and its actual work.
+        Completion is committed only after it returns. Waiting stops dispatch;
+        exceptions propagate to the existing CLI/Web recovery boundary.
+        """
+        current = start
+        if from_node is not None:
+            successors = self.satisfied_successors(from_node, read_node_states(run_dir), facts())
+            if successors != [start]:
+                raise WorkflowDispatchError(f"cannot resume {from_node}->{start}: enabled successors {successors}")
+            if on_edge:
+                on_edge(from_node, start)
+        for _ in range(max_steps):
+            if current not in self.node_ids or current not in handlers:
+                raise WorkflowDispatchError(f"no executable handler for {current}")
+            if before_node:
+                before_node(current)
+            append_node_event(run_dir, node_id=current, event_type="started", detail="engine dispatch")
+            try:
+                outcome = handlers[current]() or NodeOutcome()
+            except BaseException as exc:
+                status = "cancelled" if type(exc).__name__ == "PipelineCancelled" else (
+                    "waiting" if type(exc).__name__ == "PipelineReviewRevisionRequested" else "failed")
+                append_node_event(run_dir, node_id=current, event_type=status, detail=type(exc).__name__)
+                raise
+            if outcome.status not in {"completed", "waiting", "skipped"}:
+                raise WorkflowDispatchError(f"invalid handler outcome: {outcome.status}")
+            append_node_event(run_dir, node_id=current, event_type=outcome.status, detail="engine handler returned")
+            if outcome.status == "waiting" or current in terminal_nodes:
+                return current
+            successors = self.satisfied_successors(current, read_node_states(run_dir), facts())
+            if len(successors) != 1:
+                raise WorkflowDispatchError(f"expected one successor for {current}, got {successors}")
+            target = successors[0]
+            if target not in handlers:
+                raise WorkflowDispatchError(f"no executable handler for {target}")
+            if on_edge:
+                on_edge(current, target)
+            if (current, target) == ("experiment_plan", "experiments"):
+                append_node_event(run_dir, node_id="execution_gate", event_type="skipped", detail="execution does not require approval")
+            current = target
+        raise WorkflowDispatchError(f"workflow exceeded {max_steps} transitions")
 
     def _status(self, states: dict[str, dict[str, Any]], node_id: str) -> str:
         return str(states.get(node_id, {}).get("status") or "pending")
@@ -286,7 +349,7 @@ class WorkflowEngine:
             and not bool(facts.get("execution_requires_approval"))
             and self._status(states, "execution_gate") != "waiting",
             ("execution_gate", "experiments"): status_is("execution_gate", "completed"),
-            ("experiments", "analysis"): status_is("experiments", "completed"),
+            ("experiments", "analysis"): lambda states, facts: self._status(states, "experiments") == "completed" and not bool(facts.get("repair_required")),
             ("experiments", "experiment_plan"): lambda states, facts: self._status(
                 states, "experiments"
             ) in {"failed", "cancelled"} or bool(facts.get("repair_required")),

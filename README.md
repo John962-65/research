@@ -129,7 +129,7 @@ enabled = false
 ```
 
 - **skill**：`skills/<skill_id>/SKILL.md` 全文注入对应角色的 system prompt。内置四个 skill（experiment-design、manuscript-editing、evidence-grounding、skeptical-review），角色未显式配置时按内置默认绑定（如 skeptical_reviewer → skeptical-review、benchmark_engineer → experiment-design）。
-- **MCP**：仅支持 streamable-http 传输（`pip install -e '.[mcp]'` 安装依赖），默认仅限 localhost、强制只读、工具白名单非空、auth env 限定 `RESEARCH_AGENT_MCP_*` 命名空间；每次调用写 `run-tool-receipts.json` 审计回执。工具结果以「不可信数据」注入，最多 `max_tool_rounds` 轮。
+- **MCP**：仅支持 streamable-http 传输（`pip install -e '.[mcp]'` 安装兼容的 MCP 1.x 依赖），默认仅限 localhost、强制只读、工具白名单非空、auth env 限定 `RESEARCH_AGENT_MCP_*` 命名空间；每次调用写 `run-tool-receipts.json` 审计回执。工具结果以「不可信数据」注入，最多 `max_tool_rounds` 轮。工具结果触发的每次模型续问都单独检查调用数与累计 prompt 字符预算，并记录该次请求的哈希、角色、skill 和 provider token 用量；最终输出校验绑定最后一次模型调用。
 - 完整字段说明见 `examples/config.toml` 与 `docs/platform.md`。
 
 ## 修复恢复与跨 run 记忆
@@ -187,6 +187,12 @@ RESEARCH_AGENT_OPENAI_API_KEY_FIFO="$fifo" RESEARCH_AGENT_GOLD_DRY_RUN=1 scripts
 read -rsp "OPENAI_API_KEY: " k; printf '\n'; printf '%s\n' "$k" > "$fifo"; unset k
 rm -f "$fifo"; rmdir "$fifo_dir"
 ```
+
+## 决策完整性修复与评审验证
+
+人工覆盖严格绑定批准值、当前版本和完整证据哈希；Run 租约区分线程重入；新建及恢复路径由实际工作流引擎选边执行。行为与兼容边界见 [修复说明](docs/workflow-integrity-fixes.md)。
+
+可直接运行 [12 个结构化评审案例及真实试用测量入口](docs/review-evaluation.md)。没有真实使用者数据时，业务效果明确标为 `not_measured`。
 
 ## 测试与 CI
 

@@ -121,7 +121,7 @@ class OpenAICompatibleLLM:
                             last_error = RuntimeError(f"{safe_url} returned HTTP {exc.code}: {detail}")
                             if exc.code in {404, 405}:
                                 break
-                            if exc.code in {429, 502, 503, 504} and attempt < attempts - 1:
+                            if exc.code in {429, 500, 502, 503, 504, 520, 521, 522, 523, 524} and attempt < attempts - 1:
                                 delay = _retry_delay_seconds(exc, attempt)
                                 if delay is not None:
                                     _sleep_within_deadline(delay, deadline, "LLM completion")
@@ -331,7 +331,7 @@ def _candidate_model_urls(base_url: str, provider: str) -> list[str]:
 
 
 def _request_timeout_seconds() -> float:
-    return _positive_timeout(os.environ.get("OPENAI_TIMEOUT_SECONDS", "90"), "OPENAI_TIMEOUT_SECONDS")
+    return _positive_timeout(os.environ.get("OPENAI_TIMEOUT_SECONDS", "300"), "OPENAI_TIMEOUT_SECONDS")
 
 
 def _max_attempts() -> int:

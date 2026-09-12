@@ -108,20 +108,24 @@ def _try_ai_paper(
     evidence_integrity: EvidenceIntegrity | None = None,
     runbook: dict[str, Any] | None = None,
 ) -> str:
-    draft, call_id = complete_with_purpose_detail(
-        llm,
-        "Paper writing. You write concise Chinese academic Markdown. Use only provided evidence and experimental results.",
-        _paper_prompt(topic, review, ideas, plan, analysis, config, failure_analysis, experiment_decision, hypothesis_outcome, claim_boundary_preflight, benchmark_evidence, evidence_integrity, runbook),
-        stage="paper_writing",
-        purpose="paper writing",
-        requires_validation=True,
-    )
-    draft = _strip_code_fence(draft).strip()
-    valid = _looks_like_paper(draft, citation_keys, claim_boundaries, claim_boundary_preflight)
-    record_validation_result(llm, stage="paper_writing", valid=valid, error="paper draft failed structure/evidence validation", call_id=call_id)
-    if valid:
-        return draft
-    return ""
+    try:
+        draft, call_id = complete_with_purpose_detail(
+            llm,
+            "Paper writing. You write concise Chinese academic Markdown. Use only provided evidence and experimental results. Keep the text concise, informative, and under 2500 words.",
+            _paper_prompt(topic, review, ideas, plan, analysis, config, failure_analysis, experiment_decision, hypothesis_outcome, claim_boundary_preflight, benchmark_evidence, evidence_integrity, runbook),
+            stage="paper_writing",
+            purpose="paper writing",
+            requires_validation=True,
+        )
+        draft = _strip_code_fence(draft).strip()
+        valid = _looks_like_paper(draft, citation_keys, claim_boundaries, claim_boundary_preflight)
+        record_validation_result(llm, stage="paper_writing", valid=valid, error="paper draft failed structure/evidence validation", call_id=call_id)
+        if valid:
+            return draft
+        return ""
+    except Exception as exc:
+        record_validation_result(llm, stage="paper_writing", valid=False, error=f"AI paper generation error: {exc}")
+        return ""
 
 
 def _paper_prompt(
@@ -151,6 +155,7 @@ def _paper_prompt(
             f"课题：{topic}",
             f"目标场景：{config.target_venue}；写作风格：{config.style}",
             "请写一篇中文 Markdown 论文草稿，必须包含这些二级标题：摘要、引言、相关工作、方法、结果、局限性、结论、代码和数据可用性、复现清单。",
+            "要求语言严谨精炼、论点直接，全文控制在 2500 字以内，重点清晰列出核心假设、实验数据与结论边界，避免冗长废话。",
             "不要编造不存在的实验结果；所有结论必须受下面证据约束。",
             "正文中的文献性主张必须使用方括号 citation key，例如 [key]；只能使用下列 citation keys：",
             ", ".join(citation_keys) if citation_keys else "当前没有可用 citation key，必须标记待人工补充。",

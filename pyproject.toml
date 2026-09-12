@@ -15,7 +15,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
-mcp = ["mcp>=1.2"]
+mcp = ["mcp>=1.2,<2"]
 
 [project.scripts]
 research-agent = "research_agent.cli:main"
@@ -23,4 +23,3 @@ research-agent-web = "research_agent.web_server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-

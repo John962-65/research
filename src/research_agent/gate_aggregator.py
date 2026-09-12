@@ -13,6 +13,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 import json
+import hashlib
+import hmac
 
 from .artifacts import write_json, write_text, cell as _cell, utc_now as _utc_now
 
@@ -54,31 +56,44 @@ def aggregate_final_decision(
     warning_sources: list[str] = []
     for name, report in deterministic_audits.items():
         status = str((report or {}).get("status") or "")
-        if status == "block":
+        if status not in {"pass", "warn", "review_required"}:
             blocking_sources.append(f"deterministic:{name}")
-        elif status == "warn":
+        elif status in {"warn", "review_required"}:
             warning_sources.append(f"deterministic:{name}")
 
     missing_roles: list[str] = []
     verdicts: list[dict[str, Any]] = []
     if independent_deliberation is not None:
+        if independent_deliberation.get("status") in {"block", "invalid"}:
+            blocking_sources.append("independent_deliberation")
+        if "revision" in independent_deliberation and independent_deliberation["revision"] != revision:
+            blocking_sources.append("independent_deliberation:stale_revision")
         verdicts = [
             item for item in (independent_deliberation.get("verdicts") or []) if isinstance(item, dict)
         ]
         for verdict in verdicts:
             verdict_value = str(verdict.get("verdict") or "")
             agent_id = str(verdict.get("agent_id") or "unknown")
-            if verdict_value in {"block", "invalid", ""}:
+            if verdict_value not in {"pass", "warn"}:
                 blocking_sources.append(f"verdict:{agent_id}")
             elif verdict_value == "warn":
                 warning_sources.append(f"verdict:{agent_id}")
-        for role_id in expected_roles or []:
-            if not any(str(item.get("agent_id") or "") == role_id for item in verdicts):
-                missing_roles.append(role_id)
-        if missing_roles:
-            blocking_sources.extend(f"missing_verdict:{role_id}" for role_id in missing_roles)
+    for role_id in expected_roles or []:
+        if not any(str(item.get("agent_id") or "") == role_id for item in verdicts):
+            missing_roles.append(role_id)
+    if missing_roles:
+        blocking_sources.extend(f"missing_verdict:{role_id}" for role_id in missing_roles)
 
     status = "blocked" if blocking_sources else ("repair_required" if warning_sources else "publishable")
+    # Bind approval to the actual evidence, not just the names of its sources.
+    # Deliberately exclude the output timestamp and the override itself.
+    verdict_sha256 = hashlib.sha256(json.dumps({
+        "schema_version": 1,
+        "revision": revision,
+        "deterministic_audits": deterministic_audits,
+        "independent_deliberation": independent_deliberation,
+        "expected_roles": sorted(set(expected_roles or [])),
+    }, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")).hexdigest()
 
     override_applied = False
     override_payload: dict[str, Any] = {}
@@ -89,8 +104,20 @@ def aggregate_final_decision(
             for name in OVERRIDE_REQUIRED_FIELDS
             if override.get(name) is None or override.get(name) == ""
         ]
-        if missing:
-            warning_sources.append(f"override_rejected:missing fields {','.join(missing)}")
+        errors = [f"missing fields {','.join(missing)}"] if missing else []
+        if override.get("approved") is not True:
+            errors.append("approved must be true")
+        if type(override.get("revision")) is not int or override["revision"] != revision:
+            errors.append("revision does not match current decision")
+        for name, limit in (("reviewer", 120), ("reason", 500)):
+            value = override.get(name)
+            if not isinstance(value, str) or not value.strip() or len(value) > limit:
+                errors.append(f"{name} must be nonblank text of at most {limit} characters")
+        digest = override.get("verdict_sha256")
+        if not isinstance(digest, str) or not digest.isascii() or not hmac.compare_digest(digest, verdict_sha256):
+            errors.append("verdict_sha256 does not match current evidence")
+        if errors:
+            warning_sources.extend(f"override_rejected:{error}" for error in errors)
         else:
             override_applied = True
             override_payload = {
@@ -115,6 +142,7 @@ def aggregate_final_decision(
             "deterministic_audits": sorted(deterministic_audits),
             "independent_deliberation": independent_deliberation is not None,
             "verdict_count": len(verdicts),
+            "verdict_sha256": verdict_sha256,
         },
         created_at=_utc_now(),
     )

@@ -65,18 +65,22 @@ def _try_ai_rewrite(
     llm: LLM,
     benchmark_evidence: dict[str, Any] | None,
 ) -> str:
-    draft, call_id = complete_with_purpose_detail(
-        llm,
-        "Paper revision. You revise Chinese academic Markdown without inventing evidence.",
-        _rewrite_prompt(topic, paper_md, revision_plan, paper_review, benchmark_evidence),
-        stage="paper_revision",
-        purpose="paper revision",
-        requires_validation=True,
-    )
-    draft = _strip_code_fence(draft).strip()
-    valid = _looks_like_revised_paper(draft, benchmark_evidence)
-    record_validation_result(llm, stage="paper_revision", valid=valid, error="revised paper failed structure/evidence validation", call_id=call_id)
-    return draft if valid else ""
+    try:
+        draft, call_id = complete_with_purpose_detail(
+            llm,
+            "Paper revision. You revise Chinese academic Markdown without inventing evidence. Keep the revision concise and under 2500 words.",
+            _rewrite_prompt(topic, paper_md, revision_plan, paper_review, benchmark_evidence),
+            stage="paper_revision",
+            purpose="paper revision",
+            requires_validation=True,
+        )
+        draft = _strip_code_fence(draft).strip()
+        valid = _looks_like_revised_paper(draft, benchmark_evidence)
+        record_validation_result(llm, stage="paper_revision", valid=valid, error="revised paper failed structure/evidence validation", call_id=call_id)
+        return draft if valid else ""
+    except Exception as exc:
+        record_validation_result(llm, stage="paper_revision", valid=False, error=f"AI rewrite generation error: {exc}")
+        return ""
 
 
 def _rewrite_prompt(

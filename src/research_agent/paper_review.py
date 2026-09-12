@@ -76,14 +76,18 @@ def _try_ai_review(
     context: LiteratureContext | None,
     llm: LLM,
 ) -> PaperReview | None:
-    raw, call_id = complete_with_purpose_detail(
-        llm,
-        "Scientific peer review. You are a rigorous reviewer. Return only valid JSON in Chinese.",
-        _review_prompt(topic, review, ideas, plan, analysis, paper_md, context),
-        stage="paper_review_loop",
-        purpose="scientific peer review",
-        requires_validation=True,
-    )
+    try:
+        raw, call_id = complete_with_purpose_detail(
+            llm,
+            "Scientific peer review. You are a rigorous reviewer. Return only valid JSON in Chinese.",
+            _review_prompt(topic, review, ideas, plan, analysis, paper_md, context),
+            stage="paper_review_loop",
+            purpose="scientific peer review",
+            requires_validation=True,
+        )
+    except Exception as exc:
+        record_validation_result(llm, stage="paper_review_loop", valid=False, error=f"AI review generation error: {exc}")
+        return None
     data = _parse_json(raw)
     if not isinstance(data, dict):
         record_validation_result(llm, stage="paper_review_loop", valid=False, error="response is not a JSON object", call_id=call_id)

@@ -7,6 +7,7 @@ import json
 import sys
 import time
 import unittest
+from threading import Thread
 
 from research_agent.run_lease import (
     RunLeaseConflict,
@@ -27,6 +28,29 @@ with acquire_run_lease(Path(sys.argv[1]), "long-operation", owner="other-process
 
 
 class RunLeaseTest(unittest.TestCase):
+    def test_other_thread_cannot_reenter_and_can_acquire_after_release(self) -> None:
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            outcomes = []
+            def contender():
+                try:
+                    with acquire_run_lease(run_dir, "contender"):
+                        outcomes.append("entered")
+                except RunLeaseConflict:
+                    outcomes.append("conflict")
+            with acquire_run_lease(run_dir, "outer"):
+                thread = Thread(target=contender)
+                thread.start()
+                thread.join(timeout=3)
+                self.assertFalse(thread.is_alive())
+                self.assertEqual(outcomes, ["conflict"])
+                with acquire_run_lease(run_dir, "nested"):
+                    self.assertEqual(read_lease_holder(run_dir)["operation"], "outer")
+            thread = Thread(target=contender)
+            thread.start()
+            thread.join(timeout=3)
+            self.assertEqual(outcomes, ["conflict", "entered"])
+
     def test_cross_process_conflict_then_success_after_release(self) -> None:
         with TemporaryDirectory() as tmp:
             run_dir = Path(tmp) / "run"

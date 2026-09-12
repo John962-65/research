@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "evidence_type": "synthetic_structured_rule_cases",
+  "cases_sha256": "17cae66889f1242d08c674932d3b10bc7e0fd76566a189262a1ee35b02f120de",
+  "decision_sources_sha256": {
+    "gate_aggregator.py": "285cff8c3d4981976925e7e32abe0aeba5735b56f8dc6c15b5c46bde0af30780",
+    "experiment_decision.py": "0ae5b043cd3ca7d0cd3a5ec12fea1344d7cffd1845bfb1bae539a7480463d982",
+    "review_evaluation.py": "a28a082270d33852c27730ded27668fa1d30081cdcf925e60ca44bd23df1dc5a"
+  },
+  "sessions_sha256": null,
+  "total": 12,
+  "passed": 12,
+  "results": [
+    {
+      "id": "valid_comparison",
+      "expected": "proceed_to_paper",
+      "actual": "proceed_to_paper",
+      "passed": true,
+      "rule_seconds": 3.17179997182393e-05
+    },
+    {
+      "id": "invalid_comparison",
+      "expected": "repair_before_writing",
+      "actual": "repair_before_writing",
+      "passed": true,
+      "rule_seconds": 1.9969999812019523e-05
+    },
+    {
+      "id": "failed_execution",
+      "expected": "repair_before_writing",
+      "actual": "repair_before_writing",
+      "passed": true,
+      "rule_seconds": 1.1226999959035311e-05
+    },
+    {
+      "id": "negative_result",
+      "expected": "pivot_or_refine",
+      "actual": "pivot_or_refine",
+      "passed": true,
+      "rule_seconds": 1.566300034028245e-05
+    },
+    {
+      "id": "uncertain_result",
+      "expected": "refine_experiment",
+      "actual": "refine_experiment",
+      "passed": true,
+      "rule_seconds": 9.444000170333311e-06
+    },
+    {
+      "id": "simulated_evidence",
+      "expected": "benchmark_upgrade",
+      "actual": "benchmark_upgrade",
+      "passed": true,
+      "rule_seconds": 7.532000381615944e-06
+    },
+    {
+      "id": "no_override",
+      "expected": "blocked",
+      "actual": "blocked",
+      "passed": true,
+      "rule_seconds": 7.433299970216467e-05
+    },
+    {
+      "id": "explicit_rejection",
+      "expected": "blocked",
+      "actual": "blocked",
+      "passed": true,
+      "rule_seconds": 4.302500019548461e-05
+    },
+    {
+      "id": "stale_override",
+      "expected": "blocked",
+      "actual": "blocked",
+      "passed": true,
+      "rule_seconds": 2.580899990789476e-05
+    },
+    {
+      "id": "wrong_evidence_hash",
+      "expected": "blocked",
+      "actual": "blocked",
+      "passed": true,
+      "rule_seconds": 1.1316999916743953e-05
+    },
+    {
+      "id": "valid_bound_override",
+      "expected": "publishable",
+      "actual": "publishable",
+      "passed": true,
+      "rule_seconds": 1.8106999959854875e-05
+    },
+    {
+      "id": "missing_required_role",
+      "expected": "blocked",
+      "actual": "blocked",
+      "passed": true,
+      "rule_seconds": 1.040600000123959e-05
+    }
+  ],
+  "business_measurements": {
+    "status": "not_measured",
+    "participants": 0,
+    "pairs": 0
+  },
+  "limitations": [
+    "No online LLM calls or real-user evaluation in the synthetic suite.",
+    "Rule execution time is not human review time.",
+    "Expected labels are repository-authored, not an independent expert benchmark."
+  ]
+}

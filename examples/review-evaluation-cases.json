@@ -1,0 +1,259 @@
+{
+  "schema_version": 1,
+  "source": "repository-authored synthetic structured evidence",
+  "cases": [
+    {
+      "id": "valid_comparison",
+      "description": "已结构化的对照实验通过验证",
+      "kind": "experiment",
+      "inputs": {
+        "execution_mode": "benchmark",
+        "result_validation": {
+          "status": "pass"
+        },
+        "failure_analysis": {
+          "status": "pass",
+          "summary": {}
+        },
+        "benchmark_evidence": {
+          "status": "pass",
+          "evidence_grade": "real_benchmark"
+        }
+      },
+      "expected": "proceed_to_paper"
+    },
+    {
+      "id": "invalid_comparison",
+      "description": "比较条件校验已报告阻断",
+      "kind": "experiment",
+      "inputs": {
+        "execution_mode": "benchmark",
+        "result_validation": {
+          "status": "block",
+          "blocking_issues": [
+            "candidate/baseline split mismatch"
+          ]
+        },
+        "failure_analysis": {
+          "status": "pass",
+          "summary": {}
+        },
+        "benchmark_evidence": {
+          "status": "pass",
+          "evidence_grade": "real_benchmark"
+        }
+      },
+      "expected": "repair_before_writing"
+    },
+    {
+      "id": "failed_execution",
+      "description": "实验执行失败",
+      "kind": "experiment",
+      "inputs": {
+        "execution_mode": "benchmark",
+        "result_validation": {
+          "status": "pass"
+        },
+        "failure_analysis": {
+          "status": "block",
+          "failed_runs": [
+            {
+              "name": "candidate"
+            }
+          ]
+        },
+        "benchmark_evidence": {
+          "status": "pass",
+          "evidence_grade": "real_benchmark"
+        }
+      },
+      "expected": "repair_before_writing"
+    },
+    {
+      "id": "negative_result",
+      "description": "结果显示候选方法无优势",
+      "kind": "experiment",
+      "inputs": {
+        "execution_mode": "benchmark",
+        "result_validation": {
+          "status": "pass"
+        },
+        "failure_analysis": {
+          "status": "warn",
+          "negative_metrics": [
+            "accuracy"
+          ]
+        },
+        "benchmark_evidence": {
+          "status": "pass",
+          "evidence_grade": "real_benchmark"
+        }
+      },
+      "expected": "pivot_or_refine"
+    },
+    {
+      "id": "uncertain_result",
+      "description": "统计不确定性需要补实验",
+      "kind": "experiment",
+      "inputs": {
+        "execution_mode": "benchmark",
+        "result_validation": {
+          "status": "pass"
+        },
+        "failure_analysis": {
+          "status": "warn",
+          "uncertain_metrics": [
+            "accuracy"
+          ]
+        },
+        "benchmark_evidence": {
+          "status": "pass",
+          "evidence_grade": "real_benchmark"
+        }
+      },
+      "expected": "refine_experiment"
+    },
+    {
+      "id": "simulated_evidence",
+      "description": "模拟结果不能替代真实实验",
+      "kind": "experiment",
+      "inputs": {
+        "execution_mode": "simulated",
+        "result_validation": {
+          "status": "pass"
+        },
+        "failure_analysis": {
+          "status": "pass",
+          "summary": {}
+        },
+        "benchmark_evidence": {
+          "status": "pass",
+          "evidence_grade": "real_benchmark"
+        }
+      },
+      "expected": "benchmark_upgrade"
+    },
+    {
+      "id": "no_override",
+      "description": "no_override",
+      "kind": "gate",
+      "inputs": {
+        "deterministic_audits": {
+          "comparison": {
+            "status": "block",
+            "reason": "unmatched split"
+          }
+        },
+        "independent_deliberation": null,
+        "revision": 3
+      },
+      "expected": "blocked"
+    },
+    {
+      "id": "explicit_rejection",
+      "description": "explicit_rejection",
+      "kind": "gate",
+      "inputs": {
+        "deterministic_audits": {
+          "comparison": {
+            "status": "block",
+            "reason": "unmatched split"
+          }
+        },
+        "independent_deliberation": null,
+        "revision": 3,
+        "human_override": {
+          "reviewer": "demo-reviewer",
+          "reason": "Accepted limitation in this synthetic scenario only",
+          "revision": 3,
+          "approved": false,
+          "verdict_sha256": "$current_evidence"
+        }
+      },
+      "expected": "blocked"
+    },
+    {
+      "id": "stale_override",
+      "description": "stale_override",
+      "kind": "gate",
+      "inputs": {
+        "deterministic_audits": {
+          "comparison": {
+            "status": "block",
+            "reason": "unmatched split"
+          }
+        },
+        "independent_deliberation": null,
+        "revision": 3,
+        "human_override": {
+          "reviewer": "demo-reviewer",
+          "reason": "Accepted limitation in this synthetic scenario only",
+          "revision": 2,
+          "approved": true,
+          "verdict_sha256": "$current_evidence"
+        }
+      },
+      "expected": "blocked"
+    },
+    {
+      "id": "wrong_evidence_hash",
+      "description": "wrong_evidence_hash",
+      "kind": "gate",
+      "inputs": {
+        "deterministic_audits": {
+          "comparison": {
+            "status": "block",
+            "reason": "unmatched split"
+          }
+        },
+        "independent_deliberation": null,
+        "revision": 3,
+        "human_override": {
+          "reviewer": "demo-reviewer",
+          "reason": "Accepted limitation in this synthetic scenario only",
+          "revision": 3,
+          "approved": true,
+          "verdict_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      },
+      "expected": "blocked"
+    },
+    {
+      "id": "valid_bound_override",
+      "description": "valid_bound_override",
+      "kind": "gate",
+      "inputs": {
+        "deterministic_audits": {
+          "comparison": {
+            "status": "block",
+            "reason": "unmatched split"
+          }
+        },
+        "independent_deliberation": null,
+        "revision": 3,
+        "human_override": {
+          "reviewer": "demo-reviewer",
+          "reason": "Accepted limitation in this synthetic scenario only",
+          "revision": 3,
+          "approved": true,
+          "verdict_sha256": "$current_evidence"
+        }
+      },
+      "expected": "publishable"
+    },
+    {
+      "id": "missing_required_role",
+      "description": "missing_required_role",
+      "kind": "gate",
+      "inputs": {
+        "deterministic_audits": {},
+        "independent_deliberation": null,
+        "revision": 3,
+        "expected_roles": [
+          "statistician"
+        ]
+      },
+      "expected": "blocked"
+    }
+  ]
+}

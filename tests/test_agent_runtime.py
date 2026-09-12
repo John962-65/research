@@ -4,6 +4,8 @@ from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import os
+import hashlib
+import json
 import unittest
 from unittest import mock
 
@@ -14,7 +16,7 @@ from research_agent.agent_runtime import (
     RoleModelRouter,
     agent_for_stage,
 )
-from research_agent.config import AgentConfig, AgentRoleConfig, LLMConfig, MultiAgentConfig
+from research_agent.config import AgentConfig, AgentRoleConfig, LLMConfig, MCPServerConfig, MultiAgentConfig
 
 LOCAL_BASE_URL = "http://127.0.0.1:9/v1"
 ALT_BASE_URL = "http://127.0.0.1:10/v1"
@@ -79,6 +81,19 @@ class RoleModelRouterTest(unittest.TestCase):
         router = RoleModelRouter(config)
         decision = router.resolve(stage="paper_review_loop")
         self.assertEqual(decision.skills, DEFAULT_ROLE_SKILLS["skeptical_reviewer"])
+
+    def test_default_skills_applied_to_implicit_roles(self) -> None:
+        router = RoleModelRouter(_config(enabled=True))
+        for agent_id, skills in DEFAULT_ROLE_SKILLS.items():
+            with self.subTest(agent_id=agent_id):
+                decision = router.resolve(stage="paper_deliberation", agent_id=agent_id)
+                self.assertEqual(decision.skills, skills)
+
+    def test_disabled_role_does_not_load_default_skills(self) -> None:
+        router = RoleModelRouter(_config(
+            enabled=True, roles=[AgentRoleConfig(agent_id="skeptical_reviewer", enabled=False)]
+        ))
+        self.assertEqual(router.resolve(stage="paper_review_loop").skills, [])
 
     def test_explicit_skills_override_defaults(self) -> None:
         config = _config(
@@ -157,6 +172,19 @@ class AgentRoutedLLMTest(unittest.TestCase):
         )
         self.assertIn("## Skill: skeptical-review", prepared.system)
 
+    def test_implicit_role_loads_and_records_default_skill(self) -> None:
+        config = _config(enabled=True)
+        routed = AgentRoutedLLM(config, self.project_root, self.run_dir)
+        prepared = routed.prepare_request("System", "Task", stage="paper_review_loop", purpose="review")
+        self.assertIn("## Skill: skeptical-review", prepared.system)
+        self.assertEqual(prepared.skill_records[0]["skill_id"], "skeptical-review")
+        with mock.patch.object(routed, "_client_for", return_value=_FakeLLM()):
+            traced = trace_llm(routed, self.run_dir, config.llm)
+            complete_with_purpose_detail(traced, "System", "Task", stage="paper_review_loop", purpose="review")
+        entry = _read_entries(self.run_dir / "run-llm-ledger.json")[0]
+        self.assertEqual(entry.skills, ["skeptical-review"])
+        self.assertTrue(entry.skill_hashes[0].startswith("skeptical-review:"))
+
     def test_clients_cached_per_endpoint_and_model(self) -> None:
         config = _config(
             enabled=True,
@@ -224,6 +252,118 @@ class AgentRoutedLLMTest(unittest.TestCase):
         client = routed._client_for(routed.router.resolve(stage="research_planning"))
         self.assertEqual(client.temperature, 0.3)
         self.assertEqual(client.max_tokens, 512)
+
+
+class MCPBudgetTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.run_dir = self.root / "run"
+        _skills_root(self.root, ["evidence-grounding"])
+        self.config = _config(
+            enabled=True,
+            roles=[AgentRoleConfig(agent_id="gap_analyst", mcp_servers=["local-docs"])],
+            mcp_servers=[MCPServerConfig(
+                server_id="local-docs", url="http://127.0.0.1:9/mcp",
+                enabled=True, allowed_tools=["search_docs"],
+            )],
+        )
+        self.tool_response = json.dumps({"__mcp_call__": {
+            "server_id": "local-docs", "name": "search_docs", "arguments": {"q": "iris"},
+        }})
+
+    def runtime(self, responses, **budget):
+        config = replace(self.config, llm=replace(self.config.llm, **budget))
+        routed = AgentRoutedLLM(config, self.root, self.run_dir)
+        client = mock.Mock()
+        prompts = []
+        responses = iter(responses)
+
+        def complete(system, user):
+            prompts.append((system, user))
+            response = next(responses)
+            if isinstance(response, Exception):
+                raise response
+            client.last_usage = {"input_tokens": 100 * len(prompts), "output_tokens": 10 * len(prompts)}
+            return response
+
+        client.complete.side_effect = complete
+        self.enterContext(mock.patch.object(routed, "_client_for", return_value=client))
+        return trace_llm(routed, self.run_dir, config.llm), routed, prompts
+
+    def invoke(self, traced):
+        return complete_with_purpose_detail(
+            traced, "Private system", "Private task", stage="research_planning",
+            purpose="plan", requires_validation=True,
+        )
+
+    def entries(self):
+        return _read_entries(self.run_dir / "run-llm-ledger.json")
+
+    def test_tool_continuation_obeys_call_budget(self) -> None:
+        traced, routed, prompts = self.runtime([self.tool_response, "Finished"], max_calls=1)
+        with mock.patch.object(routed.tool_runtime, "call", return_value="Private tool data"):
+            with self.assertRaisesRegex(RuntimeError, "max_calls=1"):
+                self.invoke(traced)
+        self.assertEqual(len(prompts), 1)
+        self.assertEqual([entry.status for entry in self.entries()], ["success", "budget_exceeded"])
+        self.assertEqual([entry.usage_input_tokens for entry in self.entries()], [100, 0])
+
+    def test_tool_continuation_obeys_cumulative_prompt_budget(self) -> None:
+        traced, routed, prompts = self.runtime([self.tool_response, "Finished"])
+        prepared = routed.prepare_request("Private system", "Private task", stage="research_planning", purpose="plan")
+        traced.config = replace(traced.config, max_prompt_chars=len(prepared.system) + len(prepared.user) + 1)
+        with mock.patch.object(routed.tool_runtime, "call", return_value="Private tool data"):
+            with self.assertRaisesRegex(RuntimeError, "max_prompt_chars="):
+                self.invoke(traced)
+        self.assertEqual(len(prompts), 1)
+        self.assertEqual(self.entries()[-1].status, "budget_exceeded")
+
+    def test_each_round_records_usage_and_final_call_owns_validation(self) -> None:
+        traced, routed, prompts = self.runtime([self.tool_response, self.tool_response, "Finished"], max_calls=3)
+        with mock.patch.object(routed.tool_runtime, "call", return_value="Private tool data") as tool:
+            response, call_id = self.invoke(traced)
+        entries = self.entries()
+        self.assertEqual((response, call_id, tool.call_count), ("Finished", 3, 2))
+        self.assertEqual([entry.status for entry in entries], ["success", "success", "validation_pending"])
+        self.assertEqual([entry.usage_input_tokens for entry in entries], [100, 200, 300])
+        self.assertEqual([entry.usage_output_tokens for entry in entries], [10, 20, 30])
+        for entry, (system, user) in zip(entries, prompts):
+            self.assertEqual(entry.user_sha256, hashlib.sha256(user.encode()).hexdigest())
+            self.assertEqual(entry.system_chars + entry.user_chars, len(system) + len(user))
+            self.assertEqual(entry.agent_id, "gap_analyst")
+            self.assertTrue(entry.skill_hashes)
+        self.assertNotIn("Private tool data", (self.run_dir / "run-llm-ledger.json").read_text())
+        traced.record_validation_result(stage="research_planning", valid=False, error="Invalid final answer", call_id=call_id)
+        self.assertEqual([entry.status for entry in self.entries()], ["success", "success", "invalid_response"])
+
+    def test_failed_continuation_does_not_reuse_previous_usage(self) -> None:
+        traced, routed, prompts = self.runtime([self.tool_response, RuntimeError("Provider unavailable")])
+        with mock.patch.object(routed.tool_runtime, "call", return_value="Private tool data"):
+            with self.assertRaisesRegex(RuntimeError, "Provider unavailable"):
+                self.invoke(traced)
+        self.assertEqual(len(prompts), 2)
+        self.assertEqual([entry.status for entry in self.entries()], ["success", "failed"])
+        self.assertEqual([entry.usage_input_tokens for entry in self.entries()], [100, 0])
+        self.assertIsNone(routed.last_usage)
+
+    def test_denied_tool_records_receipt_without_extra_model_call(self) -> None:
+        other_tool = self.tool_response.replace("local-docs", "unassigned")
+        traced, routed, prompts = self.runtime([other_tool])
+        with self.assertRaises(RuntimeError):
+            self.invoke(traced)
+        self.assertEqual(len(prompts), 1)
+        self.assertEqual(len(self.entries()), 1)
+        receipts = json.loads((self.run_dir / "run-tool-receipts.json").read_text())
+        self.assertIn('"denied"', json.dumps(receipts))
+
+    def test_round_limit_keeps_all_actual_calls_in_ledger(self) -> None:
+        traced, routed, prompts = self.runtime([self.tool_response] * 3)
+        with mock.patch.object(routed.tool_runtime, "call", return_value="Private tool data") as tool:
+            with self.assertRaisesRegex(RuntimeError, "round limit"):
+                self.invoke(traced)
+        self.assertEqual((len(prompts), tool.call_count, len(self.entries())), (3, 2, 3))
 
 
 class SkillFingerprintTest(unittest.TestCase):

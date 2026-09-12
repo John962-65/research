@@ -10,6 +10,8 @@ from research_agent.workflow_state import (
     NODE_STATUSES,
     STAGE_COMPLETIONS,
     WorkflowEngine,
+    NodeOutcome,
+    WorkflowDispatchError,
     append_node_event,
     append_node_events,
     read_node_states,
@@ -19,6 +21,49 @@ from research_agent.workflow_state import (
 )
 
 NODE_IDS = [node.node_id for node in WORKFLOW_NODES]
+
+
+class DispatchTest(unittest.TestCase):
+    def test_wait_does_not_dispatch_experiments_and_can_resume(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            calls = []
+            engine = WorkflowEngine(NODE_IDS)
+            handlers = {
+                "experiment_plan": lambda: calls.append("plan"),
+                "execution_gate": lambda: NodeOutcome("waiting"),
+                "experiments": lambda: calls.append("experiment"),
+            }
+            kwargs = dict(handlers=handlers, facts=lambda: {"execution_requires_approval": True}, terminal_nodes={"experiments"})
+            self.assertEqual(engine.run(out, start="experiment_plan", **kwargs), "execution_gate")
+            self.assertEqual(calls, ["plan"])
+            handlers["execution_gate"] = lambda: calls.append("approved")
+            engine.run(out, start="execution_gate", **kwargs)
+            self.assertEqual(calls, ["plan", "approved", "experiment"])
+
+    def test_blocked_writing_selects_repair_instead_of_writer(self) -> None:
+        with TemporaryDirectory() as tmp:
+            calls = []
+            WorkflowEngine(NODE_IDS).run(Path(tmp), start="analysis", handlers={
+                "analysis": lambda: None,
+                "paper_writing": lambda: calls.append("writer"),
+                "finalization": lambda: calls.append("repair"),
+            }, facts=lambda: {"writing_blocked": True}, terminal_nodes={"finalization"})
+            self.assertEqual(calls, ["repair"])
+
+    def test_failure_never_completes_or_invokes_successor(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            calls = []
+            def fail():
+                raise RuntimeError("injected crash")
+            with self.assertRaisesRegex(RuntimeError, "injected crash"):
+                WorkflowEngine(NODE_IDS).run(out, start="research_planning", handlers={
+                    "research_planning": fail,
+                    "literature_review": lambda: calls.append("search"),
+                }, facts=lambda: {}, terminal_nodes={"literature_review"})
+            self.assertEqual(calls, [])
+            self.assertEqual(read_node_states(out)["research_planning"]["status"], "failed")
 
 
 def _states(**statuses: str) -> dict[str, dict[str, str]]:

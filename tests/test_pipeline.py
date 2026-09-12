@@ -23,6 +23,7 @@ from research_agent.research_plan import build_research_plan, render_research_pl
 from research_agent.models import ExperimentCommand, ExperimentPlan, LiteratureContext, PaperRevisionPlan, ResearchIdea, ReviewGate, RevisionTask
 import research_agent.pipeline as pipeline_module
 from research_agent.llm_trace import trace_llm
+from research_agent.workflow_state import read_node_states, WorkflowEngine, WorkflowDispatchError
 
 class NoopLLM:
     model = "noop-test-model"
@@ -115,6 +116,20 @@ def _prepare_run_at_review_gate(topic: str, out: Path, config: AgentConfig) -> N
 
 
 class PipelineTest(unittest.TestCase):
+    def test_engine_predicate_really_controls_pipeline_execution(self) -> None:
+        original = WorkflowEngine._build_predicates
+        def blocked_edges(engine):
+            predicates = original(engine)
+            predicates[("review_gate", "ideation")] = lambda states, facts: False
+            return predicates
+        with TemporaryDirectory() as tmp:
+            out = Path(tmp) / "run"
+            with patch.object(WorkflowEngine, "_build_predicates", blocked_edges):
+                with self.assertRaises(WorkflowDispatchError):
+                    _run_pipeline_with_noop_llm("auditable research", out, AgentConfig())
+            self.assertFalse((out / "02-ideas.json").exists())
+            self.assertFalse((out / "04-results.json").exists())
+
     def test_revision_plan_checkpoint_must_match_current_review_signature(self) -> None:
         current = PaperRevisionPlan(
             topic="demo",
@@ -180,6 +195,8 @@ class PipelineTest(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             out = Path(tmp) / "run"
             _run_pipeline_with_noop_llm("auditable autonomous research agents", out, AgentConfig())
+            events = read_node_states(out)
+            self.assertEqual(events["completed"]["status"], "completed")
             expected = [
                 "run-manifest.json",
                 "run-manifest.md",

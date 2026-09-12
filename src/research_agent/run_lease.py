@@ -10,7 +10,7 @@ them while holding the lease.
 The lock is an OS-level ``flock`` on ``<run_dir>/.lease`` so it is released
 automatically when a process dies; the file also carries JSON metadata
 (owner, pid, operation) for diagnostics and conflict messages. The lease is
-reentrant inside one process (pipeline resume paths call each other).
+reentrant only in the owning thread (pipeline resume paths call each other).
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from threading import Lock
+from threading import Lock, get_ident
 from typing import Any, Iterator
 import fcntl
 import json
@@ -57,6 +57,7 @@ class RunLease:
 
 _PROCESS_LOCKS_GUARD = Lock()
 _PROCESS_LEASE_DEPTH: dict[str, int] = {}
+_PROCESS_LEASE_OWNER: dict[str, tuple[int, int]] = {}
 
 
 def lease_path(run_dir: Path) -> Path:
@@ -82,13 +83,17 @@ def acquire_run_lease(
     """Hold an exclusive, reentrant, crash-safe lease on ``run_dir``."""
     resolved = Path(run_dir).resolve()
     key = str(resolved)
+    identity = (os.getpid(), get_ident())
     with _PROCESS_LOCKS_GUARD:
         depth = _PROCESS_LEASE_DEPTH.get(key, 0)
+        if depth and _PROCESS_LEASE_OWNER.get(key) != identity:
+            raise RunLeaseConflict(resolved, operation, read_lease_holder(resolved))
+        _PROCESS_LEASE_OWNER[key] = identity
         _PROCESS_LEASE_DEPTH[key] = depth + 1
     fd: int | None = None
     try:
         if depth > 0:
-            # Same process already holds the lease; keep the outer metadata.
+            # Only the owning thread may reenter; other threads fail fast.
             yield RunLease(run_dir=resolved, operation=operation, owner=owner, acquired_at="")
             return
         resolved.mkdir(parents=True, exist_ok=True)
@@ -126,6 +131,7 @@ def acquire_run_lease(
             remaining = _PROCESS_LEASE_DEPTH.get(key, 1) - 1
             if remaining <= 0:
                 _PROCESS_LEASE_DEPTH.pop(key, None)
+                _PROCESS_LEASE_OWNER.pop(key, None)
             else:
                 _PROCESS_LEASE_DEPTH[key] = remaining
 

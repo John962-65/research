@@ -74,11 +74,48 @@
           <div id="stage-track" class="stage-track"></div>
         </section>
 
+        <!-- Active Gate & Thresholds Inspector Banner -->
+        <section id="gate-inspector-panel" class="gate-inspector-panel" hidden aria-label="Gate and Thresholds Inspector">
+          <div class="gate-inspector-header">
+            <div class="gate-inspector-title-area">
+              <span id="gate-inspector-icon" class="gate-inspector-icon">⚠️</span>
+              <div>
+                <div class="gate-inspector-title" id="gate-inspector-title">当前处于阶段门禁拦截</div>
+                <div class="gate-inspector-subtitle" id="gate-inspector-subtitle">系统根据学术与安全规范暂停执行，等待人工确认或达标修复</div>
+              </div>
+            </div>
+            <div class="gate-inspector-actions" id="gate-inspector-actions"></div>
+          </div>
+          <div class="gate-inspector-metrics" id="gate-inspector-metrics"></div>
+          <div class="gate-inspector-issues" id="gate-inspector-issues"></div>
+        </section>
+
         <!-- Artifact Navigation & Manuscript Explorer -->
         <section class="artifact-layout">
           <div class="artifact-nav-wrapper">
+            <div class="artifact-toolbar-panel">
+              <div class="artifact-search-row">
+                <span class="artifact-search-icon" aria-hidden="true">🔍</span>
+                <input id="artifact-search-input" class="artifact-search-input" type="search" placeholder="搜索产物名称或文件..." aria-label="搜索产物">
+                <button id="artifact-search-clear" class="artifact-search-clear-btn" type="button" title="清空搜索" hidden>×</button>
+              </div>
+              <div class="artifact-toggle-row">
+                <label class="artifact-toggle-label" title="仅显示当前运行已经生成的产物">
+                  <input type="checkbox" id="toggle-available-only" checked>
+                  <span class="toggle-box"></span>
+                  <span>仅看已生成</span>
+                </label>
+                <label class="artifact-toggle-label" title="隐藏底层机器审计与数据 JSON 文件">
+                  <input type="checkbox" id="toggle-hide-json" checked>
+                  <span class="toggle-box"></span>
+                  <span>隐藏原始 JSON</span>
+                </label>
+              </div>
+            </div>
+
             <!-- Category Filter Bar -->
             <div class="artifact-category-filter" aria-label="Artifact categories" role="group">
+              <button class="cat-filter-btn" type="button" data-cat="core" aria-pressed="false">⭐ 核心</button>
               <button class="cat-filter-btn active" type="button" data-cat="all" aria-pressed="true">全部</button>
               <button class="cat-filter-btn" type="button" data-cat="paper" aria-pressed="false">论文</button>
               <button class="cat-filter-btn" type="button" data-cat="lit" aria-pressed="false">文献</button>
@@ -87,8 +124,13 @@
               <button class="cat-filter-btn" type="button" data-cat="audit" aria-pressed="false">审计</button>
               <button class="cat-filter-btn" type="button" data-cat="json" aria-pressed="false">JSON</button>
             </div>
+
+            <div class="artifact-summary-bar">
+              <span id="artifact-count-badge" class="artifact-count-badge">产物目录</span>
+            </div>
             
             <nav class="artifact-nav" aria-label="Artifacts">
+              <div id="artifact-no-results" class="artifact-no-results" hidden>未找到匹配的产物</div>
               <button class="artifact-tab active" type="button" data-file="06-paper.md" data-cat="paper">论文初稿</button>
               <button class="artifact-tab" type="button" data-file="run-manifest.md" data-cat="audit">执行轨迹</button>
               <button class="artifact-tab" type="button" data-file="run-llm-ledger.md" data-cat="audit">LLM 账本</button>
@@ -560,8 +602,8 @@
               </label>
 
               <label class="field">
-                <span>执行超时 (秒)</span>
-                <input id="timeout-seconds" name="timeout_seconds" type="number" min="1" max="86400" value="300">
+                <span>执行超时 (秒，最大3600)</span>
+                <input id="timeout-seconds" name="timeout_seconds" type="number" min="1" max="3600" value="300" placeholder="300">
               </label>
 
               <label class="field">
@@ -781,6 +823,6 @@
     </section>
   </div>
 
-  <script src="/app.js?v=multiview-v4"></script>
+  <script src="/app.js?v=multiview-v5"></script>
 </body>
 </html>
