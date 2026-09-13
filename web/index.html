@@ -13,7 +13,7 @@
     <div class="brand-section">
       <div class="brand-crest" aria-hidden="true">RA</div>
       <div class="brand-title-group">
-        <h1>Research Agent <span class="brand-badge">Paper-Grade</span></h1>
+        <h1>Research Agent <span class="brand-badge" title="publishable 仅表示通过本系统的发布前检查，不代表论文达到期刊发表标准">发布前检查（非发表保证）</span></h1>
         <p>Auditable Autonomous Science Workbench</p>
       </div>
     </div>
@@ -88,6 +88,17 @@
           </div>
           <div class="gate-inspector-metrics" id="gate-inspector-metrics"></div>
           <div class="gate-inspector-issues" id="gate-inspector-issues"></div>
+        </section>
+
+        <section id="decision-state-panel" class="decision-state-panel" hidden aria-label="评审决策状态"></section>
+
+        <section class="import-existing-panel" aria-label="导入已有结果">
+          <h3>导入已有代码和结果</h3>
+          <p class="muted">“我已有代码和实验结果，帮我检查是否足以支持结论”：选择目标 run，粘贴已有 04-results 格式 JSON；系统生成字段映射、来源与缺失项清单，不强迫重新生成 idea。</p>
+          <textarea id="import-existing-json" rows="6" placeholder='[{"name":"candidate","status":"passed","metrics":{...},"command":[...],"returncode":0}]'></textarea>
+          <label class="checkbox-row"><input id="import-existing-replace" type="checkbox">覆盖 run 中已有 04-results.json</label>
+          <button id="import-existing-submit" type="button">导入并生成核对报告</button>
+          <pre id="import-existing-report" hidden></pre>
         </section>
 
         <!-- Artifact Navigation & Manuscript Explorer -->
@@ -425,7 +436,7 @@
                 <span>论文级硬门槛 (Paper-Grade Mode)</span>
                 <span class="checkbox-row">
                   <input id="paper-grade-enabled" name="paper_grade_enabled" type="checkbox">
-                  <span>启用严格论文级准入门槛</span>
+                  <span>启用严格发布前检查门槛（检查更严，不等于发表保证）</span>
                 </span>
               </label>
 

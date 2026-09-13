@@ -732,6 +732,7 @@ function setCurrentRun(run) {
   els.status.className = `status-pill ${statusClass(status)}`;
   renderStages(run ? run.stage : 'started', run?.workflow);
   renderGateInspector(run);
+  renderDecisionStatePanel(run);
   updateActionButtons();
   updateTabs();
 }
@@ -1252,6 +1253,66 @@ function literatureQualityGateDetails(run) {
   return lines.join('\n');
 }
 
+async function renderDecisionStatePanel(run) {
+  const panel = document.getElementById('decision-state-panel');
+  if (!panel) return;
+  if (!run) { panel.hidden = true; return; }
+  try {
+    const data = await api(`/api/runs/${encodeURIComponent(run.id)}/decision-state`);
+    renderDecisionStateData(panel, data);
+    panel.hidden = false;
+  } catch (_) {
+    panel.hidden = true;
+  }
+}
+
+function decisionStateChip(label, value, tone) {
+  return `<span class="decision-chip ${tone || ''}"><b>${label}</b>${value}</span>`;
+}
+
+function renderDecisionStateData(panel, data) {
+  const states = data.states || {};
+  const gate = data.gate || {};
+  const outcomeTone = { supported: 'ok', not_supported: 'warn', inconclusive: 'warn', not_assessed: 'muted' }[states.research_outcome] || 'muted';
+  const evidenceTone = { verified: 'ok', incomplete: 'warn', invalid: 'bad', simulated: 'bad', unknown: 'muted' }[states.evidence_status] || 'muted';
+  const actionTone = { proceed: 'ok', repair: 'bad', request_material: 'warn', stop: 'muted', human_review: 'warn', rerun: 'warn' }[states.next_action] || 'muted';
+  const budget = data.budget || {};
+  const budgetRows = Object.entries(budget).map(([kind, item]) =>
+    `<li>${kind}：${item.consumed}/${item.limit}${item.consumed >= item.limit ? '（已耗尽，停止并保留证据）' : ''}</li>`).join('');
+  const blockers = (data.blockers && data.blockers.length) ? data.blockers.map((b) => `<li>${b}</li>`).join('') : '<li>无阻断项</li>';
+  const actions = (data.actions && data.actions.length) ? data.actions.map((a) => `<li>${a}</li>`).join('') : '<li>暂无</li>';
+  const importInfo = data.import || {};
+  const importRows = importInfo.present
+    ? `<div>导入文件：${(importInfo.imported_files || []).join('、') || '无'}</div>
+       <div>缺失项：${(importInfo.missing_fields || []).length ? '<ul>' + importInfo.missing_fields.map((m) => `<li>${m}</li>`).join('') + '</ul>' : '无'}</div>`
+    : '';
+  panel.innerHTML = `
+    <div class="decision-header"><h3>评审决策</h3>
+      <div class="decision-chips">
+        ${decisionStateChip('执行状态', states.execution_status || 'unknown', 'muted')}
+        ${decisionStateChip('证据状态', states.evidence_status || 'unknown', evidenceTone)}
+        ${decisionStateChip('研究结论', states.research_outcome || 'not_assessed', outcomeTone)}
+        ${decisionStateChip('下一步', states.next_action || 'human_review', actionTone)}
+      </div>
+    </div>
+    <div class="decision-section"><h4>当前问题</h4>
+      <div>${data.problem?.topic || ''}</div>
+      <div>${data.problem?.paper_statement || ''}</div>
+      ${states.stop_after_report ? '<div>负结果报告完成后将停止本轮，不自动开新实验轮。</div>' : ''}
+    </div>
+    <div class="decision-section"><h4>证据</h4>
+      <div>LLM 证据：${states.llm_evidence_status || 'unknown'}（独立于实验证据评估）</div>
+      <div>实验证据：${states.experiment_evidence_status || 'unknown'}</div>
+      <div>门禁状态：${gate.status || '-'}${gate.overridden ? '（含人工覆盖，原阻断记录保留）' : ''}</div>
+      ${importRows}
+    </div>
+    <div class="decision-section"><h4>阻断原因</h4><ul>${blockers}</ul></div>
+    <div class="decision-section"><h4>可选动作</h4><ul>${actions}</ul></div>
+    <div class="decision-section"><h4>预算</h4><ul>${budgetRows || '<li>无预算记录</li>'}</ul></div>
+    <div class="decision-section"><h4>本次修改影响</h4><div>${data.change_impact?.note || ''}</div>
+      <div>${data.reviewer_identity_note || ''}</div></div>`;
+}
+
 function renderGateInspector(run) {
   const panel = document.getElementById('gate-inspector-panel');
   if (!panel) return;
@@ -1366,6 +1427,33 @@ function renderGateInspector(run) {
     }
   }
 }
+
+document.getElementById('import-existing-submit')?.addEventListener('click', async () => {
+  const runId = state.currentRun?.id;
+  const box = document.getElementById('import-existing-json');
+  const report = document.getElementById('import-existing-report');
+  if (!runId) { alert('请先在运行列表选择一个目标 run（或先创建一个空 run）。'); return; }
+  if (!box || !box.value.trim()) { alert('请粘贴已有 04-results 格式的 JSON（数组或含 results 字段的对象）。'); return; }
+  try {
+    const result = await api(`/api/runs/${encodeURIComponent(runId)}/import-results`, {
+      method: 'POST',
+      body: JSON.stringify({ results_json: box.value, replace: document.getElementById('import-existing-replace')?.checked === true }),
+    });
+    if (report) {
+      const r = result.import_report || {};
+      report.textContent = JSON.stringify({
+        imported_files: (r.imported_files || []).map((i) => i.path),
+        missing_fields: r.missing_fields || [],
+        warnings: r.warnings || [],
+        evidence_assessment: r.evidence_assessment || {},
+      }, null, 2);
+      report.hidden = false;
+    }
+    await refreshRuns(true);
+  } catch (err) {
+    alert('导入失败：' + (err?.message || err));
+  }
+});
 
 document.querySelector('#gate-inspector-panel')?.addEventListener('click', async (event) => {
   const fileBtn = event.target.closest('[data-gate-file]');
@@ -2492,11 +2580,11 @@ async function approveCurrentRun() {
     const evidenceDetails = literatureEvidenceContractDetails(state.currentRun);
     const ideaGateDetails = ideaExperimentGateDetails(state.currentRun);
     const isExecution = state.currentRun.stage === 'awaiting_execution_approval';
-    const defaultNote = '已人工核对文献与研究边界，放行进入方案探索。';
+    // T09：审批理由必须来自实际检查；不得预填“已核对”类文字代替检查。
     const promptMsg = isExecution
-      ? '【执行前安全门禁审核】\nlocal/benchmark 执行前必须填写审核意见（命令计划和安全审计确认说明，至少8个字符）：'
-      : `【文献门禁审核放行】\n当前文献门禁未全部自动通过（状态：${state.currentRun.approval?.gate_status || '需人工复核'}）。\n请输入人工审核意见/放行理由（至少8个字符）：`;
-    const entered = window.prompt(promptMsg, defaultNote);
+      ? '【执行前安全门禁审核】\n审批者：本机操作者（单用户原型，无企业身份认证）。\n理由模板要点：① 已核对的命令清单与工作目录；② 安全审计结论；③ 接受/拒绝的理由。\n请填写审核意见（至少8个字符，不预填，需本人实际核对后填写）：'
+      : `【文献门禁审核放行】\n审批者：本机操作者（单用户原型，无企业身份认证）。\n当前门禁状态：${state.currentRun.approval?.gate_status || '需人工复核'}。\n理由模板要点：① 已核对的阻断/警告项；② 接受理由或修复计划；③ 接受的风险范围。\n请填写审核意见（至少8个字符，不预填，需本人实际核对后填写）：`;
+    const entered = window.prompt(promptMsg, '');
     if (entered === null) {
       return;
     }

@@ -769,6 +769,46 @@ class RunStore:
             return None
         return path
 
+    def import_results(self, run_id: str, payload: dict[str, Any] | None) -> dict[str, Any] | None:
+        """T09：向指定 run 导入已有结果/契约/预注册（已有代码和结果入口）。"""
+        payload = payload if isinstance(payload, dict) else {}
+        record = self.get(run_id)
+        if record is None:
+            return None
+        if record.get("status") in {"cancelling", "cancelled"}:
+            raise RuntimeError("run is cancelling or cancelled")
+        if record.get("worker_active") is True:
+            raise RuntimeError("run worker is active; wait for it to finish before importing")
+        stage = str(record.get("stage") or "")
+        if stage in {"completed", "failed"}:
+            raise RuntimeError("run is already terminal; import into an active or new run instead")
+        out_dir = (ROOT / record["out_dir"]).resolve()
+        if not _is_relative_to(out_dir, ROOT):
+            return None
+        results_payload = payload.get("results")
+        if isinstance(results_payload, str) and results_payload.strip():
+            try:
+                results_payload = json.loads(results_payload)
+            except ValueError as exc:
+                raise ValueError(f"results_json 不是合法 JSON：{exc}")
+        if results_payload is None and payload.get("results_json"):
+            try:
+                results_payload = json.loads(str(payload.get("results_json")))
+            except ValueError as exc:
+                raise ValueError(f"results_json 不是合法 JSON：{exc}")
+        from .existing_results import import_existing_results
+
+        report = import_existing_results(
+            out_dir,
+            results_payload if results_payload is not None else payload.get("results_path") or "",
+            contract_source=payload.get("contract_json") or payload.get("contract_path") or None,
+            preregistration_source=payload.get("preregistration_json") or payload.get("preregistration_path") or None,
+            replace=payload.get("replace") is True,
+            notes=str(payload.get("notes") or ""),
+        )
+        # contract_json/preregistration_json 若传字符串需先转对象
+        return {"run": self.get(run_id), "import_report": report}
+
     def approve(self, run_id: str, reviewer: str = "web") -> dict[str, Any] | None:
         return self.approve_with_config(run_id, reviewer=reviewer, payload={})
 
@@ -804,6 +844,7 @@ class RunStore:
             approval = approve_execution_gate(out_dir, reviewer=reviewer, notes=notes)
         else:
             approval = approve_review_gate(out_dir, reviewer=reviewer, notes=notes)
+        ensure_approval_not_stale(approval)
         with self._lock:
             stored = self._runs.get(run_id)
             if stored is not None:
@@ -1482,6 +1523,86 @@ def _configure_web_server(server: ThreadingHTTPServer, bind_host: str) -> None:
     server.research_agent_max_body_bytes = _web_max_body_bytes()  # type: ignore[attr-defined]
     server.research_agent_max_response_bytes = _web_max_response_bytes()  # type: ignore[attr-defined]
     _web_max_llm_timeout_seconds()
+def ensure_approval_not_stale(approval: dict[str, Any]) -> None:
+    """T09/A19：审批请求所绑定的材料在其后发生变化时，旧批准拒绝生效。
+
+    审批请求已由 approve_review_gate 刷新；此处把该情形转成显式错误，
+    页面必须提示材料变化而不是静默通过。
+    """
+    if isinstance(approval, dict) and approval.get("approved") is not True and approval.get("stale_previous_approval") is True:
+        raise RuntimeError(
+            "材料在审批请求后已发生变化：旧版本批准被拒绝（stale approval binding）；"
+            "审批请求已刷新，请核对刷新后的材料与版本后重新批准。"
+        )
+
+
+def build_decision_state_payload(out_dir: Path) -> dict[str, Any]:
+    """T09：评审页决策状态载荷，按 问题→证据→阻断→动作→预算→修改影响 组织。"""
+    from .run_budget import budget_summary
+
+    def _read(name: str) -> dict[str, Any]:
+        try:
+            data = json.loads((Path(out_dir) / name).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    state = _read("state.json")
+    decision = _read("04-experiment-decision.json")
+    integrity = _read("04-evidence-integrity.json")
+    gate = _read("10-gate-decision.json")
+    import_report = _read("00-import-report.json")
+    hypothesis = _read("04-hypothesis-outcome.json")
+    states = decision.get("decision_states") if isinstance(decision.get("decision_states"), dict) else {}
+    blockers = [str(item) for item in (gate.get("blocking_sources") or [])]
+    if decision.get("decision") == "repair_before_writing":
+        blockers = [*blockers, "实验后决策为 repair_before_writing：当前结果不能支撑写作。"]
+    actions: list[str] = [str(item) for item in (decision.get("next_actions") or [])]
+    if str(states.get("next_action") or "") == "request_material" and actions:
+        pass
+    return {
+        "schema_version": 1,
+        "run_state": str(state.get("status") or ""),
+        "problem": {
+            "topic": str(state.get("topic") or ""),
+            "hypothesis": str(hypothesis.get("hypothesis") or ""),
+            "paper_statement": str(hypothesis.get("paper_statement") or ""),
+        },
+        "states": {
+            "execution_status": states.get("execution_status") or "unknown",
+            "evidence_status": states.get("evidence_status") or integrity.get("experiment_evidence_status") or "unknown",
+            "research_outcome": states.get("research_outcome") or "not_assessed",
+            "next_action": states.get("next_action") or "human_review",
+            "stop_after_report": states.get("stop_after_report") is True,
+            "llm_evidence_status": integrity.get("llm_evidence_status") or "unknown",
+            "experiment_evidence_status": integrity.get("experiment_evidence_status") or "unknown",
+        },
+        "decision": str(decision.get("decision") or ""),
+        "paper_policy": str(decision.get("paper_policy") or ""),
+        "gate": {
+            "status": str(gate.get("status") or ""),
+            "overridden": gate.get("overridden") is True,
+            "blocking_sources": blockers,
+            "warning_sources": [str(item) for item in (gate.get("warning_sources") or [])],
+        },
+        "blockers": blockers,
+        "actions": actions,
+        "budget": budget_summary(Path(out_dir)),
+        "change_impact": {
+            "note": "修改任何参与决策的材料都会使相关评审与批准失效（证据快照机制）；重新批准前请核对刷新后的版本。",
+            "overridden": gate.get("overridden") is True,
+            "override_reviewer": (gate.get("override") or {}).get("reviewer") if isinstance(gate.get("override"), dict) else "",
+        },
+        "import": {
+            "present": bool(import_report),
+            "imported_files": [str(item.get("path")) for item in (import_report.get("imported_files") or []) if isinstance(item, dict)],
+            "missing_fields": [str(item) for item in (import_report.get("missing_fields") or [])],
+            "warnings": [str(item) for item in (import_report.get("warnings") or [])],
+        },
+        "reviewer_identity_note": "审批者：本机操作者（单用户原型，无企业身份认证或多人权限体系）。",
+    }
+
+
 
 
 class ResearchAgentHandler(BaseHTTPRequestHandler):
@@ -2037,13 +2158,15 @@ class ResearchAgentHandler(BaseHTTPRequestHandler):
 
     def _handle_run_post(self, path: str) -> None:
         parts = [unquote(part) for part in path.split("/") if part]
-        if len(parts) != 4 or parts[3] not in {"approve", "revision", "cancel", "resume", "repair-resume", "repair-resume-preview", "rollback-preview", "rollback-apply"}:
+        if len(parts) != 4 or parts[3] not in {"approve", "revision", "cancel", "resume", "repair-resume", "repair-resume-preview", "rollback-preview", "rollback-apply", "import-results"}:
             self._send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
             return
         try:
             payload = self._read_json()
             if parts[3] == "approve":
                 result = STORE.approve_with_config(parts[2], reviewer="web", payload=payload)
+            elif parts[3] == "import-results":
+                result = STORE.import_results(parts[2], payload)
             elif parts[3] == "revision":
                 result = STORE.request_revision(parts[2], reviewer="web", notes=str(payload.get("review_notes") or payload.get("notes") or ""))
             elif parts[3] == "cancel":
@@ -2208,6 +2331,13 @@ class ResearchAgentHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "run not found"}, HTTPStatus.NOT_FOUND)
                 return
             self._send_json_with_etag(record)
+            return
+        if len(parts) == 4 and parts[3] == "decision-state":
+            out_dir = STORE.out_dir(run_id)
+            if out_dir is None:
+                self._send_json({"error": "run not found"}, HTTPStatus.NOT_FOUND)
+                return
+            self._send_json(build_decision_state_payload(Path(out_dir)))
             return
         if len(parts) == 4 and parts[3] == "activity":
             self._send_activity_stream(run_id, parse_qs(query))

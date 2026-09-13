@@ -27,7 +27,7 @@
 | A16 | 超出总预算/最大轮次 | 停止并保留已有证据 | T07 | tests/test_run_budget.py（3 用例，含恢复不绕过） | tested |
 | A17 | 引用否定方向/数字/条件相反 | 不得自动宣称已支持 | T08 | tests/test_claim_evidence_polarity.py（6 用例）+ tests/test_claim_traceability.py::test_contradicted_direction_blocks_claim_with_claim_id | tested |
 | A18 | 正确主张且证据完整 | 可通过并定位证据 | T08 | tests/test_claim_traceability.py::test_supported_claim_with_complete_evidence_passes + citation_grounding evidence_locator（chunk/字符跨度/页码） | tested |
-| A19 | 页面提交旧版本批准 | 后端拒绝，提示材料变化 | T09 | tests/test_web_server.py::test_stale_approval_rejected | planned |
+| A19 | 页面提交旧版本批准 | 后端拒绝，提示材料变化 | T09 | tests/test_web_decision_state.py::StaleApprovalRejectionTest::test_stale_binding_approval_is_rejected_with_material_change_message | tested |
 | A20 | 正常真实案例 | 可重算关键结果并解释最终决策 | T10 | runs 公开案例 + scripts/replay_public_case.sh（人工核对记录） | planned |
 | A21 | 无试用数据 | 保持 not_measured，不生成效率比例 | T11 | tests/test_review_evaluation.py（既有；docs/review-evaluation.md 声明） | planned |
 | A22 | 同输入走 CLI/Web/恢复 | 决策、原因、证据版本一致 | T12 | tests/test_cli.py 决策一致性用例 | planned |

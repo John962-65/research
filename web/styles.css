@@ -2063,3 +2063,24 @@ button, input, select, textarea {
   margin-bottom: 3px;
 }
 
+
+/* T09：评审决策状态面板与导入入口 */
+.decision-state-panel,
+.import-existing-panel {
+  margin: 16px 0;
+  padding: 16px;
+  border: 1px solid var(--border, #d0d4dc);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+}
+.decision-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.decision-chip { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border, #d0d4dc); font-size: 13px; }
+.decision-chip b { margin-right: 6px; }
+.decision-chip.ok { background: #e7f6ec; border-color: #9fd8b1; }
+.decision-chip.warn { background: #fdf3e0; border-color: #ecd39a; }
+.decision-chip.bad { background: #fbe9e7; border-color: #e7a9a0; }
+.decision-chip.muted { color: #555; }
+.decision-section { margin-top: 10px; }
+.decision-section h4 { margin: 4px 0; }
+.import-existing-panel textarea { width: 100%; font-family: monospace; font-size: 12px; }
+.import-existing-panel pre { max-height: 240px; overflow: auto; background: #f6f7f9; padding: 8px; }

@@ -250,6 +250,17 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="research-agent")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    import_existing_parser = subparsers.add_parser(
+        "import-existing",
+        help="导入已有实验结果/契约/预注册（已有代码和结果入口），生成字段映射与缺失项报告",
+    )
+    import_existing_parser.add_argument("--run-dir", type=Path, required=True, help="目标 run 目录（不存在则创建）")
+    import_existing_parser.add_argument("--results", type=Path, required=True, help="已有 04-results 格式的 JSON 文件路径")
+    import_existing_parser.add_argument("--contract", type=Path, default=None, help="已有 03-idea-experiment-contract JSON（可选）")
+    import_existing_parser.add_argument("--preregistration", type=Path, default=None, help="已有 03-preregistration JSON（可选）")
+    import_existing_parser.add_argument("--replace", action="store_true", help="覆盖 run 目录中已有的 04-results.json")
+    import_existing_parser.add_argument("--notes", default="", help="导入备注（来源、授权等）")
+
     run_parser = subparsers.add_parser("run", help="Run the full research pipeline")
     run_parser.add_argument("--topic", required=True, help="Research topic or question")
     run_parser.add_argument("--out", type=Path, default=None, help="Output directory for run artifacts")
@@ -740,6 +751,30 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     _reject_forbidden_cli_secret_args(args)
     _apply_gold_defaults_to_args(args)
+    if args.command == "import-existing":
+        from .existing_results import import_existing_results
+
+        report = import_existing_results(
+            args.run_dir,
+            args.results,
+            contract_source=args.contract,
+            preregistration_source=args.preregistration,
+            replace=args.replace,
+            notes=args.notes,
+        )
+        print(f"导入报告：{args.run_dir / '00-import-report.json'}")
+        print(f"- 导入文件：{len(report.get('imported_files', []))}")
+        print(f"- 缺失项：{len(report.get('missing_fields', []))}")
+        for item in report.get("missing_fields", [])[:6]:
+            print(f"  - {item}")
+        print(f"- 警告：{len(report.get('warnings', []))}")
+        evidence = report.get("evidence_assessment") or {}
+        if evidence:
+            print(f"- LLM 证据：{evidence.get('llm_evidence_status')}")
+            print(f"- 实验证据：{evidence.get('experiment_evidence_status')}")
+        print(f"- 下一步：{evidence.get('next_step') or '见导入报告'}")
+        return
+
     if args.command == "run":
         base_config = load_config(args.config)
         _reject_paper_grade_direct_secret_args(args, base_config)
