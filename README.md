@@ -226,7 +226,7 @@ bash scripts/prepare_gold_support_runs.sh
 | `tests-with-mcp` | 装上可选 mcp extra，同样先生成 support run 再跑全量，让 streamable-http 客户端路径跑在真实 SDK 上，而不是只覆盖 `tool_runtime` 的 ImportError 回退 |
 | `zero-runtime-deps` | 不装任何 extra，逐个导入 `src/research_agent` 下 143 个模块。零第三方运行时依赖是本项目的可信度论据之一（见 [`docs/design-notes.md`](docs/design-notes.md) §5），这个 job 防止后续某次 import 悄悄破坏它 |
 
-本仓库基线（2026-09-13，任务书 T00–T10 实施前）：Python 3.12.13 全量 3 failed / 1372 passed / 1 skipped（3 个失败为 T04 已修复的静默降级子用例，见 docs/baseline-audit.md）。实施后以 CI 矩阵结果为准。
+实施前基线（2026-09-13，T00）：Python 3.12.13 全量 3 failed / 1372 passed / 1 skipped（3 个失败为 T04 已修复的静默降级子用例，见 docs/baseline-audit.md）。实施后全量实测（2026-09-13，T10 收尾）：**1423 passed, 1 skipped, 117 subtests，0 failed**（含 tests/test_cli.py 与 gold 用例，未做任何排除）；CI 矩阵以 push 结果为准。
 
 ## 文档索引
 
