@@ -60,9 +60,18 @@ def main() -> int:
     if pack_path.exists():
         pack = json.loads(pack_path.read_text(encoding="utf-8"))
         print(f"[fault-injection] pack 状态：{pack.get('status')}（预期 block）")
-    blocked = proc.returncode != 0
-    print("[fault-injection] 结果：", "系统按预期阻断 ✓" if blocked else "未阻断——系统出现漏判，需要排查 ✗")
-    return 0 if blocked else 1
+    # 复审第 6 项：不能把任意非零退出码当成规则正确——必须断言具体审计原因。
+    schema_ok = False
+    if schema_path.exists():
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        issues = " ".join(str(item) for item in schema.get("blocking_issues", []))
+        schema_ok = schema.get("status") == "block" and "split_sha256" in issues
+    pack_ok = False
+    if pack_path.exists():
+        pack_ok = json.loads(pack_path.read_text(encoding="utf-8")).get("status") == "block"
+    all_ok = proc.returncode != 0 and schema_ok and pack_ok
+    print("[fault-injection] 结果：", "系统按预期阻断（provenance 校验）✓" if all_ok else "未按预期阻断——需要排查 ✗")
+    return 0 if all_ok else 1
 
 
 if __name__ == "__main__":

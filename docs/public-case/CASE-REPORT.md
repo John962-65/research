@@ -3,7 +3,7 @@
 > 存档说明：本报告的权威版本随证据包生成于 `runs/public-iris-case/`（runs 为 gitignore 的本地产物，可用 `bash scripts/replay_public_case.sh` 确定性再生）；此副本入库供查阅，两者内容一致。
 
 案例目录：`runs/public-iris-case`（本目录即公开证据包；`fault-injection/` 为受控故障注入副本，不是自然错误）。
-生成日期：2026-09-13。重放：`bash scripts/replay_public_case.sh`（离线、CPU、无需任何凭据）。
+生成日期：2026-09-13。重放：`bash scripts/replay_public_case.sh`（离线、CPU、无需任何凭据；干净检出即可运行——与入库的 `docs/public-case/EXPECTED-RESULTS.json` 比对，并断言中断生效与具体阻断原因）。
 
 ## 1. 研究问题与冻结契约
 
@@ -28,7 +28,7 @@
 
 ## 3. 真实中断恢复记录
 
-第一次执行在中途被 SIGINT 真实终止（进度：candidate×3 与 baseline×3 已完成，ablation 未开始，`04-results.json` 尚未生成）。
+第一次执行在中途被真实终止（进程死亡式中断，进度：candidate×3 与 baseline×3 已完成、ablation 未开始，`04-results.json` 尚未生成；重放脚本以轮询尝试账本+强制终止的崩溃式中断注入，与 A13"即刻崩溃或任务重启"同型）。
 随后使用 `benchmark-pack-run --resume` 原地恢复：
 
 - 复用：03 契约/适配器/预注册工件（内容与摘要未变化，预注册保持 revision 1，未产生新分析身份）。

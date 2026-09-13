@@ -1,0 +1,6 @@
+{
+ "accuracy": 0.966667,
+ "macro_f1": 0.966583,
+ "error_rate": 0.033333,
+ "passed_rows": 9
+}

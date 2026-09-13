@@ -21,6 +21,7 @@ def write_experiment_decision_artifacts(
     benchmark_plan: dict[str, Any] | None = None,
     benchmark_evidence: dict[str, Any] | None = None,
     contract: dict[str, Any] | None = None,
+    experiment_evidence_status: str = "",
 ) -> dict[str, Any]:
     report = build_experiment_decision_report(
         plan,
@@ -31,6 +32,7 @@ def write_experiment_decision_artifacts(
         benchmark_plan=benchmark_plan,
         benchmark_evidence=benchmark_evidence,
         contract=contract,
+        experiment_evidence_status=experiment_evidence_status,
     )
     write_json(run_dir / EXPERIMENT_DECISION_JSON, report)
     write_text(run_dir / EXPERIMENT_DECISION_MD, render_experiment_decision_markdown(report))
@@ -46,6 +48,7 @@ def build_experiment_decision_report(
     benchmark_plan: dict[str, Any] | None = None,
     benchmark_evidence: dict[str, Any] | None = None,
     contract: dict[str, Any] | None = None,
+    experiment_evidence_status: str = "",
 ) -> dict[str, Any]:
     validation_status = str(result_validation.get("status") or "")
     failure_status = str(failure_analysis.get("status") or "")
@@ -118,6 +121,7 @@ def build_experiment_decision_report(
             uncertain_metrics=uncertain_metrics,
             failed_runs=failed_runs,
             positive_primary=positive_primary,
+            experiment_evidence_status=experiment_evidence_status,
         ),
         "evidence_summary": {
             "validation_status": validation_status,
@@ -306,6 +310,7 @@ def _decision_states(
     uncertain_metrics: list[Any],
     failed_runs: list[Any],
     positive_primary: int = 0,
+    experiment_evidence_status: str = "",
 ) -> dict[str, Any]:
     """decision-contract §1 的四类状态映射（execution/evidence/research_outcome/next_action）。
 
@@ -328,8 +333,12 @@ def _decision_states(
         execution_status = "completed"  # 模拟执行也是一次完成的执行；证据维度单独标 simulated
 
     validation_status = str(result_validation.get("status") or "")
+    # 复审第 4/6 项：证据真实性优先采纳 04-evidence-integrity 的独立判定
+    # （产物来源与内容可信度）；统计警告（如 CI 零宽）不属于证据缺失。
     if validation_status == "block" or decision == "repair_before_writing":
         evidence_status = "invalid"
+    elif experiment_evidence_status in {"verified", "incomplete", "invalid", "simulated", "unknown"}:
+        evidence_status = experiment_evidence_status
     elif validation_status == "warn":
         evidence_status = "incomplete"
     elif execution_mode == "simulated" or simulated_runs:
