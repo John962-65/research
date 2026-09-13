@@ -92,6 +92,61 @@ echo "== 2/5 生成评审工件（契约/证据/决策/假设结论） =="
 "$PYTHON_BIN" "$ROOT_DIR/scripts/finalize_public_case.py" "$CASE_DIR"
 
 echo
+echo "== 2b/5 断言中断与恢复（按实际事件，不依赖固定总数） =="
+"$PYTHON_BIN" - "$CASE_DIR" <<'PY3'
+import json, sys
+attempts = json.load(open(sys.argv[1] + "/04-experiment-attempts.json"))["attempts"]
+interrupted = [a for a in attempts if a.get("status") == "interrupted"]
+passed = [a for a in attempts if a.get("status") == "passed"]
+assert interrupted, "重放必须至少产生一条 interrupted 尝试"
+assert len(passed) >= 9, f"最终成功执行必须 >= 9（3 角色 x 3 repeats），实际 {len(passed)}"
+print(f"中断恢复断言通过：interrupted={len(interrupted)}，passed={len(passed)}，总数={len(attempts)}")
+PY3
+
+echo
+echo "== 2c/5 生成机器可读 replay summary（与 EXPECTED-RESULTS 分开保存） =="
+"$PYTHON_BIN" - "$CASE_DIR" <<'PY4'
+import json, sys
+from datetime import datetime, timezone
+run_dir = sys.argv[1]
+rows = json.load(open(run_dir + "/04-results.json"))
+attempts = json.load(open(run_dir + "/04-experiment-attempts.json"))["attempts"]
+decision = json.load(open(run_dir + "/04-experiment-decision.json"))
+integrity = json.load(open(run_dir + "/04-evidence-integrity.json"))
+contract = json.load(open(run_dir + "/03-idea-experiment-contract.json"))
+fault_path = run_dir + "/fault-injection/FAULT-INJECTION.json"
+try:
+    fault = json.load(open(fault_path))
+except (OSError, ValueError):
+    fault = None
+cand = next(r for r in rows if r["name"].endswith("candidate") and r["status"] == "passed")
+summary = {
+    "schema_version": 1,
+    "replay_generated_at": datetime.now(timezone.utc).isoformat(),
+    "attempts_total": len(attempts),
+    "interrupted_count": sum(1 for a in attempts if a.get("status") == "interrupted"),
+    "final_passed_rows": sum(1 for r in rows if r["status"] == "passed"),
+    "key_metrics": {
+        "accuracy": cand["metrics"]["accuracy"],
+        "macro_f1": cand["metrics"]["macro_f1"],
+        "error_rate": cand["metrics"]["error_rate"],
+    },
+    "decision": decision.get("decision"),
+    "decision_states": decision.get("decision_states"),
+    "evidence": {
+        "llm": integrity.get("llm_evidence_status"),
+        "experiment": integrity.get("experiment_evidence_status"),
+    },
+    "contract_digest": contract.get("contract_digest"),
+    "fault_injection_blocked": bool(fault and fault.get("observed", {}).get("benchmark_pack_run_status") == "block"),
+    "llm_involved": False,
+    "not_verified_steps": ["论文生成", "独立模型评审", "最终 gate（publishable 判定）"],
+}
+open(run_dir + "/replay-summary.json", "w").write(json.dumps(summary, ensure_ascii=False, indent=1))
+print(json.dumps({k: summary[k] for k in ("attempts_total", "interrupted_count", "final_passed_rows", "decision")}, ensure_ascii=False))
+PY4
+
+echo
 echo "== 3/5 比对关键数值（与入库期望值 docs/public-case/EXPECTED-RESULTS.json） =="
 "$PYTHON_BIN" - "$CASE_DIR" "$EXPECTED" <<'PY'
 import json, sys

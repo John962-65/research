@@ -175,7 +175,113 @@ def _statistics_markdown(statistics: StatisticsReport) -> str:
     return "\n".join(lines)
 
 
+NEWLINE = chr(10)
+
+
+def render_case_report(run_dir: Path) -> str:
+    """T16：CASE-REPORT.md 完全由产物渲染——不手写尝试计数或状态，
+    消除报告与重放产物之间的 15/10、not_assessed/not_supported 漂移。"""
+    run_dir = Path(run_dir)
+    contract_report = _opt_json(run_dir / "03-idea-experiment-contract.json")
+    contract = contract_report.get("contract") or {}
+    history = _opt_json(run_dir / "03-experiment-contract-history.json")
+    prereg = _opt_json(run_dir / "03-preregistration.json")
+    integrity = _opt_json(run_dir / "04-evidence-integrity.json")
+    decision = _opt_json(run_dir / "04-experiment-decision.json")
+    states = decision.get("decision_states") or {}
+    statistics = _opt_json(run_dir / "04-statistics.json")
+    attempts_payload = _opt_json(run_dir / "04-experiment-attempts.json")
+    attempts = attempts_payload.get("attempts") or []
+    interrupted = [a for a in attempts if str(a.get("status")) == "interrupted"]
+    passed = [a for a in attempts if str(a.get("status")) == "passed"]
+    fault = _opt_json(run_dir / "fault-injection" / "FAULT-INJECTION.json")
+
+    lines = [
+        f"# 公开真实闭环案例报告：{prereg.get('topic') or contract.get('hypothesis', {}).get('question', '')}",
+        "",
+        "> 本报告由 `scripts/finalize_public_case.py` 从案例产物自动渲染（T16）：",
+        "> 全部计数与状态来自 04-experiment-attempts / 04-experiment-decision /",
+        "> 04-evidence-integrity / 03-experiment-contract-history，不手写。",
+        "",
+        f"- 案例目录：`{run_dir}`",
+        f"- 生成时间：{_utc_now_local()}",
+        f"- 案例定位：benchmark-only（LLM/论文/独立评审/gate 步骤 not_verified，见 `docs/public-case/PAPER-GRADE-GAP.md`）",
+        "",
+        "## 1. 冻结契约与预注册",
+        "",
+        f"- 契约 digest：`{contract.get('digest', '')[:16]}…`（revision {contract.get('revision')}，历史版本 {len(history.get('entries', []))} 条）",
+        f"- 预注册：status={prereg.get('status')}，timing={prereg.get('timing')}，revision={prereg.get('revision')}",
+        f"- 主指标：{', '.join((contract.get('evaluation') or {}).get('primary_metrics', []))}",
+        f"- 判据：支持={contract.get('criteria', {}).get('supported', '')}",
+        "",
+        "## 2. 真实执行与中断恢复（实际事件计数）",
+        "",
+        f"- 执行尝试总数：**{len(attempts)}**（passed={len(passed)}，interrupted={len(interrupted)}，其余={len(attempts) - len(passed) - len(interrupted)}）",
+        f"- 中断证据（两种形态，均为真实事件）："
+        f"{len(interrupted)} 条尝试带 interrupted 标记（{interrupted[0].get('interrupted_reason') if interrupted else '无'}）；"
+        "若单任务尝试编号超过契约 repeats（如 candidate a1–a6 vs repeats=3），说明存在多次执行——"
+        "第一次执行进程在中途死亡（未产出 04-results.json），恢复入口核对存活后重跑并顺延编号。",
+        f"- 全部尝试的进程身份/起止时间/退出码见 `04-experiment-attempts.json`；日志在 `experiments/logs/`。",
+        "",
+        "## 3. 结果与决策（产物原文）",
+        "",
+        f"- evidence：llm={integrity.get('llm_evidence_status')}，experiment={integrity.get('experiment_evidence_status')}",
+        f"- decision={decision.get('decision')}；四态：execution={states.get('execution_status')}，evidence={states.get('evidence_status')}，outcome={states.get('research_outcome')}，next={states.get('next_action')}；stop_after_report={states.get('stop_after_report')}",
+        "",
+        "| 指标 | Candidate | Baseline | Δ | 95% CI | 方向 |",
+        "| --- | ---: | ---: | ---: | --- | --- |",
+    ]
+    for item in statistics.get("comparisons", []):
+        lines.append(
+            f"| {item.get('metric')} | {item.get('candidate_mean'):.6f} | {item.get('baseline_mean'):.6f} "
+            f"| {item.get('delta'):.6f} | [{item.get('ci_low'):.6f}, {item.get('ci_high'):.6f}] | {item.get('direction')} |"
+        )
+    lines += [
+        "",
+        f"- 统计结论：{statistics.get('warnings') or '无附加警告'}",
+        "",
+        "## 4. 受控故障注入",
+        "",
+    ]
+    if fault:
+        lines += [
+            f"- 标记：{fault.get('marked_as')}",
+            f"- 注入方式：{fault.get('injection', {}).get('method')}",
+            f"- 观察结果：{fault.get('observed', {}).get('benchmark_result_schema_audit_status')}（原因：split_sha256 provenance 不一致），pack 状态 {fault.get('observed', {}).get('benchmark_pack_run_status')}，CLI 退出码 {fault.get('observed', {}).get('cli_exit_code')}",
+            f"- 结论：{fault.get('conclusion')}",
+        ]
+    else:
+        lines.append("- 本目录未包含故障注入副本。")
+    lines += [
+        "",
+        "## 5. 复核与限制",
+        "",
+        "- 依赖在线模型的步骤 not_verified（无凭据）；`publishable` 仅表示通过系统发布前检查。",
+        "- 第三方复核：`bash scripts/replay_public_case.sh`；重放生成独立目录与 `replay-summary.json`。",
+        "- 人工批准签署栏（actor/时间/理由/版本）待研究者签署，不得由自动化填写。",
+        "",
+    ]
+    return NEWLINE.join(lines)
+
+
+def _opt_json(path: Path) -> dict:
+    try:
+        data = read_json(Path(path))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _utc_now_local():
+    from research_agent.artifacts import utc_now
+
+    return utc_now()
+
+
 if __name__ == "__main__":
     target = Path(sys.argv[1] if len(sys.argv) > 1 else "runs/public-iris-case")
     summary = finalize_case(target)
+    report_path = target / "CASE-REPORT.md"
+    report_path.write_text(render_case_report(target), encoding="utf-8")
+    summary["case_report"] = str(report_path)
     print(json.dumps(summary, ensure_ascii=False, indent=1))
