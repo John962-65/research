@@ -1,0 +1,13 @@
+{
+ "schema_version": 1,
+ "generated_at": "2026-09-13T14:44:50.224428+00:00",
+ "command": "bash scripts/run_tests.sh",
+ "summary_line": "1435 passed, 1 skipped, 120 subtests passed in 291.32s (0:04:51)",
+ "passed": 1435,
+ "failed": 0,
+ "skipped": 1,
+ "subtests": 120,
+ "duration_seconds": null,
+ "excluded_tests": [],
+ "note": "完整套件，未排除 tests/test_cli.py；数字由 pytest 实际输出解析，不手写。"
+}

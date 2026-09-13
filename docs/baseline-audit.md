@@ -1,6 +1,11 @@
 # 基线审计（T00）
 
-审计日期：2026-09-13。任务书：`research_modification_taskbook_v1.md`，
+> 历史快照说明（T20）：本文记录的是 **2026-09-13 T00 时点的历史快照**——
+> 当时的本地目录为无 `.git` 的导出副本、与远端 `e64af3c` 零差异、测试基线
+> 3 failed/1372 passed。这些是当时的事实，不随当前仓库演化更新；当前
+> 数字以 [`docs/test-evidence.json`](test-evidence.json) 为准。
+
+审计日期：2026-09-13（历史快照时点）。任务书：`research_modification_taskbook_v1.md`，
 基线 `e64af3c11ce7c1cdf7124bd1999d8cccc4cfcdd6`。
 
 ## 1. 版本核对结论

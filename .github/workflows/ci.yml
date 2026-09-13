@@ -71,6 +71,11 @@ jobs:
       - name: Docs link check
         run: python scripts/check_docs.py
 
+      - name: Docs status drift check (T20)
+        run: |
+          python3 scripts/generate_test_evidence.py --from-log pytest-output.log --command "bash scripts/run_tests.sh"
+          PYTHONPATH=scripts python3 scripts/check_docs_drift.py
+
   # Same suite with the optional MCP extra installed, so the streamable-http
   # client paths are exercised against the real SDK rather than only against
   # the ImportError fallback.
