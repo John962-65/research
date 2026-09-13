@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from .artifacts import read_json, write_json, write_text, cell as _cell
+from .idea_experiment_contract import compute_contract_digest
 from .models import ExperimentPlan, ExperimentResult, StatisticsReport
 from .preregistration import plan_fingerprint
 
@@ -245,7 +246,11 @@ def _check_contract_binding(
     warnings: list[str],
     check_expected: bool = False,
 ) -> None:
-    """A12：结果出来后改契约 → 执行绑定摘要失效，旧批准与分析身份不再沿用。"""
+    """A12/复审第 4 项：契约摘要必须**重新计算**并与执行绑定核对。
+
+    - 内容与文件内保存的 digest 字段不一致（改内容、留旧摘要）→ block；
+    - 执行绑定摘要与重算摘要不一致 → block（旧批准与分析身份不再沿用）。
+    """
     if not contract:
         if not check_expected:
             return
@@ -253,8 +258,21 @@ def _check_contract_binding(
         items.append({"name": "contract_binding", "status": "warn", "detail": detail})
         warnings.append(detail)
         return
+    stored = str(contract.get("digest") or "")
+    recomputed = compute_contract_digest(contract)
+    if stored and stored != recomputed:
+        detail = (
+            "契约内容与文件内保存的摘要不一致（契约被改动但 digest 未更新）；"
+            "按 contract_violation 处理，结果不得用于支撑比较结论。"
+        )
+        items.append({
+            "name": "contract_binding", "status": "block", "detail": detail,
+            "overridable": False, "block_reason_code": "contract_violation",
+        })
+        blocking.append(detail)
+        return
     bound = str((binding or {}).get("contract_digest") or "")
-    current = str(contract.get("digest") or "")
+    current = recomputed
     if bound and bound != current:
         detail = (
             "执行绑定的契约摘要与当前契约不一致：已有结果可能基于旧契约版本；"

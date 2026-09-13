@@ -2387,6 +2387,7 @@ def _run_after_review_approval(
                 execution_mode=config.execution.mode,
                 benchmark_plan=benchmark_plan_report,
                 benchmark_evidence=benchmark_evidence,
+                contract=(_read_dict(out_dir / IDEA_EXPERIMENT_CONTRACT_JSON).get("contract") if isinstance(_read_dict(out_dir / IDEA_EXPERIMENT_CONTRACT_JSON).get("contract"), dict) else None),
             )
             hypothesis_outcome = write_hypothesis_outcome_artifacts(
                 chosen_idea,
@@ -2480,6 +2481,7 @@ def _run_after_review_approval(
                 execution_mode=config.execution.mode,
                 benchmark_plan=benchmark_plan_report,
                 benchmark_evidence=benchmark_evidence,
+                contract=(_read_dict(out_dir / IDEA_EXPERIMENT_CONTRACT_JSON).get("contract") if isinstance(_read_dict(out_dir / IDEA_EXPERIMENT_CONTRACT_JSON).get("contract"), dict) else None),
             )
             hypothesis_outcome = write_hypothesis_outcome_artifacts(
                 chosen_idea,

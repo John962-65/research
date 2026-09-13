@@ -20,6 +20,7 @@ def write_experiment_decision_artifacts(
     execution_mode: str = "",
     benchmark_plan: dict[str, Any] | None = None,
     benchmark_evidence: dict[str, Any] | None = None,
+    contract: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     report = build_experiment_decision_report(
         plan,
@@ -29,6 +30,7 @@ def write_experiment_decision_artifacts(
         execution_mode=execution_mode,
         benchmark_plan=benchmark_plan,
         benchmark_evidence=benchmark_evidence,
+        contract=contract,
     )
     write_json(run_dir / EXPERIMENT_DECISION_JSON, report)
     write_text(run_dir / EXPERIMENT_DECISION_MD, render_experiment_decision_markdown(report))
@@ -43,6 +45,7 @@ def build_experiment_decision_report(
     execution_mode: str = "",
     benchmark_plan: dict[str, Any] | None = None,
     benchmark_evidence: dict[str, Any] | None = None,
+    contract: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     validation_status = str(result_validation.get("status") or "")
     failure_status = str(failure_analysis.get("status") or "")
@@ -57,6 +60,19 @@ def build_experiment_decision_report(
     uncertain_metrics = _as_list(failure_analysis.get("uncertain_metrics"))
     failed_runs = _as_list(failure_analysis.get("failed_runs"))
     simulated_runs = _safe_int(summary.get("simulated_runs"))
+    # 复审第 4 项：假设判定必须按契约冻结的主指标进行——次指标升降不得
+    # 改写主指标的 supported/not_supported 结论。
+    contract = contract if isinstance(contract, dict) else {}
+    evaluation = contract.get("evaluation") if isinstance(contract.get("evaluation"), dict) else {}
+    primary_metrics = [str(item).strip() for item in (evaluation.get("primary_metrics") or []) if str(item).strip()]
+    if primary_metrics:
+        negative_metrics = [item for item in negative_metrics if _metric_name(item) in primary_metrics]
+        uncertain_metrics = [item for item in uncertain_metrics if _metric_name(item) in primary_metrics]
+    positive_primary = sum(
+        1
+        for item in statistics.comparisons
+        if item.direction == "candidate_better" and (not primary_metrics or item.metric in primary_metrics)
+    )
     decision, status = _decision(
         validation_status=validation_status,
         failure_status=failure_status,
@@ -90,6 +106,8 @@ def build_experiment_decision_report(
         "decision": decision,
         "paper_policy": _paper_policy(decision),
         "downstream_writing_allowed": decision not in {"repair_before_writing"},
+        "primary_metrics": primary_metrics,
+        "contract_scoped": bool(primary_metrics),
         "decision_states": _decision_states(
             decision=decision,
             result_validation=result_validation,
@@ -99,6 +117,7 @@ def build_experiment_decision_report(
             negative_metrics=negative_metrics,
             uncertain_metrics=uncertain_metrics,
             failed_runs=failed_runs,
+            positive_primary=positive_primary,
         ),
         "evidence_summary": {
             "validation_status": validation_status,
@@ -286,6 +305,7 @@ def _decision_states(
     negative_metrics: list[Any],
     uncertain_metrics: list[Any],
     failed_runs: list[Any],
+    positive_primary: int = 0,
 ) -> dict[str, Any]:
     """decision-contract §1 的四类状态映射（execution/evidence/research_outcome/next_action）。
 
@@ -319,7 +339,10 @@ def _decision_states(
     else:
         evidence_status = "verified"
 
-    stable_positive = comparisons - len(negative_metrics) - len(uncertain_metrics)
+    if comparisons and (positive_primary or negative_metrics or uncertain_metrics):
+        stable_positive = positive_primary
+    else:
+        stable_positive = comparisons - len(negative_metrics) - len(uncertain_metrics)
     if decision == "repair_before_writing" or execution_mode == "simulated" or decision == "benchmark_upgrade" or comparisons <= 0:
         research_outcome = "not_assessed"
     elif negative_metrics and stable_positive <= 0:

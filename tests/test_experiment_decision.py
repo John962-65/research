@@ -89,6 +89,52 @@ class ExperimentDecisionTest(unittest.TestCase):
         self.assertEqual(states["research_outcome"], "not_assessed")
         self.assertEqual(states["next_action"], "request_material")
 
+    def test_primary_metric_governs_when_secondary_improves(self) -> None:
+        # 复审第 4 项复现：主指标变差、次指标变好 → 不得同时输出
+        # pivot_or_refine 与 supported；契约主指标决定结论。
+        contract = {"evaluation": {"primary_metrics": ["accuracy"]}}
+        report = build_experiment_decision_report(
+            _plan(),
+            _statistics([
+                _comparison("accuracy", -0.2, "baseline_better_or_equal"),
+                _comparison("speed", 0.5, "candidate_better"),
+            ]),
+            {"status": "pass"},
+            {"status": "pass", "summary": {}, "failed_runs": [],
+             "negative_metrics": [{"metric": "accuracy"}], "uncertain_metrics": []},
+            execution_mode="benchmark",
+            contract=contract,
+        )
+        self.assertEqual(report["decision"], "pivot_or_refine")
+        states = report["decision_states"]
+        self.assertEqual(states["research_outcome"], "not_supported")
+        self.assertNotEqual(states["research_outcome"], "supported")
+        self.assertEqual(report["primary_metrics"], ["accuracy"])
+        # 次指标单独变差不影响主指标结论：主指标稳定为正 → supported。
+        report2 = build_experiment_decision_report(
+            _plan(),
+            _statistics([
+                _comparison("accuracy", 0.2, "candidate_better"),
+                _comparison("speed", -0.5, "baseline_better_or_equal"),
+            ]),
+            {"status": "pass"},
+            {"status": "pass", "summary": {}, "failed_runs": [],
+             "negative_metrics": [{"metric": "speed"}], "uncertain_metrics": []},
+            execution_mode="benchmark",
+            contract=contract,
+        )
+        self.assertEqual(report2["decision"], "proceed_to_paper")
+        self.assertEqual(report2["decision_states"]["research_outcome"], "supported")
+        # 无契约时保持旧行为（全部指标参与判定）。
+        report3 = build_experiment_decision_report(
+            _plan(),
+            _statistics([_comparison("accuracy", 0.2, "candidate_better")]),
+            {"status": "pass"},
+            {"status": "pass", "summary": {}, "failed_runs": [], "negative_metrics": [], "uncertain_metrics": []},
+            execution_mode="benchmark",
+        )
+        self.assertEqual(report3["decision_states"]["research_outcome"], "supported")
+
     def test_write_experiment_decision_outputs_json_and_markdown(self) -> None:
         with TemporaryDirectory() as tmp:
             report = write_experiment_decision_artifacts(

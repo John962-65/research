@@ -152,10 +152,19 @@ def build_execution_contract(
     return contract
 
 
-def _contract_content_digest(contract: dict[str, Any]) -> str:
-    """内容摘要：排除 revision/frozen_at/approvals 等过程字段，专用于版本比较。"""
+def compute_contract_digest(contract: dict[str, Any]) -> str:
+    """契约内容摘要（排除 revision/frozen_at/approvals/digest 等过程字段）。
+
+    复审第 4 项：执行绑定与审计核对必须对当前内容**重新计算**该摘要，
+    而不是比较文件里保存的 digest 字符串——否则改动内容、保留原 digest
+    即可绕过检查。
+    """
     payload = {key: value for key, value in contract.items() if key not in {"revision", "frozen_at", "approvals", "digest"}}
     return payload_sha256(payload)
+
+
+# 兼容别名
+_contract_content_digest = compute_contract_digest
 
 
 def append_contract_history(

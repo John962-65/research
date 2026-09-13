@@ -46,7 +46,10 @@ class ResultValidationTest(unittest.TestCase):
             _result("ablation", 2, {"success_rate": 0.76, "runtime_cost": 0.34}),
         ]
         statistics = build_statistics_report(plan, results)
-        contract = {"digest": "new-digest-after-change", "contract_id": "contract-x"}
+        from research_agent.idea_experiment_contract import compute_contract_digest
+
+        contract = {"digest": "", "contract_id": "contract-x", "evaluation": {"primary_metrics": ["success_rate"]}}
+        contract["digest"] = compute_contract_digest(contract)
         binding = {"contract_digest": "old-digest-at-execution"}
         report = build_result_validation_report(
             plan, results, statistics, expected_repeats=3,
@@ -58,10 +61,34 @@ class ResultValidationTest(unittest.TestCase):
         ok = build_result_validation_report(
             plan, results, statistics, expected_repeats=3,
             preregistration=_preregistration(plan), contract=contract,
-            contract_binding={"contract_digest": "new-digest-after-change"},
+            contract_binding={"contract_digest": contract["digest"]},
         )
         binding_check = next(item for item in ok["items"] if item["name"] == "contract_binding")
         self.assertEqual(binding_check["status"], "pass")
+
+    def test_tampered_contract_digest_is_blocked_even_if_field_kept(self) -> None:
+        # 复审第 4 项：改契约内容但保留原 digest 字段 → 重算摘要不一致 → 阻断。
+        plan = _plan()
+        results = [
+            _result("candidate", 0, {"success_rate": 0.8, "runtime_cost": 0.3}),
+            _result("baseline", 0, {"success_rate": 0.7, "runtime_cost": 0.4}),
+            _result("ablation", 0, {"success_rate": 0.74, "runtime_cost": 0.36}),
+            _result("candidate", 1, {"success_rate": 0.82, "runtime_cost": 0.31}),
+            _result("baseline", 1, {"success_rate": 0.69, "runtime_cost": 0.42}),
+            _result("ablation", 1, {"success_rate": 0.75, "runtime_cost": 0.35}),
+            _result("candidate", 2, {"success_rate": 0.84, "runtime_cost": 0.29}),
+            _result("baseline", 2, {"success_rate": 0.68, "runtime_cost": 0.43}),
+            _result("ablation", 2, {"success_rate": 0.76, "runtime_cost": 0.34}),
+        ]
+        statistics = build_statistics_report(plan, results)
+        contract = {"digest": "original-digest", "contract_id": "c", "evaluation": {"primary_metrics": ["success_rate"]}}
+        binding = {"contract_digest": "original-digest"}
+        report = build_result_validation_report(
+            plan, results, statistics, expected_repeats=3,
+            preregistration=_preregistration(plan), contract=contract, contract_binding=binding,
+        )
+        self.assertEqual(report["status"], "block")
+        self.assertTrue(any("摘要不一致" in item for item in report["blocking_issues"]))
 
     def test_validation_blocks_failed_and_missing_metric_results(self) -> None:
         plan = _plan()
