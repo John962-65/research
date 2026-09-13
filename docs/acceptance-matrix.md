@@ -32,6 +32,13 @@
 | A21 | 无试用数据 | 保持 not_measured，不生成效率比例 | T11 | tests/test_review_evaluation.py（16 子测试通过；docs/review-evaluation.md 维持 not_measured 声明） | verified |
 | A22 | 同输入走 CLI/Web/恢复 | 决策、原因、证据版本一致 | T12 | 三入口共享同一决策实现（experiment_decision/gate_aggregator/evidence_snapshot 由 pipeline 单点调用，Web 仅做输入输出）；tests/test_web_resume.py 恢复等价性 + examples/review-evaluation-cases.json 直连真实决策函数 | verified |
 
+| A23 | 三条阻断同时存在，人工只批准第一条 | 其余阻断（含缺角色/不可核验）继续阻止放行 | 复审1 | tests/test_gate_aggregator.py::test_partial_override_only_dissolves_approved_blockers | verified |
+| A24 | 修改角色证据文件（如 04-statistics）后恢复 | 快照摘要变化，独立评审重跑（调用次数>0） | 复审2 | tests/test_gate_aggregator.py::test_statistics_change_invalidates_deliberation_on_resume + ::test_verdict_must_match_ledger_records（版本/响应/输入过期核验） | verified |
+| A25 | 导入声明已执行但无产物文件 | 实验证据 incomplete（声明不等于核验）；人工报告+已核验实验 → 来源说明而非演示横幅 | 复审3 | tests/test_import_existing.py::test_imported_results_without_artifacts_are_incomplete + tests/test_evidence_integrity.py::test_manual_report_with_real_experiment_is_not_simulated | verified |
+| A26 | 改契约内容保留旧 digest 字段；主降次升 | 摘要重算不一致 → block；主指标决定结论（不出现 supported+pivot 并存） | 复审4 | tests/test_result_validation.py::test_tampered_contract_digest_is_blocked_even_if_field_kept + tests/test_experiment_decision.py::test_primary_metric_governs_when_secondary_improves | verified |
+| A27 | 目标数值缺失/无方向证据/同句正反混合 | 数值冲突判矛盾；无方向证据 → 待核验；按指标归因 → 不误拦 | 复审5 | tests/test_claim_evidence_polarity.py::ReviewerRegressionTest | verified |
+| A28 | 干净检出重放；预算中途异常；进程脚本不同 | 重放断言中断生效+期望数值+具体阻断原因；预算启动前预留；argv 全长比较 | 复审6–8 | scripts/replay_public_case.sh 实测 + tests/test_run_budget.py::test_event_history_survives_reload + tests/test_experiment_attempts.py::test_same_interpreter_different_script_is_rejected | verified |
+
 ## 使用规则
 
 1. 每个任务实现完成时把对应行的"测试载体"改为实际 `文件::用例名`，

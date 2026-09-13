@@ -129,12 +129,25 @@ next_action=stop 后继续自动实验轮。
 | missing_required_evidence | 必需证据缺失（如必需角色 verdict、必需指标） |
 | contract_violation | 违反冻结契约（如结果出来后改主指标且未建新版本） |
 
-### 3.3 覆盖字段要求（在现有 gate_aggregator 校验之上新增）
+### 3.3 覆盖语义（复审第 1 项修订）：逐项批准、逐项消解
+
+- 覆盖只消解 `approved_blockers` 中明确列出、且经系统推导属于**可覆盖**
+  类别的阻断；任何未被合法覆盖的阻断继续阻止放行（status 保持 blocked）。
+- 可覆盖性由系统推导，不依赖批准人填写的原因码：缺必需评审
+  （missing_verdict:*）、快照损坏（snapshot:*）、verdict 与账本核验失败
+  （verdict:*:unverified_call）、独立评审层阻断（independent_deliberation），
+  以及自报 overridable=false 的确定性审计（provenance/来源不可核验、
+  契约绑定失配）一律不可覆盖。
+- 覆盖后的决定保留 dissolved/remaining 清单与原始机器状态；部分覆盖时
+  页面必须显示剩余阻断。
+
+### 3.4 覆盖字段要求（在现有 gate_aggregator 校验之上新增）
 
 - `approved` 必须布尔真、`revision` 必须整型且等于当前 revision、
   `verdict_sha256` 必须 HMAC 匹配（现有校验保留）。
 - 新增：`reason_code` ∈ §3.1 词表；`scope`（覆盖影响的产物/阶段清单）；
-  `approval_object`（被覆盖对象，如 "10-gate-decision:blocking_sources:deterministic:citation_grounding"）。
+  `approved_blockers`（被批准消解的阻断来源列表，规范字段）；
+  `approval_object`（单项兼容别名）。
 - 覆盖后的决定必须同时保留：原机器决定（status/blocking_sources）、
   覆盖者、理由、原因码、所绑定证据摘要。批准不能消除原始阻断记录，
   不能把缺失数据改成已验证证据。
