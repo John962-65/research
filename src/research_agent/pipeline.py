@@ -2338,7 +2338,7 @@ def _run_after_review_approval(
             benchmark_plan_report = _read_dict(out_dir / BENCHMARK_PLAN_JSON)
             adapter_report = _read_dict(out_dir / BENCHMARK_ADAPTER_JSON)
             audit_plan = _execution_audit_plan(plan, runbook, adapter_report, config.execution.mode)
-            statistics = build_statistics_report(audit_plan, results)
+            statistics = build_statistics_report(audit_plan, results, metric_directions=_declared_metric_directions(adapter_report))
             if not (out_dir / "04-statistics.json").exists():
                 write_json(out_dir / "04-statistics.json", statistics)
             if not (out_dir / "04-statistics.md").exists():
@@ -2437,7 +2437,7 @@ def _run_after_review_approval(
             benchmark_plan_report = _read_dict(out_dir / BENCHMARK_PLAN_JSON)
             adapter_report = _read_dict(out_dir / BENCHMARK_ADAPTER_JSON)
             audit_plan = _execution_audit_plan(plan, runbook, adapter_report, config.execution.mode)
-            statistics = build_statistics_report(audit_plan, results)
+            statistics = build_statistics_report(audit_plan, results, metric_directions=_declared_metric_directions(adapter_report))
             write_json(out_dir / "04-statistics.json", statistics)
             write_text(out_dir / "04-statistics.md", render_statistics_markdown(statistics))
             write_statistics_figure_artifacts(out_dir, statistics)
@@ -5144,6 +5144,20 @@ def recheck_required_from_disk(out_dir: Path) -> bool:
         return True
     blocking = audit.get("blocking_issues")
     return bool(isinstance(blocking, list) and blocking)
+
+
+def _declared_metric_directions(adapter_report: dict[str, Any] | None) -> dict[str, str]:
+    """从 benchmark adapter 报告提取 manifest 声明的指标方向（T18）。"""
+    directions: dict[str, str] = {}
+    if not isinstance(adapter_report, dict):
+        return directions
+    for command in adapter_report.get("commands", []) if isinstance(adapter_report.get("commands"), list) else []:
+        schema = command.get("metric_schema") if isinstance(command, dict) else None
+        if isinstance(schema, dict):
+            for metric, spec in schema.items():
+                if isinstance(spec, dict) and spec.get("direction") in {"higher_is_better", "lower_is_better"}:
+                    directions.setdefault(str(metric), str(spec["direction"]))
+    return directions
 
 
 def _experiment_results_usable(results: Any) -> bool:

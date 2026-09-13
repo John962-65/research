@@ -80,7 +80,9 @@ def run_benchmark_pack(
     write_json(out_dir / "03-experiment-plan.json", audit_plan)
     write_text(out_dir / "03-experiment-plan.md", render_experiment_plan_markdown(audit_plan))
 
-    statistics = build_statistics_report(audit_plan, results)
+    from .pipeline import _declared_metric_directions
+
+    statistics = build_statistics_report(audit_plan, results, metric_directions=_declared_metric_directions(adapter_report))
     write_json(out_dir / "04-statistics.json", statistics)
     write_text(out_dir / "04-statistics.md", render_statistics_markdown(statistics))
     write_statistics_figure_artifacts(out_dir, statistics)

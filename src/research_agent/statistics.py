@@ -12,7 +12,15 @@ STATISTICS_FIGURE_JSON = "04-statistics-figure.json"
 STATISTICS_FIGURE_SVG = "04-statistics-figure.svg"
 
 
-def build_statistics_report(plan: ExperimentPlan, results: list[ExperimentResult]) -> StatisticsReport:
+def build_statistics_report(
+    plan: ExperimentPlan,
+    results: list[ExperimentResult],
+    metric_directions: dict[str, str] | None = None,
+) -> StatisticsReport:
+    """T18：指标方向以 manifest/契约声明为准（metric_schema.direction），
+    名称启发式只作缺省——声明 lower_is_better 的指标（如 mean_iterations）
+    不再被误判为 higher_is_better。"""
+    declared = {str(k): str(v) for k, v in (metric_directions or {}).items() if str(v)}
     role_lookup = {command.name: command.role for command in plan.commands if command.role}
     group_lookup = {command.name: command.comparison_group or "default" for command in plan.commands}
     warnings: list[str] = []
@@ -81,7 +89,7 @@ def build_statistics_report(plan: ExperimentPlan, results: list[ExperimentResult
         right = baseline_metrics[metric]
         if not left or not right:
             continue
-        comparison = _compare_paired_metric(metric, left, right)
+        comparison = _compare_paired_metric(metric, left, right, metric_directions=declared)
         comparisons.append(comparison)
     if len(pairs) < 3:
         warnings.append("重复次数少于 3，置信区间和效应量仅作烟测参考。")
@@ -448,7 +456,7 @@ def _paired_metric_values(
     return candidate, baseline
 
 
-def _compare_paired_metric(metric: str, candidate: list[float], baseline: list[float]) -> MetricComparison:
+def _compare_paired_metric(metric: str, candidate: list[float], baseline: list[float], *, metric_directions: dict[str, str] | None = None) -> MetricComparison:
     deltas = [left - right for left, right in zip(candidate, baseline)]
     candidate_mean = _mean(candidate)
     baseline_mean = _mean(baseline)
@@ -460,7 +468,7 @@ def _compare_paired_metric(metric: str, candidate: list[float], baseline: list[f
     ci_low = delta - 1.96 * se
     ci_high = delta + 1.96 * se
     effect = None if delta_std == 0 else delta / delta_std
-    lower_is_better = _lower_is_better(metric)
+    lower_is_better = _lower_is_better(metric, metric_directions)
     better = delta < 0 if lower_is_better else delta > 0
     direction = "candidate_better" if better else "baseline_better_or_equal"
     if abs(delta) < 1e-12 and abs(ci_low) < 1e-12 and abs(ci_high) < 1e-12:
@@ -486,7 +494,7 @@ def _compare_paired_metric(metric: str, candidate: list[float], baseline: list[f
     )
 
 
-def _compare_metric(metric: str, candidate: list[float], baseline: list[float]) -> MetricComparison:
+def _compare_metric(metric: str, candidate: list[float], baseline: list[float], *, metric_directions: dict[str, str] | None = None) -> MetricComparison:
     candidate_mean = _mean(candidate)
     baseline_mean = _mean(baseline)
     candidate_std = _sample_std(candidate)
@@ -497,7 +505,7 @@ def _compare_metric(metric: str, candidate: list[float], baseline: list[float]) 
     ci_high = delta + 1.96 * se
     pooled = _pooled_std(candidate, baseline, candidate_std, baseline_std)
     effect = None if pooled == 0 else delta / pooled
-    lower_is_better = _lower_is_better(metric)
+    lower_is_better = _lower_is_better(metric, metric_directions)
     better = delta < 0 if lower_is_better else delta > 0
     direction = "candidate_better" if better else "baseline_better_or_equal"
     if abs(delta) < 1e-12 and abs(ci_low) < 1e-12 and abs(ci_high) < 1e-12:
@@ -542,7 +550,13 @@ def _pooled_std(candidate: list[float], baseline: list[float], candidate_std: fl
     return math.sqrt(max(0.0, pooled_variance))
 
 
-def _lower_is_better(metric: str) -> bool:
+def _lower_is_better(metric: str, metric_directions: dict[str, str] | None = None) -> bool:
+    """指标方向：manifest/契约声明（metric_schema.direction）优先，名称启发式只作缺省。"""
+    declared = (metric_directions or {}).get(metric)
+    if declared == "lower_is_better":
+        return True
+    if declared == "higher_is_better":
+        return False
     lowered = metric.lower()
     tokens = ["time", "cost", "latency", "collision", "failure", "error", "risk", "耗时", "成本", "碰撞", "失败", "误差", "风险"]
     return any(token in lowered for token in tokens)
