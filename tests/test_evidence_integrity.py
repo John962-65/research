@@ -31,21 +31,34 @@ from research_agent.writing import write_paper_markdown
 
 
 def _write_results(run_dir: Path, statuses: list[str]) -> None:
-    rows = [
-        {
-            "name": f"exp{index}",
-            "status": status,
-            "metrics": {"planning_success_rate": 0.8},
-            "artifacts": [],
-            "stdout": "",
-            "stderr": "",
-            "repeat_index": 0,
-            "seed": "deadbeef",
-            "command": ["python3", "exp.py"],
-            "returncode": 0 if status in {"passed", "completed", "local"} else 1,
-        }
-        for index, status in enumerate(statuses)
-    ]
+    """写入结果行并生成真实存在的产物文件（含 sha256）——复审第 3 项：
+    来源核验要求产物文件真实存在且哈希一致，声明字段不再构成核验。"""
+    import hashlib
+
+    experiments = run_dir / "experiments"
+    experiments.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for index, status in enumerate(statuses):
+        artifact = experiments / f"exp{index}_metrics.json"
+        artifact.write_text('{"planning_success_rate": 0.8}\n', encoding="utf-8")
+        rows.append(
+            {
+                "name": f"exp{index}",
+                "status": status,
+                "metrics": {"planning_success_rate": 0.8},
+                "artifacts": [],
+                "stdout": "",
+                "stderr": "",
+                "repeat_index": 0,
+                "seed": "deadbeef",
+                "command": ["python3", "exp.py"],
+                "returncode": 0 if status in {"passed", "completed", "local"} else 1,
+                "artifact_records": [
+                    {"path": f"experiments/exp{index}_metrics.json", "bytes": artifact.stat().st_size,
+                     "sha256": hashlib.sha256(artifact.read_bytes()).hexdigest()}
+                ],
+            }
+        )
     (run_dir / "04-results.json").write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
 
 
@@ -152,10 +165,13 @@ class AssessEvidenceIntegrityTest(unittest.TestCase):
             integrity = assess_evidence_integrity(run_dir)
             self.assertNotEqual(integrity.experiment_evidence_status, "verified")
             self.assertFalse(integrity.real_experiment)
-            self.assertEqual(len(integrity.unusable_result_reasons), 3)
+            self.assertEqual(len(integrity.unusable_result_reasons), 4)
             self.assertTrue(any("非有限数值" in reason for reason in integrity.unusable_result_reasons))
             self.assertTrue(any("无任何指标" in reason for reason in integrity.unusable_result_reasons))
-            self.assertTrue(any("来源绑定" in reason for reason in integrity.unusable_result_reasons))
+            self.assertTrue(
+                any(("来源" in reason and "核验" in reason) or "产物文件" in reason
+                    for reason in integrity.unusable_result_reasons)
+            )
 
     def test_manual_report_with_real_experiment_is_not_simulated(self) -> None:
         # A04：真实实验 + 无模型调用 → 实验证据 verified，不因无 LLM 判成模拟。
@@ -168,8 +184,13 @@ class AssessEvidenceIntegrityTest(unittest.TestCase):
             self.assertEqual(integrity.llm_evidence_status, "unknown")
             self.assertFalse(integrity.real_llm)
             banner = evidence_integrity_banner(integrity)
-            self.assertIn("真实 LLM", banner)
-            self.assertNotIn("实验结果缺少可用真实数据", banner)
+            # 复审第 3 项：人工报告+已核验实验 → 只做来源说明，不得宣称
+            # "不能作为科学结论"，也不得要求接入模型重跑实验。
+            self.assertIn("非模型生成", banner)
+            self.assertIn("已通过真实性核验", banner)
+            self.assertNotIn("不能作为科学结论", banner)
+            self.assertNotIn("流水线演示", banner)
+            self.assertEqual(evidence_integrity_prompt_constraint(integrity), "")
             readiness = build_final_readiness_report(
                 "机械臂路径规划", _paper_review(), _paper_review(), _rewrite_report(), evidence_integrity=integrity
             )

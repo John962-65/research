@@ -48,7 +48,9 @@ class ImportExistingTest(unittest.TestCase):
             self.assertEqual(report["result_summary"]["status_counts"], {"passed": 1, "failed": 1})
             # candidate 行指标与来源绑定齐全 → 实验证据 verified；
             # baseline 失败行保留为执行尝试，不影响 verified 判定。
-            self.assertEqual(report["evidence_assessment"]["experiment_evidence_status"], "verified")
+            # 复审第 3 项：导入结果没有真实存在的产物文件 → 声明不等于核验，
+            # 实验证据为 incomplete 而非 verified。
+            self.assertEqual(report["evidence_assessment"]["experiment_evidence_status"], "incomplete")
             self.assertIn("unknown", report["evidence_assessment"]["llm_evidence_status"])
 
     def test_import_writes_file_source_and_does_not_overwrite_without_flag(self) -> None:

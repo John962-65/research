@@ -212,7 +212,7 @@ def _assess_experiment_evidence(run_dir: Path) -> dict[str, Any]:
             statuses.append(status)
         if status in _COMPLETED_RESULT_STATUSES:
             completed_rows += 1
-            problems = _result_row_problems(row)
+            problems = _result_row_problems(row, run_dir)
             if problems:
                 reasons.extend(problems)
             else:
@@ -271,8 +271,13 @@ def _assess_experiment_evidence(run_dir: Path) -> dict[str, Any]:
     }
 
 
-def _result_row_problems(row: dict[str, Any]) -> list[str]:
-    """单条完成结果行的校验：指标非空、全部有限数值、来源绑定存在。"""
+def _result_row_problems(row: dict[str, Any], run_dir: Path) -> list[str]:
+    """单条完成结果行的校验：指标非空、全部有限数值、来源可核验。
+
+    复审第 3 项："有产物路径/退出码为零/有命令"只是导入者声明，不等于
+    系统核验过执行产物。verified 要求产物文件真实存在于 run 目录且
+    （声明了 sha256 时）内容哈希一致；否则按 incomplete 处理。
+    """
     name = str(row.get("name") or f"row#{row.get('repeat_index', '?')}")
     problems: list[str] = []
     metrics = row.get("metrics")
@@ -283,22 +288,52 @@ def _result_row_problems(row: dict[str, Any]) -> list[str]:
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
             problems.append(f"{name}: 指标 {key} 非有限数值（NaN/Inf/非数值）")
     records = row.get("artifact_records")
-    has_artifacts = isinstance(records, list) and any(
-        isinstance(item, dict) and str(item.get("path") or "").strip() for item in records
-    )
-    command = row.get("command")
-    has_command = (isinstance(command, list) and bool(command)) or (
-        isinstance(command, str) and bool(command.strip())
-    )
-    if not (has_artifacts or row.get("returncode") == 0 or has_command):
-        problems.append(f"{name}: 缺少来源绑定（无产物记录、退出码或命令）")
+    record_list = [item for item in (records if isinstance(records, list) else []) if isinstance(item, dict)]
+    if not record_list:
+        problems.append(f"{name}: 来源不可核验（无任何产物记录；声明字段不构成核验）")
+        return problems
+    any_verifiable = False
+    for record in record_list:
+        rel = str(record.get("path") or "").strip()
+        if not rel:
+            continue
+        artifact = Path(run_dir) / rel
+        if not artifact.is_file():
+            problems.append(f"{name}: 产物文件不存在（声明 {rel}）；来源待核验")
+            continue
+        declared_hash = str(record.get("sha256") or "").strip()
+        if declared_hash:
+            try:
+                import hashlib as _hashlib
+
+                actual = _hashlib.sha256(artifact.read_bytes()).hexdigest()
+            except OSError:
+                problems.append(f"{name}: 产物文件不可读（{rel}）")
+                continue
+            if actual != declared_hash:
+                problems.append(f"{name}: 产物哈希与声明不一致（{rel}）")
+                continue
+        any_verifiable = True
+    if not any_verifiable:
+        problems.append(f"{name}: 没有任何可核验的产物文件（声明不等于核验）")
     return problems
 
 
 def evidence_integrity_banner(integrity: EvidenceIntegrity | None) -> str:
-    """论文顶部的不可忽略横幅；两个证据维度都 verified 时返回空串。"""
+    """论文顶部横幅；按两个独立维度分别措辞（复审第 3 项）。
+
+    - 实验证据未通过 → 完整的"流水线演示"警示横幅；
+    - 实验证据已核验、仅缺模型调用 → 只做来源说明（人工/模板撰写），
+      不得宣称"不能作为科学结论"——实验真实性与报告撰写来源互相独立。
+    """
     if integrity is None or integrity.publishable_evidence:
         return ""
+    if integrity.real_experiment:
+        return (
+            "> ℹ️ **来源说明：本报告文本非模型生成（人工撰写或模板来源）。**\n"
+            ">\n> 实验结果已通过真实性核验（见 04-evidence-integrity）；"
+            "未使用的模型生成/独立评审步骤如需补齐，接入真实端点后重跑对应阶段。"
+        )
     reasons: list[str] = []
     if not integrity.real_experiment:
         reasons.append("实验结果缺少可用真实数据（模拟、失败或未通过校验）")
@@ -315,6 +350,9 @@ def evidence_integrity_banner(integrity: EvidenceIntegrity | None) -> str:
 def evidence_integrity_prompt_constraint(integrity: EvidenceIntegrity | None) -> str:
     """注入论文 LLM 写作 prompt 的强制诚实性约束；两个维度都 verified 时返回空串。"""
     if integrity is None or integrity.publishable_evidence:
+        return ""
+    if integrity.real_experiment:
+        # 实验证据已核验、仅缺模型：不注入"模拟原型"诚实性约束。
         return ""
     gaps: list[str] = []
     if not integrity.real_experiment:
