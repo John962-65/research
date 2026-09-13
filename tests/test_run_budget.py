@@ -9,6 +9,7 @@ from research_agent.run_budget import (
     RunBudgetExhausted,
     budget_summary,
     ensure_budget,
+    load_budget,
     record_execution,
 )
 
@@ -48,6 +49,18 @@ class RunBudgetTest(unittest.TestCase):
             with self.assertRaises(RunBudgetExhausted):
                 ensure_budget(run_dir, "paper_revisions")
             ensure_budget(run_dir, "experiment_runs")
+
+
+    def test_event_history_survives_reload(self) -> None:
+        # 复审第 8 项：连续记录三次，事件历史必须保留全部 3 条而不是只剩最后一条。
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            for index in range(3):
+                record_execution(run_dir, "experiment_runs", note=f"run-{index}")
+            budget = load_budget(run_dir)
+            self.assertEqual(budget["consumed"]["experiment_runs"], 3)
+            self.assertEqual(len(budget["events"]), 3)
+            self.assertEqual([item["note"] for item in budget["events"]], ["run-0", "run-1", "run-2"])
 
 
 if __name__ == "__main__":

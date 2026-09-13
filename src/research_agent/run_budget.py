@@ -45,6 +45,8 @@ def load_budget(run_dir: Path) -> dict[str, Any]:
         "schema_version": 1,
         "limits": merged_limits,
         "consumed": {key: _safe_int(consumed.get(key)) for key in merged_limits},
+        # 复审第 8 项：事件历史必须跨加载保留，否则每次记录后历史只剩最后一条。
+        "events": [item for item in (data.get("events") or []) if isinstance(item, dict)],
     }
 
 

@@ -62,11 +62,21 @@ def process_matches(pid: int, command: list[str] | str) -> bool:
     wanted = [str(part) for part in (command if isinstance(command, list) else [command]) if str(part)]
     if not wanted or not cmdline:
         return False
-    # 命令可能是 "python3 script.py args" 或经 shell 包装；按尾部对齐匹配。
-    window = cmdline[-len(wanted):] if len(cmdline) >= len(wanted) else cmdline
-    return any(part.endswith(wanted[-1]) for part in window) and any(
-        wanted[0] in part or part.endswith(wanted[0]) for part in window
+    if len(cmdline) != len(wanted):
+        return False
+    # 复审第 8 项：完整比较命令身份——解释器按基名匹配（python3 与
+    # /usr/bin/python3 等价），其余参数必须逐项精确一致且长度相同；
+    # 中间脚本不同或末尾多参数都视为不同任务。
+    first = cmdline[0]
+    wanted_first = wanted[0]
+    first_ok = (
+        first == wanted_first
+        or first.endswith("/" + wanted_first)
+        or os.path.basename(first) == os.path.basename(wanted_first)
     )
+    if not first_ok:
+        return False
+    return cmdline[1:] == wanted[1:]
 
 
 def find_live_attempt(run_dir: Path) -> dict[str, Any] | None:

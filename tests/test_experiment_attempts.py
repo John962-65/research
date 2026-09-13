@@ -34,6 +34,24 @@ class ProcessMatchTest(unittest.TestCase):
         process.wait()
         self.assertFalse(experiment_attempts.process_matches(process.pid, ["/bin/sleep", "30"]))
 
+    def test_same_interpreter_different_script_is_rejected(self) -> None:
+        # 复审第 8 项：解释器和末尾参数相同、中间执行脚本不同 → 必须视为不同任务。
+        process = subprocess.Popen(["/bin/sleep", "30"])
+        try:
+            matched = False
+            for _ in range(40):
+                if experiment_attempts.process_matches(process.pid, ["/bin/sleep", "30"]):
+                    matched = True
+                    break
+                time.sleep(0.05)
+            self.assertTrue(matched)
+            # 相同解释器位置特征、不同中间参数 → 不匹配。
+            self.assertFalse(experiment_attempts.process_matches(process.pid, ["/bin/sleep", "other-script.py", "30"]))
+            self.assertFalse(experiment_attempts.process_matches(process.pid, ["/bin/sleep"]))
+        finally:
+            process.terminate()
+            process.wait()
+
     def test_pid_reuse_with_different_cmdline_is_rejected(self) -> None:
         # 只凭 PID 存在不能判断存活：命令行不匹配 → 不算活任务（A13）。
         process = subprocess.Popen(["/bin/sleep", "30"])

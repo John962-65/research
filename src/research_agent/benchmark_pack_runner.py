@@ -65,6 +65,11 @@ def run_benchmark_pack(
     write_execution_safety_audit_artifacts(locked_plan, config, out_dir)
     preregistration = write_preregistration_artifacts(topic, _benchmark_pack_idea(topic, locked_plan), locked_plan, out_dir, results_exist=False)
 
+    # 复审第 8 项：pack 运行接入同一套 Run 预算；启动前预留并持久化。
+    from .run_budget import ensure_budget, record_execution
+
+    ensure_budget(out_dir, "experiment_runs")
+    record_execution(out_dir, "experiment_runs", note="benchmark_pack_reserved_pre_execution")
     # T10/T06：resume 时 run_experiments 会核对尝试账本——活任务不重复启动，
     # 已消亡的中断尝试标记为 interrupted 并保留；随后重跑全部命令。
     results = run_experiments(plan, config, out_dir)

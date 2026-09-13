@@ -2420,7 +2420,9 @@ def _run_after_review_approval(
         else:
 
             # T07/A16：实验真实执行受冻结次数上限约束（checkpoint 复用不计数）。
+            # 复审第 8 项：预算在启动前预留并持久化——中途异常或中断同样计入消耗。
             ensure_budget(out_dir, "experiment_runs")
+            record_execution(out_dir, "experiment_runs", note="reserved_pre_execution")
             # T05：执行启动时绑定当前契约内容摘要（审计器读取同一契约做一致性核对）。
             _contract_report = _read_dict(out_dir / IDEA_EXPERIMENT_CONTRACT_JSON)
             results = run_experiments(
@@ -2430,7 +2432,6 @@ def _run_after_review_approval(
                 paper_grade=config.paper_grade,
                 contract_digest=str(_contract_report.get("contract_digest") or ""),
             )
-            record_execution(out_dir, "experiment_runs", note="experiments node executed")
             write_json(results_path, results)
             runbook = _read_dict(out_dir / EXPERIMENT_RUNBOOK_JSON)
             benchmark_plan_report = _read_dict(out_dir / BENCHMARK_PLAN_JSON)
@@ -2711,6 +2712,7 @@ def _run_after_review_approval(
 
         # T07/A16：修订轮次冻结上限；恢复同样在此被拦。
         ensure_budget(out_dir, "paper_revisions")
+        record_execution(out_dir, "paper_revisions", note="reserved_pre_execution")
         revision_plan_path = out_dir / REVISION_PLAN_JSON
         if resume and revision_plan_path.exists() and _paper_revision_plan_checkpoint_matches(
             _load_paper_revision_plan(revision_plan_path),
@@ -2757,7 +2759,6 @@ def _run_after_review_approval(
         else:
             paper_md = paper_path.read_text(encoding="utf-8")
             revised_paper_md, revision_report = revise_paper_draft(topic, paper_md, revision_plan, paper_review, llm, benchmark_evidence=benchmark_evidence, paper_config=config.paper, model_source_recorder=_model_source_recorder(out_dir))
-            record_execution(out_dir, "paper_revisions", note="paper_revision node executed")
             write_text(revised_paper_path, revised_paper_md)
             write_text(out_dir / REVISED_PAPER_TEX, markdown_to_latex(revised_paper_md))
             write_json(revision_report_path, revision_report)
