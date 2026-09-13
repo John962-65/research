@@ -21,8 +21,8 @@
 | A10 | 明确启用模板降级 | 保留失败和来源，必需评审仍待完成 | T04 | tests/test_ai_integration.py::ExplicitTemplateFallbackTest（4 用例）+ 既有 test_llm_call_failures_are_not_replaced_by_rule_fallbacks 恢复通过 | tested |
 | A11 | 契约完整、idea 未重复执行细节 | 不因文案关键词缺失误拦 | T05 | tests/test_idea_experiment_contract.py::test_complete_contract_passes_without_keyword_echo、::test_execution_contract_has_eight_field_groups | tested |
 | A12 | 结果出来后改指标或划分 | 新版本/新分析身份，旧批准不沿用 | T05 | tests/test_idea_experiment_contract.py::test_contract_history_versions_after_results + tests/test_preregistration.py::test_posthoc_metric_change_creates_new_version + tests/test_result_validation.py::test_posthoc_contract_change_blocks_with_binding_mismatch | tested |
-| A13 | 即刻崩溃或任务重启 | 及时报错，不重复启动活任务 | T06 | tests/test_experiments.py::test_resume_does_not_restart_live_process | planned |
-| A14 | 同 Run 线程/进程竞争 | 互斥成立，同线程嵌套仍正常 | T06 | tests/test_run_lease.py（既有，保留回归） | planned |
+| A13 | 即刻崩溃或任务重启 | 及时报错，不重复启动活任务 | T06 | tests/test_experiment_attempts.py（ProcessMatchTest 3 用例 + RunExperimentsResumeGuardTest 3 用例，含 PID 复用与中断保留） | tested |
+| A14 | 同 Run 线程/进程竞争 | 互斥成立，同线程嵌套仍正常 | T06 | tests/test_run_lease.py（既有回归，4 用例保留） | tested |
 | A15 | 正确完成但假设不成立 | 允许准确负结果报告，停止无意义循环 | T07 | tests/test_experiment_decision.py + workflow 路由用例 | planned |
 | A16 | 超出总预算/最大轮次 | 停止并保留已有证据 | T07 | tests/test_workflow_state.py::test_budget_exhaustion_stops_and_preserves | planned |
 | A17 | 引用否定方向/数字/条件相反 | 不得自动宣称已支持 | T08 | tests/test_claim_consistency.py::test_negated_direction_not_supported | planned |

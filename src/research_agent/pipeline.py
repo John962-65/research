@@ -2295,8 +2295,25 @@ def _run_after_review_approval(
     def _node_experiments():
         nonlocal benchmark_evidence, experiment_decision, failure_analysis, hypothesis_outcome, result_validation, results, results_path, runbook, statistics
         results_path = out_dir / "04-results.json"
+        # T06/A13：恢复前核对执行尝试——活任务不重复进入；结果文件损坏/
+        # 为空则不按旧结果复用，转入重新执行。
+        reuse_results: list | None = None
         if resume and results_path.exists():
-            results = _load_experiment_results(results_path)
+            from . import experiment_attempts as _attempts
+
+            live_attempt = _attempts.find_live_attempt(out_dir)
+            if live_attempt is not None:
+                raise RuntimeError(
+                    "恢复中止：检测到仍在运行的实验执行尝试（task_id="
+                    f"{live_attempt.get('task_id')}，pid={live_attempt.get('pid')}）；"
+                    "请先停止旧进程或等其结束后再恢复，避免重复启动。"
+                )
+            _attempts.mark_interrupted_attempts(out_dir)
+            loaded = _load_experiment_results(results_path)
+            if _experiment_results_usable(loaded):
+                reuse_results = loaded
+        if reuse_results is not None:
+            results = reuse_results
             runbook_outputs: list[str] = []
             if not (out_dir / EXPERIMENT_RUNBOOK_JSON).exists() or not (out_dir / EXPERIMENT_RUNBOOK_MD).exists():
                 runbook = write_experiment_runbook(plan, config.execution, out_dir, results)
@@ -5011,6 +5028,16 @@ def _load_benchmark_plan(path: Path) -> BenchmarkPlan:
         selected_names=[str(item) for item in data.get("selected_names", [])],
         required_actions=[str(item) for item in data.get("required_actions", [])],
         warnings=[str(item) for item in data.get("warnings", [])],
+    )
+
+
+def _experiment_results_usable(results: Any) -> bool:
+    """04-results.json 完整性校验：非空列表且每行有名称与状态才算可用。"""
+    if not isinstance(results, list) or not results:
+        return False
+    return all(
+        isinstance(row, dict) and str(row.get("name") or "").strip() and str(row.get("status") or "").strip()
+        for row in results
     )
 
 

@@ -20,6 +20,7 @@ import tomllib
 from .artifacts import write_json, write_text, cell as _cell, utc_now as _utc_now
 from .benchmark_adapter import prepare_benchmark_adapter_plan
 from .command_safety import interpreter_execution_issues
+from . import experiment_attempts
 from .config import ExecutionConfig, PaperGradeConfig
 from .llm import LLM
 from .llm_trace import complete_with_purpose_detail, record_validation_result
@@ -296,6 +297,16 @@ def run_experiments(
             for repeat_index in range(repeats)
         ]
     elif config.mode in {"local", "benchmark"}:
+        # T06/A13：恢复执行前核对上次执行尝试——活任务不重复启动；
+        # 进程已消亡的旧尝试标记为 interrupted，保留完整尝试历史。
+        live = experiment_attempts.find_live_attempt(run_dir)
+        if live is not None:
+            raise RuntimeError(
+                "检测到仍在运行的同任务执行尝试（task_id="
+                f"{live.get('task_id')}，pid={live.get('pid')}，命令={live.get('command')}）；"
+                "为避免重复启动与产物互踩，请先停止旧进程或确认其结束后再恢复。"
+            )
+        experiment_attempts.mark_interrupted_attempts(run_dir)
         _ensure_local_simulator(experiment_dir, plan.template_profile)
         results = [
             _run_local(command, config, experiment_dir, repeat_index, seed_namespace=execution_plan.idea_title)
@@ -368,8 +379,15 @@ def _run_local(
             adapter_id=command.adapter_id or command.name,
         )
     started = time.monotonic()
+    started_wall = _utc_now()
     _remove_expected_outputs(command, experiment_dir)
     max_output_bytes = max(1, min(int(config.max_output_bytes), MAX_OUTPUT_BYTES))
+    logs_dir = experiment_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    attempt_number = _next_attempt_number(experiment_dir.parent, command.name)
+    task_id = f"{command.name}#r{repeat_index}"
+    stdout_log_path = logs_dir / f"{task_id}-attempt-{attempt_number:03d}-stdout.log"
+    stderr_log_path = logs_dir / f"{task_id}-attempt-{attempt_number:03d}-stderr.log"
     process = subprocess.Popen(
         command.command,
         cwd=experiment_dir,
@@ -377,6 +395,16 @@ def _run_local(
         stderr=subprocess.PIPE,
         start_new_session=os.name == "posix",
         env=_minimal_subprocess_env(seed, repeat_index),
+    )
+    experiment_attempts.record_attempt_start(
+        experiment_dir.parent,
+        task_id=task_id,
+        attempt_number=attempt_number,
+        pid=process.pid,
+        command=command.command,
+        timeout_seconds=int(config.timeout_seconds),
+        stdout_log=str(stdout_log_path.relative_to(experiment_dir.parent)),
+        stderr_log=str(stderr_log_path.relative_to(experiment_dir.parent)),
     )
     stdout_buffer, stdout_thread = _start_bounded_drain(process.stdout, max_output_bytes)
     stderr_buffer, stderr_thread = _start_bounded_drain(process.stderr, max_output_bytes)
@@ -388,6 +416,16 @@ def _run_local(
         stderr = _finish_bounded_drain(process.stderr, stderr_thread, stderr_buffer)
         duration = round(time.monotonic() - started, 3)
         artifacts, artifact_records = _snapshot_command_artifacts(command, experiment_dir, repeat_index)
+        _write_attempt_logs(stdout_log_path, stderr_log_path, stdout, stderr)
+        experiment_attempts.record_attempt_end(
+            experiment_dir.parent,
+            task_id=task_id,
+            attempt_number=attempt_number,
+            pid=process.pid,
+            status="timeout",
+            exit_code=None,
+            duration_seconds=duration,
+        )
         timeout_message = f"命令超过 {config.timeout_seconds}s 超时限制，已终止整个进程组。"
         return ExperimentResult(
             name=command.name,
@@ -410,6 +448,16 @@ def _run_local(
     stderr = _finish_bounded_drain(process.stderr, stderr_thread, stderr_buffer)
     duration = round(time.monotonic() - started, 3)
     status = "passed" if returncode == 0 else "failed"
+    _write_attempt_logs(stdout_log_path, stderr_log_path, stdout, stderr)
+    experiment_attempts.record_attempt_end(
+        experiment_dir.parent,
+        task_id=task_id,
+        attempt_number=attempt_number,
+        pid=process.pid,
+        status=status,
+        exit_code=returncode,
+        duration_seconds=duration,
+    )
     metrics = _read_expected_metrics(command, experiment_dir)
     artifacts, artifact_records = _snapshot_command_artifacts(command, experiment_dir, repeat_index)
     return ExperimentResult(
@@ -428,6 +476,19 @@ def _run_local(
         adapter_id=command.adapter_id or command.name,
         artifact_records=artifact_records,
     )
+
+
+def _next_attempt_number(run_dir: Path, task_name: str) -> int:
+    history = experiment_attempts.load_attempt_history(run_dir)
+    return 1 + sum(1 for item in history if str(item.get("task_id") or "").split("#")[0] == task_name)
+
+
+def _write_attempt_logs(stdout_log_path: Path, stderr_log_path: Path, stdout: str, stderr: str) -> None:
+    try:
+        stdout_log_path.write_text(stdout or "", encoding="utf-8")
+        stderr_log_path.write_text(stderr or "", encoding="utf-8")
+    except OSError:
+        pass
 
 
 def write_experiment_runbook(
