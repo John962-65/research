@@ -466,6 +466,13 @@ def _finalize_gate_decision(
                 }
 
     def _aggregate(snapshot_dict: dict[str, Any], allow_override: bool, extra_blocking: list[str]) -> Any:
+        # 多智能体开启时读取调用账本，对每张 pass/warn verdict 做存在性/
+        # 成功状态/角色/响应哈希核验（A09）；失败票按阻断处理。
+        llm_ledger: list[dict[str, Any]] | None = None
+        if config.multi_agent.enabled:
+            ledger_payload = _read_dict(out_dir / "run-llm-ledger.json")
+            entries = ledger_payload.get("entries")
+            llm_ledger = entries if isinstance(entries, list) else []
         decision = aggregate_final_decision(
             deterministic_audits={
                 "agent_deliberation": agent_deliberation if isinstance(agent_deliberation, dict) else {},
@@ -479,6 +486,7 @@ def _finalize_gate_decision(
             human_override=load_human_override(out_dir) if allow_override else None,
             review_input_snapshot=snapshot_dict,
             non_overridable_reasons=non_overridable_reasons,
+            llm_ledger=llm_ledger,
         )
         if extra_blocking:
             decision = _replace(

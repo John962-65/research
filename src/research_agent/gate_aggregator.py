@@ -57,6 +57,7 @@ def aggregate_final_decision(
     human_override: dict[str, Any] | None = None,
     review_input_snapshot: dict[str, Any] | None = None,
     non_overridable_reasons: list[str] | None = None,
+    llm_ledger: list[dict[str, Any]] | None = None,
 ) -> GateDecision:
     """Aggregate every gate input into the one final decision.
 
@@ -79,6 +80,11 @@ def aggregate_final_decision(
 
     missing_roles: list[str] = []
     verdicts: list[dict[str, Any]] = []
+    ledger_by_call = {
+        int(entry.get("call_id") or 0): entry
+        for entry in (llm_ledger or [])
+        if isinstance(entry, dict) and entry.get("call_id") is not None
+    }
     if independent_deliberation is not None:
         if independent_deliberation.get("status") in {"block", "invalid"}:
             blocking_sources.append("independent_deliberation")
@@ -94,6 +100,14 @@ def aggregate_final_decision(
                 blocking_sources.append(f"verdict:{agent_id}")
             elif verdict_value == "warn":
                 warning_sources.append(f"verdict:{agent_id}")
+            # A09：用实际调用账本核验 pass/warn 票；不信任 JSON 自报的
+            # independent 标记。核验失败按阻断处理，原始响应保留在
+            # deliberation 文件中供排查。
+            if verdict_value in {"pass", "warn"} and llm_ledger is not None:
+                problem = _verdict_ledger_problem(verdict, ledger_by_call)
+                if problem:
+                    blocking_sources.append(f"verdict:{agent_id}:unverified_call")
+                    warning_sources.append(f"verdict:{agent_id}:{problem}")
     for role_id in expected_roles or []:
         if not any(str(item.get("agent_id") or "") == role_id for item in verdicts):
             missing_roles.append(role_id)
@@ -171,6 +185,32 @@ def aggregate_final_decision(
         created_at=_utc_now(),
     )
     return decision
+
+
+def _verdict_ledger_problem(verdict: dict[str, Any], ledger_by_call: dict[int, dict[str, Any]]) -> str:
+    """核验一条 pass/warn verdict 的调用账本凭据；返回问题说明或空串。"""
+    try:
+        call_id = int(verdict.get("call_id") or 0)
+    except (TypeError, ValueError):
+        call_id = 0
+    if call_id <= 0:
+        return "missing call_id"
+    entry = ledger_by_call.get(call_id)
+    if entry is None:
+        return "call_id not found in ledger"
+    if str(entry.get("status") or "") != "success":
+        return f"call status {entry.get('status') or 'unknown'} is not success"
+    if str(entry.get("agent_id") or "") != str(verdict.get("agent_id") or ""):
+        return "call agent_id does not match verdict role"
+    if str(entry.get("stage") or "") != "paper_deliberation":
+        return f"call stage {entry.get('stage') or 'unknown'} is not paper_deliberation"
+    entry_response = str(entry.get("response_sha256") or "")
+    verdict_response = str(verdict.get("response_sha256") or "")
+    if entry_response and verdict_response and not (
+        entry_response.startswith(verdict_response) or verdict_response.startswith(entry_response)
+    ):
+        return "response hash does not match ledger"
+    return ""
 
 
 def _validate_override(

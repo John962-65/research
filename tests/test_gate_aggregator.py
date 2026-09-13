@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import json
+import re
 import unittest
 from unittest import mock
 from types import SimpleNamespace
@@ -36,7 +37,17 @@ class _VerdictLLM:
     base_url = LOCAL_BASE_URL
 
     def complete(self, system: str, user: str) -> str:
-        return VALID_VERDICT_JSON
+        # 引用实际收到材料里的第一个文件名，模拟合规的证据引用。
+        names = re.findall(r'"([0-9A-Za-z_\-]+\.(?:json|md))":\s*\{', user)
+        refs = names[:1] or ["none.json"]
+        return json.dumps({
+            "verdict": "pass",
+            "confidence": 0.8,
+            "evidence_refs": refs,
+            "counter_evidence": [],
+            "required_actions": [],
+            "summary": "证据边界一致",
+        })
 
 
 class ParseVerdictTest(unittest.TestCase):
@@ -64,6 +75,15 @@ class ParseVerdictTest(unittest.TestCase):
         parsed, error = _parse_verdict('{"verdict": "pass", "confidence": 1.5}')
         self.assertEqual(parsed, {})
         self.assertIn("confidence", error)
+
+    def test_minimal_verdict_without_refs_or_summary_rejected(self) -> None:
+        # A09 前置：最小 {verdict, confidence} 响应不再被接受。
+        parsed, error = _parse_verdict('{"verdict": "pass", "confidence": 0.9}')
+        self.assertEqual(parsed, {})
+        self.assertIn("summary", error)
+        parsed, error = _parse_verdict(json.dumps({"verdict": "pass", "confidence": 0.9, "summary": "ok", "evidence_refs": []}))
+        self.assertEqual(parsed, {})
+        self.assertIn("evidence_refs", error)
 
 
 class GateAggregatorTest(unittest.TestCase):
@@ -221,6 +241,32 @@ class GateAggregatorTest(unittest.TestCase):
         inputs["deterministic_audits"]["audit"]["evidence"] = "changed"
         self.assertEqual(aggregate_final_decision(**inputs, human_override=valid).status, "blocked")
 
+    def test_verdict_must_match_ledger_records(self) -> None:
+        # A09：伪造/失败/错角色的 call_id 或无引用 pass → 不计作有效独立评审票。
+        verdict = {"agent_id": "statistician", "verdict": "pass", "call_id": 7, "response_sha256": "abcd1234"}
+        good_entry = {
+            "call_id": 7,
+            "status": "success",
+            "agent_id": "statistician",
+            "stage": "paper_deliberation",
+            "response_sha256": "abcd1234" + "0" * 48,
+        }
+        base = dict(deterministic_audits={}, independent_deliberation={"verdicts": [verdict]})
+        ok = aggregate_final_decision(**base, llm_ledger=[good_entry])
+        self.assertEqual(ok.status, "publishable")
+        for ledger, problem in (
+            ([], "not found"),
+            ([good_entry | {"call_id": 8}], "not found"),
+            ([good_entry | {"status": "failed"}], "is not success"),
+            ([good_entry | {"agent_id": "evidence_curator"}], "does not match"),
+            ([good_entry | {"stage": "paper_writing"}], "is not paper_deliberation"),
+            ([good_entry | {"response_sha256": "f" * 64}], "does not match"),
+        ):
+            with self.subTest(problem=problem):
+                decision = aggregate_final_decision(**base, llm_ledger=ledger)
+                self.assertEqual(decision.status, "blocked")
+                self.assertTrue(any("unverified_call" in item for item in decision.blocking_sources))
+
     def test_missing_independent_report_cannot_satisfy_required_roles(self) -> None:
         decision = aggregate_final_decision(deterministic_audits={},
             independent_deliberation=None, expected_roles=["statistician"])
@@ -264,6 +310,12 @@ class IndependentDeliberationTest(unittest.TestCase):
             skills = self.project_root / "skills" / skill_id
             skills.mkdir(parents=True)
             (skills / "SKILL.md").write_text(f"# {skill_id}\n", encoding="utf-8")
+        # 各角色的证据视图文件真实存在，verdict 的 evidence_refs 才可定位。
+        for name in sorted({path for paths in ROLE_EVIDENCE_VIEWS.values() for path in paths}):
+            if name.endswith(".md"):
+                (self.run_dir / name).write_text("# 修订稿内容\n", encoding="utf-8")
+            else:
+                (self.run_dir / name).write_text("{}", encoding="utf-8")
 
     def tearDown(self) -> None:
         self._tmp.cleanup()

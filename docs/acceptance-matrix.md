@@ -17,7 +17,7 @@
 | A06 | 稿件变化后恢复 | 相关评审重新执行（不按 revision 复用旧 deliberation） | T02 | tests/test_gate_aggregator.py::test_stale_deliberation_is_rerun_on_resume + tests/test_evidence_snapshot.py::test_pipeline_reuse_gate_honors_snapshot | tested |
 | A07 | 无效或旧人工覆盖（缺字段/"true"/旧摘要） | 拒绝覆盖，保留原决定 | T02 | tests/test_gate_aggregator.py::test_human_override_requires_full_provenance、::test_override_rejects_invalid_semantics_and_changed_evidence、::test_non_overridable_reasons_reject_override | tested |
 | A08 | 校验与提交之间材料变动 | 不提交基于旧输入的决定 | T02 | tests/test_evidence_snapshot.py::test_build_digest_and_verify_roundtrip + tests/test_gate_aggregator.py::test_pipeline_rechecks_override_file_against_current_evidence | tested |
-| A09 | 伪造/失败 call_id 或无引用 pass | 不计作有效独立评审票 | T03 | tests/test_gate_aggregator.py::test_verdict_without_ledger_backing_is_invalid | planned |
+| A09 | 伪造/失败 call_id 或无引用 pass | 不计作有效独立评审票 | T03 | tests/test_gate_aggregator.py::test_verdict_must_match_ledger_records、::test_minimal_verdict_without_refs_or_summary_rejected、::test_independent_verdicts_are_bound_to_real_calls | tested |
 | A10 | 明确启用模板降级 | 保留失败和来源，必需评审仍待完成 | T04 | tests/test_ai_integration.py + tests/test_writing.py 来源标签用例 | planned |
 | A11 | 契约完整、idea 未重复执行细节 | 不因文案关键词缺失误拦 | T05 | tests/test_idea_experiment_contract.py::test_complete_contract_passes_without_keyword_echo | planned |
 | A12 | 结果出来后改指标或划分 | 新版本/新分析身份，旧批准不沿用 | T05 | tests/test_preregistration.py::test_posthoc_metric_change_creates_new_version | planned |

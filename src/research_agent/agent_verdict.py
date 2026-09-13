@@ -45,6 +45,9 @@ VERDICT_SCHEMA = {
     "summary": "one-paragraph justification",
 }
 
+# 评审规则版本（decision-contract §5）：verdict 必须携带，随规则变更升级。
+VERDICT_RULE_VERSION = "2"
+
 
 @dataclass(frozen=True)
 class AgentVerdict:
@@ -106,6 +109,7 @@ def run_independent_deliberation(
                 revision=revision,
                 attempt_id=attempt_id,
                 stage_node_status=str(states.get(agent_id, {}).get("status") or "pending"),
+                review_input_sha256=str(review_input_sha256),
             )
         except Exception as exc:
             verdict = {
@@ -126,6 +130,8 @@ def run_independent_deliberation(
                 "prompt_sha256": "",
                 "response_sha256": "",
                 "independent": False,
+                "rule_version": VERDICT_RULE_VERSION,
+                "review_input_sha256": str(review_input_sha256),
                 "created_at": _utc_now(),
                 "validation_error": str(exc)[:280],
             }
@@ -157,10 +163,12 @@ def _run_role_verdict(
     revision: int,
     attempt_id: str,
     stage_node_status: str,
+    review_input_sha256: str = "",
 ) -> dict[str, Any]:
     from .llm_trace import complete_with_purpose_detail, record_validation_result
 
     evidence = _evidence_bundle(run_dir, ROLE_EVIDENCE_VIEWS.get(agent_id, ()))
+    available_refs = {name for name, item in evidence.items() if isinstance(item, dict) and item.get("available")}
     prompt_sha = hashlib.sha256(json.dumps(evidence, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
     system = (
         "Independent multi-agent deliberation. You are one reviewer with a narrow responsibility; "
@@ -170,8 +178,10 @@ def _run_role_verdict(
     user = (
         f"研究课题：{topic}\n角色：{profile.get('role') or agent_id}（{agent_id}）\n"
         f"职责：{profile.get('responsibility') or ''}\n"
-        f"节点状态：{stage_node_status}\n\n"
-        "以下是你职责范围内的全部证据（JSON），请独立给出 verdict：\n"
+        f"节点状态：{stage_node_status}\n"
+        f"评审输入快照：{review_input_sha256 or '未绑定'}\n\n"
+        "以下是你职责范围内的全部证据（JSON），请独立给出 verdict；"
+        "evidence_refs 只能引用上面给出的文件名：\n"
         + json.dumps(evidence, ensure_ascii=False)
     )
     response, call_id = complete_with_purpose_detail(
@@ -185,6 +195,18 @@ def _run_role_verdict(
     )
     parsed, validation_error = _parse_verdict(response)
     verdict_value = str(parsed.get("verdict") or "")
+    unlocatable: list[str] = []
+    if not validation_error:
+        # 每条 evidence_refs 必须能定位到当前角色实际收到的材料；
+        # 引用不存在或未获得的材料 → insufficient_evidence（A09）。
+        for ref in [str(item) for item in parsed.get("evidence_refs", [])]:
+            if ref not in available_refs:
+                unlocatable.append(ref)
+        if unlocatable:
+            validation_error = (
+                "insufficient_evidence: evidence_refs 无法定位到当前输入："
+                + ",".join(unlocatable[:5])
+            )
     valid = verdict_value in VALID_VERDICTS and not validation_error
     from .llm_trace import record_validation_result
 
@@ -195,15 +217,21 @@ def _run_role_verdict(
         error=validation_error,
         call_id=call_id,
     )
+    if not valid:
+        verdict_value = "invalid"
     return {
         "agent_id": agent_id,
         "role": str(profile.get("role") or agent_id),
         "responsibility": str(profile.get("responsibility") or ""),
-        "verdict": verdict_value if valid else "invalid",
+        "verdict": verdict_value,
         "confidence": _safe_confidence(parsed.get("confidence")) if valid else 0.0,
         "evidence_refs": [str(item) for item in parsed.get("evidence_refs", [])][:10] if valid else [],
         "counter_evidence": [str(item) for item in parsed.get("counter_evidence", [])][:10] if valid else [],
-        "required_actions": [str(item) for item in parsed.get("required_actions", [])][:10] if valid else [],
+        "required_actions": (
+            [str(item) for item in parsed.get("required_actions", [])][:10]
+            if valid
+            else [f"补充或修正证据引用后重评：{validation_error}"[:200]]
+        ),
         "summary": str(parsed.get("summary") or "")[:800] if valid else "",
         "route_id": f"T09:{agent_id}",
         "model": _route_model(llm, agent_id),
@@ -213,6 +241,8 @@ def _run_role_verdict(
         "prompt_sha256": prompt_sha[:16],
         "response_sha256": hashlib.sha256(response.encode("utf-8")).hexdigest()[:16] if response else "",
         "independent": valid and call_id > 0,
+        "rule_version": VERDICT_RULE_VERSION,
+        "review_input_sha256": str(review_input_sha256),
         "created_at": _utc_now(),
         "validation_error": validation_error,
     }
@@ -263,6 +293,12 @@ def _parse_verdict(response: str) -> tuple[dict[str, Any], str]:
     confidence = data.get("confidence")
     if not isinstance(confidence, (int, float)) or not 0.0 <= float(confidence) <= 1.0:
         return {}, "confidence must be a number in [0, 1]"
+    summary = str(data.get("summary") or "").strip()
+    if not summary:
+        return {}, "summary（判断依据）must be nonblank"
+    refs = data.get("evidence_refs")
+    if not isinstance(refs, list) or not [str(item) for item in refs if str(item).strip()]:
+        return {}, "evidence_refs must list at least one locatable evidence file"
     return data, ""
 
 
