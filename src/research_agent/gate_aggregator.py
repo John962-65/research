@@ -16,6 +16,7 @@ import json
 import hashlib
 import hmac
 
+from .agent_verdict import VERDICT_RULE_VERSION
 from .artifacts import write_json, write_text, cell as _cell, utc_now as _utc_now
 
 
@@ -80,6 +81,7 @@ def aggregate_final_decision(
 
     missing_roles: list[str] = []
     verdicts: list[dict[str, Any]] = []
+    snapshot_digest = str(review_input_snapshot.get("digest") or "") if isinstance(review_input_snapshot, dict) and review_input_snapshot.get("items") else ""
     ledger_by_call = {
         int(entry.get("call_id") or 0): entry
         for entry in (llm_ledger or [])
@@ -104,7 +106,12 @@ def aggregate_final_decision(
             # independent 标记。核验失败按阻断处理，原始响应保留在
             # deliberation 文件中供排查。
             if verdict_value in {"pass", "warn"} and llm_ledger is not None:
-                problem = _verdict_ledger_problem(verdict, ledger_by_call)
+                problem = _verdict_ledger_problem(
+                    verdict,
+                    ledger_by_call,
+                    current_rule_version=VERDICT_RULE_VERSION,
+                    review_input_digest=snapshot_digest,
+                )
                 if problem:
                     blocking_sources.append(f"verdict:{agent_id}:unverified_call")
                     warning_sources.append(f"verdict:{agent_id}:{problem}")
@@ -114,9 +121,7 @@ def aggregate_final_decision(
     if missing_roles:
         blocking_sources.extend(f"missing_verdict:{role_id}" for role_id in missing_roles)
 
-    snapshot_digest = ""
     if isinstance(review_input_snapshot, dict) and review_input_snapshot.get("items"):
-        snapshot_digest = str(review_input_snapshot.get("digest") or "")
         blocking_sources.extend(
             f"snapshot:invalid_input:{item.get('name')}"
             for item in review_input_snapshot.get("items", [])
@@ -262,8 +267,18 @@ def _blocker_overridability(name: str, deterministic_audits: dict[str, dict[str,
     return True, ""
 
 
-def _verdict_ledger_problem(verdict: dict[str, Any], ledger_by_call: dict[int, dict[str, Any]]) -> str:
-    """核验一条 pass/warn verdict 的调用账本凭据；返回问题说明或空串。"""
+def _verdict_ledger_problem(
+    verdict: dict[str, Any],
+    ledger_by_call: dict[int, dict[str, Any]],
+    *,
+    current_rule_version: str = "",
+    review_input_digest: str = "",
+) -> str:
+    """核验一条 pass/warn verdict 的调用账本凭据；返回问题说明或空串。
+
+    除调用存在/成功/角色匹配外，还核验这次判断对应的输入与输出：
+    响应哈希非空且与账本一致、评审规则版本一致、输入快照未过期。
+    """
     try:
         call_id = int(verdict.get("call_id") or 0)
     except (TypeError, ValueError):
@@ -281,10 +296,20 @@ def _verdict_ledger_problem(verdict: dict[str, Any], ledger_by_call: dict[int, d
         return f"call stage {entry.get('stage') or 'unknown'} is not paper_deliberation"
     entry_response = str(entry.get("response_sha256") or "")
     verdict_response = str(verdict.get("response_sha256") or "")
-    if entry_response and verdict_response and not (
+    if not verdict_response:
+        return "verdict response hash missing"
+    if entry_response and not (
         entry_response.startswith(verdict_response) or verdict_response.startswith(entry_response)
     ):
         return "response hash does not match ledger"
+    if current_rule_version and str(verdict.get("rule_version") or "") != current_rule_version:
+        return f"verdict rule_version {verdict.get('rule_version') or 'missing'} != current {current_rule_version}"
+    if (
+        review_input_digest
+        and verdict.get("review_input_sha256")
+        and str(verdict.get("review_input_sha256")) != review_input_digest
+    ):
+        return "verdict input snapshot is stale"
     return ""
 
 

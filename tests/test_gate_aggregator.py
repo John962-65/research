@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from research_agent.agent_runtime import AgentRoutedLLM, DEFAULT_ROLE_SKILLS
 from research_agent.agent_verdict import (
     ROLE_EVIDENCE_VIEWS,
+    VERDICT_RULE_VERSION,
     _parse_verdict,
     run_independent_deliberation,
 )
@@ -309,7 +310,12 @@ class GateAggregatorTest(unittest.TestCase):
 
     def test_verdict_must_match_ledger_records(self) -> None:
         # A09：伪造/失败/错角色的 call_id 或无引用 pass → 不计作有效独立评审票。
-        verdict = {"agent_id": "statistician", "verdict": "pass", "call_id": 7, "response_sha256": "abcd1234"}
+        verdict = {
+            "agent_id": "statistician", "verdict": "pass", "call_id": 7,
+            "response_sha256": "abcd1234",
+            "rule_version": VERDICT_RULE_VERSION,
+            "review_input_sha256": "snap-digest-1",
+        }
         good_entry = {
             "call_id": 7,
             "status": "success",
@@ -317,17 +323,34 @@ class GateAggregatorTest(unittest.TestCase):
             "stage": "paper_deliberation",
             "response_sha256": "abcd1234" + "0" * 48,
         }
-        base = dict(deterministic_audits={}, independent_deliberation={"verdicts": [verdict]})
+        snapshot = {"digest": "snap-digest-1", "items": [{"name": "04-statistics.json", "source": "file"}]}
+        base = dict(deterministic_audits={}, independent_deliberation={"verdicts": [verdict]}, review_input_snapshot=snapshot)
         ok = aggregate_final_decision(**base, llm_ledger=[good_entry])
         self.assertEqual(ok.status, "publishable")
-        for ledger, problem in (
+        problems = (
             ([], "not found"),
             ([good_entry | {"call_id": 8}], "not found"),
             ([good_entry | {"status": "failed"}], "is not success"),
             ([good_entry | {"agent_id": "evidence_curator"}], "does not match"),
             ([good_entry | {"stage": "paper_writing"}], "is not paper_deliberation"),
             ([good_entry | {"response_sha256": "f" * 64}], "does not match"),
-        ):
+        )
+        # 复审第 2 项：verdict 自身版本/响应摘要/输入快照过期也必须被拒。
+        verdict_variants = (
+            ("rule_version", {"verdicts": [verdict | {"rule_version": "1"}]}),
+            ("response hash missing", {"verdicts": [verdict | {"response_sha256": ""}]}),
+            ("input snapshot is stale", {"verdicts": [verdict | {"review_input_sha256": "old-snap"}]}),
+        )
+        for problem, deliberation in verdict_variants:
+            with self.subTest(problem=problem):
+                decision = aggregate_final_decision(
+                    **(base | {"independent_deliberation": deliberation}),
+                    llm_ledger=[good_entry],
+                )
+                self.assertEqual(decision.status, "blocked")
+                self.assertTrue(any("unverified_call" in item for item in decision.blocking_sources))
+                self.assertTrue(any(problem in item for item in decision.warning_sources))
+        for ledger, problem in problems:
             with self.subTest(problem=problem):
                 decision = aggregate_final_decision(**base, llm_ledger=ledger)
                 self.assertEqual(decision.status, "blocked")
@@ -430,6 +453,48 @@ class IndependentDeliberationTest(unittest.TestCase):
             report = run_independent_deliberation("独立审查测试", self.run_dir, config, traced)
         self.assertEqual(report["status"], "block")
         self.assertTrue(any(item["verdict"] == "invalid" for item in report["verdicts"]))
+
+    def test_statistics_change_invalidates_deliberation_on_resume(self) -> None:
+        # 复审第 2 项复现：改 04-statistics.json（角色证据视图之一）→ 快照
+        # 摘要变化 → 恢复时 deliberation 必须重跑，不得复用旧票。
+        from research_agent.pipeline import _finalize_gate_decision
+
+        config = self._config()
+        routed = AgentRoutedLLM(config, self.project_root, self.run_dir)
+        with mock.patch.object(routed, "_client_for", return_value=_VerdictLLM()):
+            traced = trace_llm(routed, self.run_dir, config.llm)
+            _finalize_gate_decision(
+                "统计变更测试", self.run_dir, config, traced,
+                agent_deliberation={"status": "pass"},
+                claim_consistency={"status": "pass"},
+                citation_grounding=SimpleNamespace(status="pass"),
+                revised_review=SimpleNamespace(decision="accept"),
+                resume=False,
+            )
+        first = json.loads((self.run_dir / "10-independent-deliberation.json").read_text(encoding="utf-8"))
+        calls_after_first = len(_read_entries(self.run_dir / "run-llm-ledger.json"))
+        # 修改统计文件内容（角色 statistician 的证据之一）
+        stats_path = self.run_dir / "04-statistics.json"
+        stats = json.loads(stats_path.read_text(encoding="utf-8"))
+        stats["fault_injection"] = {"note": "复审第 2 项受控修改"}
+        stats_path.write_text(json.dumps(stats, ensure_ascii=False), encoding="utf-8")
+        with mock.patch.object(routed, "_client_for", return_value=_VerdictLLM()):
+            traced2 = trace_llm(routed, self.run_dir, config.llm)
+            _finalize_gate_decision(
+                "统计变更测试", self.run_dir, config, traced2,
+                agent_deliberation={"status": "pass"},
+                claim_consistency={"status": "pass"},
+                citation_grounding=SimpleNamespace(status="pass"),
+                revised_review=SimpleNamespace(decision="accept"),
+                resume=True,
+            )
+        second = json.loads((self.run_dir / "10-independent-deliberation.json").read_text(encoding="utf-8"))
+        self.assertNotEqual(first["review_input_sha256"], second["review_input_sha256"])
+        calls_after_resume = len(_read_entries(self.run_dir / "run-llm-ledger.json"))
+        self.assertGreater(
+            calls_after_resume, calls_after_first,
+            "恢复后必须重新调用独立评审，不得复用旧票（旧票调用次数为 0 不可接受）",
+        )
 
     def test_stale_deliberation_is_rerun_on_resume(self) -> None:
         # A06（前半）：恢复时旧 deliberation 的输入快照不一致 → 不复用，重新执行。

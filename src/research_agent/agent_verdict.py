@@ -152,6 +152,21 @@ def run_independent_deliberation(
     return report
 
 
+def verdicts_match_current_inputs(report: dict[str, Any], run_dir: Path) -> bool:
+    """恢复复用校验：每条 verdict 记录的 prompt_sha256 必须与当前该角色
+    实际收到的证据包一致（文件内容变化/缺失 → 不可复用，复审第 2 项）。"""
+    for verdict in (report.get("verdicts") or []):
+        if not isinstance(verdict, dict):
+            continue
+        agent_id = str(verdict.get("agent_id") or "")
+        bundle = _evidence_bundle(Path(run_dir), ROLE_EVIDENCE_VIEWS.get(agent_id, ()))
+        digest = hashlib.sha256(json.dumps(bundle, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+        recorded = str(verdict.get("prompt_sha256") or "")
+        if not recorded or recorded != digest:
+            return False
+    return True
+
+
 def _run_role_verdict(
     topic: str,
     run_dir: Path,

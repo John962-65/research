@@ -113,7 +113,7 @@ from .llm_trace import LLM_TRACE_JSON, LLM_TRACE_MD
 from .llm_trace_audit import LLM_TRACE_AUDIT_JSON, LLM_TRACE_AUDIT_MD, write_llm_trace_audit_artifacts
 from .multi_agent_assignment import MULTI_AGENT_ASSIGNMENT_JSON, MULTI_AGENT_ASSIGNMENT_MD, agent_roles_for_text, render_multi_agent_assignment_markdown, write_multi_agent_assignment_artifacts
 from .multi_agent_deliberation import MULTI_AGENT_DELIBERATION_JSON, MULTI_AGENT_DELIBERATION_MD, render_multi_agent_deliberation_markdown, write_multi_agent_deliberation_artifacts
-from .agent_verdict import INDEPENDENT_DELIBERATION_JSON, ROLE_EVIDENCE_VIEWS, run_independent_deliberation
+from .agent_verdict import INDEPENDENT_DELIBERATION_JSON, ROLE_EVIDENCE_VIEWS, run_independent_deliberation, verdicts_match_current_inputs
 from .provenance import active_revision
 from .workflow_state import WorkflowEngine, NodeOutcome
 from .workflow_graph import WORKFLOW_NODES
@@ -419,7 +419,13 @@ def _finalize_gate_decision(
         return payload
 
     non_overridable_reasons: list[str] = []
+    # 复审第 2 项：快照必须覆盖独立评审真正读取的全部材料——每个角色的
+    # 证据视图文件（statistics/experiment plan/context 等）与稿件、结果
+    # 一起进入快照；文件缺失按 absent 记录，出现/变化都会改变摘要。
     file_inputs = {"09-revised-paper.md": "manuscript"}
+    for name in sorted({item for paths in ROLE_EVIDENCE_VIEWS.values() for item in paths}):
+        if (out_dir / name).exists():
+            file_inputs.setdefault(name, "role_evidence")
     if (out_dir / "06-paper.md").exists():
         file_inputs["06-paper.md"] = "manuscript_source"
     if (out_dir / "04-results.json").exists():
@@ -454,8 +460,13 @@ def _finalize_gate_decision(
     if config.multi_agent.enabled:
         if resume and independent_path.exists():
             existing = _read_dict(independent_path)
-            # 恢复时仅在快照一致时复用旧独立评审；稿件/审计内容变化则重评（A06）。
-            if existing and existing.get("review_input_sha256") == input_digest:
+            # 恢复时仅在快照一致且每条 verdict 的输入证据包未变化时复用；
+            # 稿件/统计/审计内容变化则重评（A06/复审第 2 项）。
+            if (
+                existing
+                and existing.get("review_input_sha256") == input_digest
+                and verdicts_match_current_inputs(existing, out_dir)
+            ):
                 independent_report = existing
         if independent_report is None:
             try:
