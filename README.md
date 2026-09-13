@@ -8,6 +8,15 @@
 
 > 本 README 是总览。各阶段的产物清单、审计语义和配置细节见 [`docs/`](docs) 目录。
 
+## 目标用户、支持范围与真实限制（2026-09 更新）
+
+- **目标用户**：需要一个"基于冻结标准与真实证据做实验评审"工作台的个人研究者/小团队；也用于大疆数字管理研发岗位的项目能力展示。
+- **最短真实演示**：`bash scripts/replay_public_case.sh`——离线 CPU 重放 UCI Iris 公开案例（冻结契约 → 真实执行与一次真实中断恢复 → 证据核验 → 中性/负结果判定 → 受控故障注入被阻断）。案例报告：[`runs/public-iris-case/CASE-REPORT.md`](runs/public-iris-case/CASE-REPORT.md)（runs 为本地产物，生成方式见重放脚本），演示讲稿：[`docs/public-case-demo-script.md`](docs/public-case-demo-script.md)。
+- **证据等级**：`04-evidence-integrity.json` 分开记录 LLM 证据与实验证据（verified/incomplete/invalid/simulated/unknown）；执行状态/证据状态/研究结论/下一步动作四类状态独立保存（见 [`docs/decision-contract.md`](docs/decision-contract.md)）。`publishable` 仅表示通过本系统的发布前检查，**不代表论文达到期刊发表标准**。
+- **真实限制**：本仓库目前没有真实用户试用数据，模块增益保持 `not_measured`（见 [`docs/review-evaluation.md`](docs/review-evaluation.md)）；公开案例未调用 LLM，模型相关步骤在该案例中为 not_verified；复杂分布式调度、任意领域从零生成实验代码、PDF 深度解析（可选适配器）与自动投稿不在支持范围。
+
+> 本 README 是总览。各阶段的产物清单、审计语义和配置细节见 [`docs/`](docs) 目录。
+
 ## 流程阶段总览（00-15）
 
 | 前缀 | 阶段 | 核心产物 |
@@ -217,7 +226,7 @@ bash scripts/prepare_gold_support_runs.sh
 | `tests-with-mcp` | 装上可选 mcp extra，同样先生成 support run 再跑全量，让 streamable-http 客户端路径跑在真实 SDK 上，而不是只覆盖 `tool_runtime` 的 ImportError 回退 |
 | `zero-runtime-deps` | 不装任何 extra，逐个导入 `src/research_agent` 下 143 个模块。零第三方运行时依赖是本项目的可信度论据之一（见 [`docs/design-notes.md`](docs/design-notes.md) §5），这个 job 防止后续某次 import 悄悄破坏它 |
 
-当前基线：Python 3.12 + dev extra 为 1352 passed, 1 skipped, 72 subtests（UA-01 合入后实测）；Python 3.11 + dev 与 3.12 + dev,mcp 最近一次实测为 1345 passed（BUDGET-01 之前）。三种配置由 CI 矩阵在每次 push 上覆盖，以 CI 结果为准。
+本仓库基线（2026-09-13，任务书 T00–T10 实施前）：Python 3.12.13 全量 3 failed / 1372 passed / 1 skipped（3 个失败为 T04 已修复的静默降级子用例，见 docs/baseline-audit.md）。实施后以 CI 矩阵结果为准。
 
 ## 文档索引
 

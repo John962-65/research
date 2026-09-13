@@ -28,7 +28,7 @@
 | A17 | 引用否定方向/数字/条件相反 | 不得自动宣称已支持 | T08 | tests/test_claim_evidence_polarity.py（6 用例）+ tests/test_claim_traceability.py::test_contradicted_direction_blocks_claim_with_claim_id | tested |
 | A18 | 正确主张且证据完整 | 可通过并定位证据 | T08 | tests/test_claim_traceability.py::test_supported_claim_with_complete_evidence_passes + citation_grounding evidence_locator（chunk/字符跨度/页码） | tested |
 | A19 | 页面提交旧版本批准 | 后端拒绝，提示材料变化 | T09 | tests/test_web_decision_state.py::StaleApprovalRejectionTest::test_stale_binding_approval_is_rejected_with_material_change_message | tested |
-| A20 | 正常真实案例 | 可重算关键结果并解释最终决策 | T10 | runs 公开案例 + scripts/replay_public_case.sh（人工核对记录） | planned |
+| A20 | 正常真实案例 | 可重算关键结果并解释最终决策 | T10 | runs/public-iris-case（CASE-REPORT.md）+ scripts/replay_public_case.sh 实测：grader 复算 accuracy=0.966667 与案例一致；故障注入副本被 schema 审计阻断（status=block，exit 2）；中断恢复尝试账本 15 条 | tested |
 | A21 | 无试用数据 | 保持 not_measured，不生成效率比例 | T11 | tests/test_review_evaluation.py（既有；docs/review-evaluation.md 声明） | planned |
 | A22 | 同输入走 CLI/Web/恢复 | 决策、原因、证据版本一致 | T12 | tests/test_cli.py 决策一致性用例 | planned |
 

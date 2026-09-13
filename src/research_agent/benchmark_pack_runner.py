@@ -32,12 +32,15 @@ def run_benchmark_pack(
     allowed_commands: list[str] | None = None,
     timeout_seconds: int = 300,
     force: bool = False,
+    resume: bool = False,
 ) -> dict[str, Any]:
     out_dir = out_dir.resolve()
-    if out_dir.exists() and any(out_dir.iterdir()):
+    if out_dir.exists() and any(out_dir.iterdir()) and not resume:
         if not force:
             raise FileExistsError(f"Output directory is not empty: {out_dir}")
         shutil.rmtree(out_dir)
+    if resume and not out_dir.exists():
+        raise FileNotFoundError(f"Cannot resume: run directory does not exist: {out_dir}")
     out_dir.mkdir(parents=True, exist_ok=True)
     _write_state(out_dir, topic, "started")
     config = ExecutionConfig(
@@ -62,6 +65,8 @@ def run_benchmark_pack(
     write_execution_safety_audit_artifacts(locked_plan, config, out_dir)
     preregistration = write_preregistration_artifacts(topic, _benchmark_pack_idea(topic, locked_plan), locked_plan, out_dir, results_exist=False)
 
+    # T10/T06：resume 时 run_experiments 会核对尝试账本——活任务不重复启动，
+    # 已消亡的中断尝试标记为 interrupted 并保留；随后重跑全部命令。
     results = run_experiments(plan, config, out_dir)
     write_json(out_dir / "04-results.json", results)
     runbook = _read_dict(out_dir / "04-experiment-runbook.json")

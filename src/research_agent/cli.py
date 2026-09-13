@@ -381,6 +381,7 @@ def main(argv: list[str] | None = None) -> None:
     benchmark_pack_run_parser.add_argument("--allowed-command", action="append", default=[], help="Allowed command executable; can be repeated")
     benchmark_pack_run_parser.add_argument("--timeout-seconds", type=int, default=300, help="Per-command timeout in seconds")
     benchmark_pack_run_parser.add_argument("--force", action="store_true", help="Overwrite a non-empty output directory")
+    benchmark_pack_run_parser.add_argument("--resume", action="store_true", help="Resume an interrupted pack run in place: keep the attempt ledger, mark dead attempts interrupted, and re-execute")
 
     fulltext_grounding_run_parser = subparsers.add_parser("fulltext-grounding-run", help="Build local fulltext corpus/context and verify citation grounding without a full LLM paper run")
     fulltext_grounding_run_parser.add_argument("--topic", required=True, help="Grounding run topic or label")
@@ -856,6 +857,7 @@ def main(argv: list[str] | None = None) -> None:
             allowed_commands=[str(item).strip() for item in args.allowed_command if str(item).strip()] or None,
             timeout_seconds=args.timeout_seconds,
             force=args.force,
+            resume=args.resume,
         )
         print(render_benchmark_pack_run_markdown(report))
         if report.get("status") == "block":
