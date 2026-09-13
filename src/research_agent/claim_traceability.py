@@ -4,8 +4,10 @@ from pathlib import Path
 from typing import Any
 import json
 import re
+from dataclasses import replace
 
 from .artifacts import write_json, write_text
+from .claim_evidence_polarity import assess_claim_polarity
 from .models import ClaimTraceabilityItem, ClaimTraceabilityReport, LiteratureContext, PaperClaimAudit, PaperReview
 
 
@@ -33,6 +35,11 @@ def build_claim_traceability_report(
 ) -> ClaimTraceabilityReport:
     inventory = _evidence_inventory(run_dir, context)
     items = [_trace_claim(item, inventory) for item in revised_review.claim_audit]
+    # T08：主张清单编号（C-001 起），供页面与报告定位。
+    items = [
+        replace(item, claim_id=f"C-{index:03d}")
+        for index, item in enumerate(items, start=1)
+    ]
     total = len(items)
     passed = sum(1 for item in items if item.decision == "pass")
     review = sum(1 for item in items if item.decision == "review")
@@ -84,8 +91,8 @@ def render_claim_traceability_markdown(report: ClaimTraceabilityReport) -> str:
         [
             "",
             "## Traceability Matrix",
-            "| 决策 | 支撑 | Citation | Result | Runbook | Claim | 文献 | 结果 | 问题 |",
-            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+            "| ID | 决策 | 极性 | 支撑 | Citation | Result | Runbook | Claim | 文献 | 结果 | 问题 |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
         ]
     )
     for item in report.items:
@@ -93,7 +100,9 @@ def render_claim_traceability_markdown(report: ClaimTraceabilityReport) -> str:
             "| "
             + " | ".join(
                 [
+                    item.claim_id or "-",
                     item.decision,
+                    item.evidence_polarity,
                     item.support_level,
                     item.citation_status,
                     item.result_status,
@@ -101,7 +110,7 @@ def render_claim_traceability_markdown(report: ClaimTraceabilityReport) -> str:
                     _cell(item.claim),
                     _cell(", ".join(item.evidence_keys) or "-"),
                     _cell(", ".join(item.result_refs) or "-"),
-                    _cell("；".join(item.issues) or "-"),
+                    _cell("；".join([*item.polarity_conflicts, *item.issues]) or "-"),
                 ]
             )
             + " |"
@@ -175,6 +184,27 @@ def _trace_claim(claim: PaperClaimAudit, inventory: dict[str, Any]) -> ClaimTrac
     ):
         decision_support_level = "supported"
     decision = _decision(decision_support_level, citation_status, result_status, runbook_status, issues)
+    # T08/A17：引用原文可取时做极性/数值/条件核对；词面重合只作检索候选。
+    evidence_text = _cited_evidence_text(claim.evidence_keys, inventory)
+    polarity_conflicts: list[str] = []
+    if evidence_text:
+        assessment = assess_claim_polarity(claim.claim, evidence_text)
+        evidence_polarity = assessment.polarity
+        polarity_conflicts = list(assessment.conflicts)
+        if assessment.polarity == "contradicted":
+            decision = "block"
+            issues.extend(assessment.conflicts[:2])
+        elif (
+            assessment.polarity == "insufficient_evidence"
+            and decision == "pass"
+            and len(evidence_text) >= 200
+        ):
+            # 足够长的引用原文却不含方向信息 → 支持性存疑；短摘录（如题录摘要）
+            # 不据此降级，避免为拦截率一律阻断（A18）。
+            decision = "review"
+            issues.append("polarity_insufficient_evidence: 引用原文不足以核对方向断言，需人工核对")
+    else:
+        evidence_polarity = "not_assessed"
     return ClaimTraceabilityItem(
         claim=claim.claim,
         support_level=claim.support_level,
@@ -187,7 +217,23 @@ def _trace_claim(claim: PaperClaimAudit, inventory: dict[str, Any]) -> ClaimTrac
         result_refs=claim.result_refs,
         matched_result_refs=matched_refs,
         issues=issues,
+        evidence_polarity=evidence_polarity,
+        polarity_conflicts=polarity_conflicts,
     )
+
+
+def _cited_evidence_text(evidence_keys: list[str], inventory: dict[str, Any]) -> str:
+    """取该主张引用的文献 chunk 原文（限长）；无可用原文返回空串。"""
+    chunks_by_key = inventory.get("chunks_by_key") or {}
+    parts: list[str] = []
+    for key in evidence_keys:
+        for chunk in chunks_by_key.get(key, [])[:3]:
+            body = str(chunk.get("text") or "").strip()
+            if body:
+                parts.append(body[:1200])
+        if len(parts) >= 3:
+            break
+    return "\n".join(parts)[:4000]
 
 
 def _evidence_inventory(run_dir: Path, context: LiteratureContext) -> dict[str, Any]:
@@ -241,8 +287,14 @@ def _evidence_inventory(run_dir: Path, context: LiteratureContext) -> dict[str, 
         for value in [experiment_plan, results, statistics, analysis, benchmark_evidence, benchmark_evidence_markdown, runbook, environment, runbook_markdown, environment_markdown, split_artifact_text]
         if value not in ({}, [], "")
     )
+    chunks_by_key: dict[str, list[dict[str, str]]] = {}
+    for chunk in context.chunks:
+        chunks_by_key.setdefault(chunk.citation_key, []).append(
+            {"chunk_id": chunk.chunk_id, "title": chunk.title, "text": chunk.text, "source": chunk.source, "url": chunk.url}
+        )
     return {
         "citation_keys": {item.key for item in context.citations},
+        "chunks_by_key": chunks_by_key,
         "result_refs": result_refs,
         "result_ref_norms": {_normalize_result_text(ref) for ref in result_refs},
         "evidence_text_norm": _normalize_result_text(evidence_text),

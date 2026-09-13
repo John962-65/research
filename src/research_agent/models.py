@@ -399,6 +399,10 @@ class ClaimTraceabilityItem:
     result_refs: list[str]
     matched_result_refs: list[str]
     issues: list[str]
+    # T08：主张清单结构化字段（decision-contract/任务书 T08）。
+    claim_id: str = ""
+    evidence_polarity: str = "not_assessed"  # supported/contradicted/insufficient_evidence/not_assessed
+    polarity_conflicts: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -428,6 +432,8 @@ class CitationGroundingItem:
     chunk_ids: list[str]
     support_excerpt: str
     issues: list[str]
+    # T08：证据定位信息（chunk + 字符跨度 + 可用页码），空串表示无法定位。
+    evidence_locator: str = ""
 
 
 @dataclass(frozen=True)

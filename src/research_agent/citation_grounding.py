@@ -160,7 +160,7 @@ def _evaluate_marker(
     if not window.strip():
         issues.append("citation marker has no local claim window")
 
-    score, terms, best_excerpt, chunk_ids = _best_overlap(window, chunks)
+    score, terms, best_excerpt, chunk_ids, evidence_locator = _best_overlap(window, chunks)
     if key not in citation_keys or not chunks or not window.strip():
         decision = "block"
         grounding_status = "missing"
@@ -181,18 +181,20 @@ def _evaluate_marker(
         matched_terms=terms[:12],
         chunk_ids=chunk_ids[:5],
         support_excerpt=_truncate(best_excerpt, 220),
+        evidence_locator=str(evidence_locator or ""),
         issues=issues,
     )
 
 
-def _best_overlap(window: str, chunks: list[dict[str, str]]) -> tuple[float, list[str], str, list[str]]:
+def _best_overlap(window: str, chunks: list[dict[str, str]]) -> tuple[float, list[str], str, list[str], str]:
     window_terms = _terms(window)
     if not window_terms or not chunks:
-        return 0.0, [], "", []
+        return 0.0, [], "", [], ""
     best_score = 0.0
     best_terms: list[str] = []
     best_excerpt = ""
     best_chunk_ids: list[str] = []
+    best_locator = ""
     for chunk in chunks:
         support_text = " ".join([chunk.get("title", ""), chunk.get("text", "")]).strip()
         support_terms = _terms(support_text)
@@ -206,9 +208,39 @@ def _best_overlap(window: str, chunks: list[dict[str, str]]) -> tuple[float, lis
             best_terms = matched
             best_excerpt = chunk.get("text", "") or chunk.get("title", "")
             best_chunk_ids = [chunk.get("chunk_id", "") or "-"]
+            best_locator = _chunk_locator(chunk, best_excerpt)
     if best_score > 0:
-        return best_score, best_terms, best_excerpt, best_chunk_ids
-    return 0.0, [], chunks[0].get("text", "") if chunks else "", [chunks[0].get("chunk_id", "") or "-"] if chunks else []
+        return best_score, best_terms, best_excerpt, best_chunk_ids, best_locator
+    fallback_chunk = chunks[0]
+    fallback_text = fallback_chunk.get("text", "")
+    fallback_id = fallback_chunk.get("chunk_id", "") or "-"
+    return 0.0, [], fallback_text, [fallback_id], _chunk_locator(fallback_chunk, fallback_text)
+
+
+def _chunk_locator(chunk: dict[str, str] | None, excerpt: str) -> str:
+    """T08：证据定位（chunk_id + 字符跨度 + 可用页码）；无法定位返回空串。"""
+    if not isinstance(chunk, dict) or not chunk:
+        return ""
+    chunk_id = str(chunk.get("chunk_id") or "").strip()
+    if not chunk_id:
+        return ""
+    chunk_text = str(chunk.get("text") or "")
+    start = end = -1
+    if excerpt and chunk_text:
+        probe = excerpt[:80].strip()
+        index = chunk_text.find(probe)
+        if index < 0:
+            index = chunk_text.find(probe[:40])
+        if index >= 0:
+            start, end = index, min(len(chunk_text), index + max(len(probe), 40))
+    parts = [f"chunk:{chunk_id}"]
+    if start >= 0:
+        parts.append(f"chars={start}-{end}")
+    metadata = chunk.get("metadata") if isinstance(chunk.get("metadata"), dict) else {}
+    page = str((metadata or {}).get("page") or chunk.get("page") or "").strip()
+    if page:
+        parts.append(f"page={page}")
+    return "#".join(parts)
 
 
 def _chunks_by_key(context: LiteratureContext) -> dict[str, list[dict[str, str]]]:

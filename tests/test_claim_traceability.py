@@ -573,6 +573,125 @@ def _write_iris_evidence_artifacts(run_dir: Path) -> None:
     write_json(run_dir / "split" / "iris-stratified-test-v1.json", {"split_policy": "Split 生成规则：每类 10 test cases / 40 train cases。"})
 
 
+    def test_contradicted_direction_blocks_claim_with_claim_id(self) -> None:
+        # A17（接线级）：引用原文与主张方向相反 → 阻断；claim_id 已分配。
+        context = LiteratureContext(
+            topic="机械臂路径规划",
+            citations=[
+                CitationEntry(
+                    key="lovelace2024robot1",
+                    title="Robot manipulator motion planning",
+                    authors=["Ada Lovace"],
+                    year=2024,
+                    venue="Robotics",
+                    url="https://example.test",
+                    source="openalex",
+                )
+            ],
+            chunks=[
+                EvidenceChunk(
+                    chunk_id="chunk-900",
+                    citation_key="lovelace2024robot1",
+                    title="Robot manipulator motion planning",
+                    text="实验表明该规划技术在 UCI Iris 上未提升准确率，与 baseline 持平，未见明显改善。",
+                    source="openalex",
+                    url="https://example.test",
+                    relevance=0.9,
+                )
+            ],
+            claim_support=[],
+            review_gate=ReviewGate("pass", [], []),
+        )
+        review = PaperReview(
+            decision="accept_with_minor_revisions",
+            score=8.0,
+            novelty=4,
+            soundness=4,
+            evidence_quality=4,
+            reproducibility=4,
+            summary="通过。",
+            strengths=[],
+            weaknesses=[],
+            required_revisions=[],
+            claim_audit=[
+                PaperClaimAudit(
+                    claim="结果显示准确率显著优于 baseline。",
+                    support_level="supported",
+                    evidence_keys=["lovelace2024robot1"],
+                    result_refs=[],
+                    risk="low",
+                )
+            ],
+        )
+        with TemporaryDirectory() as tmp:
+            _write_evidence_artifacts(Path(tmp), mode="local")
+            report = write_claim_traceability_artifacts("机械臂路径规划", Path(tmp), review, context)
+        item = report.items[0]
+        self.assertEqual(item.claim_id, "C-001")
+        self.assertEqual(item.evidence_polarity, "contradicted")
+        self.assertTrue(any("direction_conflict" in c for c in item.polarity_conflicts))
+        self.assertEqual(item.decision, "block")
+        self.assertEqual(report.status, "block")
+
+    def test_supported_claim_with_complete_evidence_passes(self) -> None:
+        # A18：正确主张且证据完整 → pass，极性 supported。
+        context = LiteratureContext(
+            topic="机械臂路径规划",
+            citations=[
+                CitationEntry(
+                    key="lovelace2024robot1",
+                    title="Robot manipulator motion planning",
+                    authors=["Ada Lovace"],
+                    year=2024,
+                    venue="Robotics",
+                    url="https://example.test",
+                    source="openalex",
+                )
+            ],
+            chunks=[
+                EvidenceChunk(
+                    chunk_id="chunk-901",
+                    citation_key="lovelace2024robot1",
+                    title="Robot manipulator motion planning",
+                    text="在 UCI Iris 固定测试划分上，该分类方法的 macro_f1 相比 baseline 提升明显，最终取得 0.966 的成绩，优于对照方法。",
+                    source="openalex",
+                    url="https://example.test",
+                    relevance=0.9,
+                )
+            ],
+            claim_support=[],
+            review_gate=ReviewGate("pass", [], []),
+        )
+        review = PaperReview(
+            decision="accept_with_minor_revisions",
+            score=8.0,
+            novelty=4,
+            soundness=4,
+            evidence_quality=4,
+            reproducibility=4,
+            summary="通过。",
+            strengths=[],
+            weaknesses=[],
+            required_revisions=[],
+            claim_audit=[
+                PaperClaimAudit(
+                    claim="结果显示 macro_f1 优于 baseline，达到 0.966。",
+                    support_level="supported",
+                    evidence_keys=["lovelace2024robot1"],
+                    result_refs=[],
+                    risk="low",
+                )
+            ],
+        )
+        with TemporaryDirectory() as tmp:
+            _write_evidence_artifacts(Path(tmp), mode="local")
+            report = write_claim_traceability_artifacts("机械臂路径规划", Path(tmp), review, context)
+        item = report.items[0]
+        self.assertEqual(item.evidence_polarity, "supported")
+        self.assertEqual(item.polarity_conflicts, [])
+        self.assertEqual(item.decision, "pass")
+
+
 def _context() -> LiteratureContext:
     return LiteratureContext(
         topic="机械臂路径规划",
