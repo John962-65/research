@@ -1,0 +1,76 @@
+# Gold Run Doctor：multi-agent gold canary（离线预检）
+
+- 状态：blocked
+- Preflight：fail
+
+## Checks
+| Check | Status | Detail | Action |
+| --- | --- | --- | --- |
+| llm_base_url_explicit | fail | OPENAI_BASE_URL=missing | 设置 OPENAI_BASE_URL，例如 http://127.0.0.1:8317 或 https://api.openai.com/v1。 |
+| llm_model | fail | OPENAI_MODEL=missing | 设置 OPENAI_MODEL 为真实模型名。 |
+| llm_api_key | fail | OPENAI_API_KEY=missing | 设置 OPENAI_API_KEY；doctor 不会记录密钥值。 |
+| literature_contact_email | fail | RESEARCH_AGENT_CONTACT_EMAIL=missing | 设置真实 RESEARCH_AGENT_CONTACT_EMAIL，用于 OpenAlex/Crossref/PubMed 联系信息；不要使用 example.org 或 <contact-email> 占位符。 |
+| semantic_scholar_key | warn | SEMANTIC_SCHOLAR_API_KEY=missing | 可选；缺失时 online probe 可能更容易遇到限流。 |
+| openalex_key | warn | OPENALEX_API_KEY=missing | 可选；有 key 时 online probe 更稳定。 |
+| credential_transport | pass | secrets=env_or_missing | - |
+| gold_release_metadata | pass | required=6/6 | - |
+| preflight:overall | fail | fail; fail=5; warn=1; failing=llm_base_url,llm_model,llm_api_key,contact_email,llm_routes | 修复 preflight fail 项后再启动 gold run。 |
+| preflight:paper_grade_mode | pass | pass: 已启用 paper-grade 启动门槛 | - |
+| preflight:paper_grade_literature_provider | pass | pass: paper-grade 文献使用 online/auto; online | - |
+| preflight:paper_grade_literature_sources | pass | pass: paper-grade 文献源数量达标; 4/3 sources | - |
+| preflight:paper_grade_seed_papers | pass | pass: paper-grade DOI/URL seed 数量达标; strong=11/3; total=11/3 | - |
+| preflight:paper_grade_seed_roles | pass | pass: paper-grade seed 角色覆盖达标; review, benchmark_dataset, baseline_method, recent | - |
+| preflight:fulltext_paths | pass | pass: 本地全文路径可读取; 1 files | - |
+| preflight:paper_grade_execution_mode | pass | pass: paper-grade 使用 benchmark 执行模式 | - |
+| preflight:paper_grade_execution_repeats | pass | pass: paper-grade 重复次数达标; 3 | - |
+| preflight:paper_grade_benchmark_manifests | pass | pass: paper-grade benchmark manifest 集合达标; roles=ablation,baseline,candidate,other | - |
+| preflight:benchmark_adapter_audit | pass | pass: benchmark manifest 内容可执行; 8 commands | - |
+| preflight:release_metadata | pass | pass: 已配置发布元数据字段; 9 fields | - |
+| benchmark_pack_run | pass | status=warn; grade=real_benchmark; results=9; comparisons=3; outcome=neutral_no_observed_difference; boundary=negative_or_neutral_no_superiority; publishable_negative_or_neutral=True; claim_policy=negative_or_neutral_benchmark_claims_allowed_no_superiority_claims | 可继续 gold run，但论文必须按负/中性结果边界写作，禁止 superiority/stability claim。 |
+| fulltext_grounding_run | pass | status=pass; grounding=pass; chunks=3 | - |
+
+## Commands
+```bash
+export OPENAI_BASE_URL="http://127.0.0.1:8317"
+export OPENAI_MODEL="gpt-5.5"
+export OPENAI_API_KEY="<real-key>"
+export RESEARCH_AGENT_CONTACT_EMAIL="<contact-email>"
+PYTHONPATH=src python3 -m research_agent run --topic "multi-agent gold canary（离线预检）" --config "examples/uci-iris-paper-grade-config.toml" --release-code-repository-url "https://github.com/research-agent-lab/research-agent" --release-code-archive-doi "https://github.com/research-agent-lab/research-agent/archive/refs/tags/v0.1.0.zip" --release-code-license "MIT" --release-code-version "v0.1.0" --release-data-repository-url "https://archive.ics.uci.edu/dataset/53/iris" --release-data-archive-doi "10.24432/C56C76" --release-data-access-statement "The Iris data are available from the UCI Machine Learning Repository; frozen benchmark splits and manifests are included in this repository for reproducible evaluation." --release-environment-url "https://github.com/research-agent-lab/research-agent/blob/v0.1.0/Dockerfile" --release-notes "Gold launch kit defaults for the UCI Iris benchmark path; verify repository, archive, and environment URLs before submission." --out "runs/multi-agent-gold-canary-gold-run"
+PYTHONPATH=src python3 -m research_agent status "runs/multi-agent-gold-canary-gold-run"
+PYTHONPATH=src python3 -m research_agent approve "runs/multi-agent-gold-canary-gold-run" --reviewer "human" --notes "Literature gate inspected; DOI/URL seed coverage, source health, and claim boundaries accepted for this gold run."
+PYTHONPATH=src python3 -m research_agent approve-execution "runs/multi-agent-gold-canary-gold-run" --reviewer "human" --notes "Benchmark manifests, allowed commands, frozen split, and grader hash inspected."
+```
+
+## Gold Launch Manifest
+- 状态：blocked
+- 可启动 gold run：否
+- Doctor：blocked；Preflight：fail
+- 失败检查：llm_base_url_explicit, llm_model, llm_api_key, literature_contact_email, preflight:overall
+- 警告检查：semantic_scholar_key, openalex_key
+
+### Secret Handling
+- secret 仅记录来源和值是否存在：是
+- 通过配置直接传入的 secret 字段：-
+
+### Launch Inputs
+- literature_provider：`online`；sources：`semantic_scholar, openalex, arxiv, crossref`
+- seed papers：`11`；DOI/URL seed：`8`；fulltext paths：`1`
+- execution_mode：`benchmark`；repeats：`3`；manifests：`8`
+- benchmark pack run：`public-iris-case`
+- release required ready：是；missing：`-`；invalid：`-`
+
+### Launch Readiness
+- 状态：`blocked`；可启动：否
+- 阻断项：`doctor_ready, preflight_pass`；需复核：`candidate_run_optional`
+- Secret policy：`env_only`；safe command count：`8`
+
+### Checklist
+| Item | Status | Evidence | Form fields | Next step |
+| --- | --- | --- | --- | --- |
+| doctor_ready | block | doctor_status=blocked |  | Resolve failed Gold Doctor checks, then rerun Gold Doctor. |
+| preflight_pass | block | preflight_status=fail |  | Run Preflight and fix failed preflight checks before launch. |
+| secrets_via_environment | pass | direct_secret_fields=- | llm_api_key, semantic_scholar_api_key, openalex_api_key | Move secret values to environment variables before a real run; leave Web/config secret fields empty. |
+| paper_grade_literature | pass | provider=online; sources=4/3; seeds=11/3; doi_url=8/3 | literature_provider, literature_sources, seed_papers, fulltext_paths, max_papers, max_search_queries, extra_search_queries | Use online/auto literature with configured source and DOI/URL seed counts meeting paper_grade thresholds; run Literature Preview. |
+| benchmark_manifest | pass | mode=benchmark; manifests=8/3; repeats=3/3 | execution_mode, execution_repeats, benchmark_manifests | Use benchmark execution with repeats >= 3 and at least 3 candidate/baseline/ablation manifests; run Benchmark Preview. |
+| release_metadata | pass | missing=-; invalid=- | release_code_repository_url, release_code_archive_doi, release_code_license, release_code_version, release_data_access_statement, release_environment_url | Fill real release metadata: code repository/archive, license, version, data access statement, and environment URL. |
+| candidate_run_optional | warn | no candidate run supplied; startup doctor only | candidate_run_id | Optional before launch; after a candidate run finishes, rerun Gold Doctor against that run for final gold evidence. |
