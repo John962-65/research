@@ -8,6 +8,8 @@ from research_agent.config import ExecutionConfig
 from research_agent.idea_experiment_contract import (
     IDEA_EXPERIMENT_CONTRACT_JSON,
     IDEA_EXPERIMENT_CONTRACT_MD,
+    append_contract_history,
+    build_execution_contract,
     build_idea_experiment_contract_report,
     render_idea_experiment_contract_markdown,
     write_idea_experiment_contract_artifacts,
@@ -35,6 +37,75 @@ class IdeaExperimentContractTest(unittest.TestCase):
         self.assertGreater(report["contract_score"], 0.99)
         self.assertIn("Idea-实验契约", rendered)
         self.assertTrue(any(check["name"] == "evidence_carryover" and check["status"] == "pass" for check in report["checks"]))
+
+    def test_complete_contract_passes_without_keyword_echo(self) -> None:
+        # A11：命令带显式 comparison_group 时，不因名称缺 candidate/baseline 关键词误拦。
+        plan = _plan()
+        plan_commands = [
+            ExperimentCommand(name="run-a", command=["python3", "simulate.py"], comparison_group="candidate"),
+            ExperimentCommand(name="run-b", command=["python3", "simulate.py"], comparison_group="baseline"),
+            ExperimentCommand(name="run-c", command=["python3", "simulate.py"], comparison_group="ablation"),
+        ]
+        plan = ExperimentPlan(
+            idea_title=plan.idea_title,
+            objective=plan.objective,
+            variables=plan.variables,
+            metrics=plan.metrics,
+            protocol=plan.protocol,
+            commands=plan_commands,
+            baseline=plan.baseline,
+            evidence_keys=plan.evidence_keys,
+        )
+        report = build_idea_experiment_contract_report(
+            _research_plan(),
+            _idea(),
+            _exploration_map(),
+            plan,
+            _benchmark_readiness("ready_for_benchmark"),
+            ExecutionConfig(mode="benchmark"),
+            ablation_plan={"status": "pass", "has_ablation": True},
+            preregistration={"status": "locked", "timing": "before_results"},
+            constraint_compliance={"status": "pass", "blocked": 0, "review_required": 0},
+        )
+        self.assertEqual(report["status"], "pass")
+        command_check = next(check for check in report["checks"] if check["name"] == "command_contract")
+        self.assertEqual(command_check["status"], "pass")
+
+    def test_execution_contract_has_eight_field_groups(self) -> None:
+        # T05：契约是执行与评估共同读取的权威结构，包含全部字段组与内容摘要。
+        contract = build_execution_contract(
+            _research_plan(), _idea(), _plan(), ExecutionConfig(mode="local", repeats=5),
+            preregistration={"status": "locked", "timing": "before_results", "primary_metrics": ["planning_success_rate", "planning_time"]},
+            ablation_plan={"status": "pass", "has_ablation": True},
+        )
+        for group in ("hypothesis", "method", "data", "evaluation", "criteria", "verification", "execution"):
+            self.assertIn(group, contract)
+        self.assertTrue(contract["contract_id"])
+        self.assertTrue(contract["digest"])
+        self.assertEqual(contract["evaluation"]["primary_metrics"], ["planning_success_rate", "planning_time"])
+        self.assertIn("不得把未显著简单等同无效", str(contract["criteria"]))
+
+    def test_contract_history_versions_after_results(self) -> None:
+        # A12：结果出来后改契约 → 新版本 + rerun_required，旧批准不沿用。
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            contract = build_execution_contract(_research_plan(), _idea(), _plan(), ExecutionConfig(mode="local"))
+            history = append_contract_history(run_dir, dict(contract), results_exist=False)
+            self.assertEqual(len(history["entries"]), 1)
+            self.assertEqual(history["entries"][0]["reason"], "initial_freeze")
+            # 结果存在后契约内容变化（改主指标）。
+            changed = dict(contract)
+            changed["evaluation"] = dict(contract["evaluation"], primary_metrics=["planning_time"])
+            changed["digest"] = __import__("research_agent.evidence_snapshot", fromlist=["payload_sha256"]).payload_sha256(
+                {k: v for k, v in changed.items() if k not in {"revision", "frozen_at", "approvals", "digest"}}
+            )
+            history = append_contract_history(run_dir, changed, results_exist=True)
+            self.assertEqual(len(history["entries"]), 2)
+            self.assertEqual(history["entries"][-1]["reason"], "post_results_change")
+            self.assertTrue(history["entries"][-1]["rerun_required"])
+            # 相同内容重复冻结不产生新版本。
+            history = append_contract_history(run_dir, dict(changed), results_exist=True)
+            self.assertEqual(len(history["entries"]), 2)
 
     def test_contract_blocks_title_drift_and_missing_evidence(self) -> None:
         weak_idea = ResearchIdea(

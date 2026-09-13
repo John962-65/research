@@ -475,7 +475,9 @@ def _result_validation_is_claim_boundary_only(result_validation: dict[str, Any])
     warning_items = [item for item in items if str(item.get("status") or "") == "warn"]
     if not warning_items:
         return True
-    return all(str(item.get("name") or "") == "statistical_comparability" for item in warning_items)
+    # contract_binding 的 warn 只表示缺少契约的迁移提示（绑定失配会直接 block），
+    # 不改变负/中性结果的可发表性判定。
+    return all(str(item.get("name") or "") in {"statistical_comparability", "contract_binding"} for item in warning_items)
 
 
 def _result_validation_warning_details(result_validation: dict[str, Any]) -> list[str]:

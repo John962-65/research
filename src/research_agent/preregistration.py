@@ -7,12 +7,13 @@ from typing import Any
 import hashlib
 import json
 
-from .artifacts import write_json, write_text
+from .artifacts import read_json, safe_int as _safe_int, write_json, write_text
 from .models import ExperimentPlan, ResearchIdea
 
 
 PREREGISTRATION_JSON = "03-preregistration.json"
 PREREGISTRATION_MD = "03-preregistration.md"
+PREREGISTRATION_HISTORY_JSON = "03-preregistration-history.json"
 
 
 def write_preregistration_artifacts(
@@ -24,9 +25,48 @@ def write_preregistration_artifacts(
     results_exist: bool = False,
 ) -> dict[str, Any]:
     report = build_preregistration_report(topic, idea, plan, results_exist=results_exist)
-    write_json(run_dir / PREREGISTRATION_JSON, report)
+    _versioned_write(run_dir, report)
     write_text(run_dir / PREREGISTRATION_MD, render_preregistration_markdown(report))
     return report
+
+
+def _versioned_write(run_dir: Path, report: dict[str, Any]) -> None:
+    """T05：预注册版本化——不再就地覆盖；计划指纹变化时旧版本进入历史。"""
+    path = run_dir / PREREGISTRATION_JSON
+    previous: dict[str, Any] | None = None
+    try:
+        data = read_json(path)
+        if isinstance(data, dict) and data.get("plan_fingerprint"):
+            previous = data
+    except (OSError, ValueError):
+        previous = None
+    revision = 1
+    history_entries: list[dict[str, Any]] = []
+    history_path = run_dir / PREREGISTRATION_HISTORY_JSON
+    try:
+        history = read_json(history_path)
+        if isinstance(history, dict) and isinstance(history.get("entries"), list):
+            history_entries = history["entries"]
+    except (OSError, ValueError):
+        history_entries = []
+    if previous is not None and str(previous.get("plan_fingerprint")) == str(report.get("plan_fingerprint")):
+        revision = max(1, _safe_int(previous.get("revision")) or 1)
+    else:
+        if previous is not None:
+            history_entries.append(
+                {
+                    "revision": max(1, _safe_int(previous.get("revision")) or len(history_entries) + 1),
+                    "superseded_at": datetime.now(timezone.utc).isoformat(),
+                    "plan_fingerprint": previous.get("plan_fingerprint"),
+                    "primary_metrics": previous.get("primary_metrics"),
+                    "status": previous.get("status"),
+                    "note": "计划指纹变化，旧预注册保留为历史版本；新版本为新的分析身份。",
+                }
+            )
+        revision = len(history_entries) + 1
+    report["revision"] = revision
+    write_json(history_path, {"schema_version": 1, "entries": history_entries})
+    write_json(path, report)
 
 
 def build_preregistration_report(

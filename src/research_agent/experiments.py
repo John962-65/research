@@ -17,7 +17,7 @@ import threading
 import time
 import tomllib
 
-from .artifacts import write_json, write_text, cell as _cell
+from .artifacts import write_json, write_text, cell as _cell, utc_now as _utc_now
 from .benchmark_adapter import prepare_benchmark_adapter_plan
 from .command_safety import interpreter_execution_issues
 from .config import ExecutionConfig, PaperGradeConfig
@@ -277,6 +277,7 @@ def run_experiments(
     run_dir: Path,
     paper_grade: PaperGradeConfig | None = None,
     base_dir: Path | None = None,
+    contract_digest: str = "",
 ) -> list[ExperimentResult]:
     validate_execution_config(config)
     experiment_dir = run_dir / "experiments"
@@ -304,7 +305,7 @@ def run_experiments(
     else:
         raise ValueError(f"Unsupported execution mode: {config.mode}")
     _write_results_csv(run_dir / "04-results.csv", results)
-    write_experiment_runbook(execution_plan, config, run_dir, results)
+    write_experiment_runbook(execution_plan, config, run_dir, results, contract_digest=contract_digest)
     return results
 
 
@@ -434,10 +435,14 @@ def write_experiment_runbook(
     config: ExecutionConfig,
     run_dir: Path,
     results: list[ExperimentResult],
+    contract_digest: str = "",
 ) -> dict[str, Any]:
     experiment_dir = run_dir / "experiments"
     experiment_dir.mkdir(parents=True, exist_ok=True)
     runbook = build_experiment_runbook(plan, config, run_dir, results)
+    if contract_digest:
+        # T05：执行启动时绑定契约内容摘要；事后改契约产生新版本，旧摘要失效。
+        runbook["contract_binding"] = {"contract_digest": str(contract_digest), "bound_at": _utc_now()}
     environment = runbook.get("environment", {}) if isinstance(runbook.get("environment"), dict) else {}
     write_json(run_dir / EXPERIMENT_RUNBOOK_JSON, runbook)
     write_text(run_dir / EXPERIMENT_RUNBOOK_MD, render_experiment_runbook_markdown(runbook))

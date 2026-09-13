@@ -2,11 +2,37 @@ from __future__ import annotations
 
 import unittest
 
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import dataclasses
+
 from research_agent.models import ExperimentCommand, ExperimentPlan, ResearchIdea
-from research_agent.preregistration import build_preregistration_report, plan_fingerprint, render_preregistration_markdown
+from research_agent.preregistration import (
+    build_preregistration_report,
+    plan_fingerprint,
+    render_preregistration_markdown,
+    write_preregistration_artifacts,
+)
 
 
 class PreregistrationTest(unittest.TestCase):
+    def test_posthoc_metric_change_creates_new_version(self) -> None:
+        # A12：结果出来后改指标/划分 → 预注册产生新版本（新分析身份），旧版本进历史。
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            first = write_preregistration_artifacts("机械臂路径规划", _idea(), _plan(), run_dir)
+            self.assertEqual(first["revision"], 1)
+            second = write_preregistration_artifacts("机械臂路径规划", _idea(), _plan(), run_dir)
+            self.assertEqual(second["revision"], 1, "相同指纹重复写入不产生新版本")
+            changed_plan = dataclasses.replace(_plan(), metrics=["planning_time"])
+            third = write_preregistration_artifacts("机械臂路径规划", _idea(), changed_plan, run_dir, results_exist=True)
+            self.assertEqual(third["revision"], 2)
+            import json as _json
+            history = _json.loads((run_dir / "03-preregistration-history.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(history["entries"]), 1)
+            self.assertEqual(history["entries"][0]["plan_fingerprint"], first["plan_fingerprint"])
+            self.assertIn("新的分析身份", history["entries"][0]["note"])
+
     def test_preregistration_locks_plan_before_results(self) -> None:
         plan = _plan()
         report = build_preregistration_report("机械臂路径规划", _idea(), plan)

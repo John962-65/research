@@ -180,7 +180,7 @@ def append_contract_history(
     revision = len(entries) + 1
     contract["revision"] = revision
     if not contract.get("frozen_at"):
-        contract["frozen_at"] = _utc_now_local()
+        contract["frozen_at"] = _utc_now()
     reason = "initial_freeze" if revision == 1 else "post_results_change" if results_exist else "contract_revised"
     affected = "实验尚未执行，无受影响结果。" if not results_exist else (
         "已有结果基于旧契约版本；旧批准与分析身份不再沿用，重新执行比较前必须人工确认。"

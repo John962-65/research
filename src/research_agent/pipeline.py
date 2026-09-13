@@ -2386,7 +2386,15 @@ def _run_after_review_approval(
             )
         else:
 
-            results = run_experiments(plan, config.execution, out_dir, paper_grade=config.paper_grade)
+            # T05：执行启动时绑定当前契约内容摘要（审计器读取同一契约做一致性核对）。
+            _contract_report = _read_dict(out_dir / IDEA_EXPERIMENT_CONTRACT_JSON)
+            results = run_experiments(
+                plan,
+                config.execution,
+                out_dir,
+                paper_grade=config.paper_grade,
+                contract_digest=str(_contract_report.get("contract_digest") or ""),
+            )
             write_json(results_path, results)
             runbook = _read_dict(out_dir / EXPERIMENT_RUNBOOK_JSON)
             benchmark_plan_report = _read_dict(out_dir / BENCHMARK_PLAN_JSON)

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .artifacts import write_json, write_text, cell as _cell
+from .artifacts import read_json, write_json, write_text, cell as _cell
 from .models import ExperimentPlan, ExperimentResult, StatisticsReport
 from .preregistration import plan_fingerprint
 
@@ -21,7 +21,21 @@ def write_result_validation_artifacts(
     preregistration: dict[str, Any] | None = None,
     execution_mode: str = "",
 ) -> dict[str, Any]:
-    report = build_result_validation_report(plan, results, statistics, expected_repeats, preregistration=preregistration, execution_mode=execution_mode)
+    contract_report = _read_local_dict(run_dir / "03-idea-experiment-contract.json")
+    contract = contract_report.get("contract") if isinstance(contract_report.get("contract"), dict) else {}
+    runbook = _read_local_dict(run_dir / "04-experiment-runbook.json")
+    binding = runbook.get("contract_binding") if isinstance(runbook.get("contract_binding"), dict) else None
+    report = build_result_validation_report(
+        plan,
+        results,
+        statistics,
+        expected_repeats,
+        preregistration=preregistration,
+        execution_mode=execution_mode,
+        contract=contract,
+        contract_binding=binding,
+        contract_check_expected=(run_dir / "04-experiment-runbook.json").exists(),
+    )
     write_json(run_dir / RESULT_VALIDATION_JSON, report)
     write_text(run_dir / RESULT_VALIDATION_MD, render_result_validation_markdown(report))
     return report
@@ -34,6 +48,9 @@ def build_result_validation_report(
     expected_repeats: int,
     preregistration: dict[str, Any] | None = None,
     execution_mode: str = "",
+    contract: dict[str, Any] | None = None,
+    contract_binding: dict[str, Any] | None = None,
+    contract_check_expected: bool = False,
 ) -> dict[str, Any]:
     items: list[dict[str, Any]] = []
     blocking: list[str] = []
@@ -43,6 +60,7 @@ def build_result_validation_report(
     _check_command_coverage(plan, results, expected, items, blocking)
     _check_ablation_coverage(plan, results, expected, items, blocking, warnings, execution_mode)
     _check_preregistration(plan, statistics, preregistration, items, blocking, warnings, execution_mode)
+    _check_contract_binding(contract, contract_binding, items, blocking, warnings, contract_check_expected)
     _check_run_status(results, items, blocking)
     _check_metrics(plan, results, items, blocking, warnings)
     _check_statistics(statistics, items, blocking, warnings, execution_mode)
@@ -219,6 +237,40 @@ def _check_preregistration(
     items.append({"name": "preregistration", "status": "pass", "detail": f"{len(primary)} primary metrics locked"})
 
 
+def _check_contract_binding(
+    contract: dict[str, Any] | None,
+    binding: dict[str, Any] | None,
+    items: list[dict[str, Any]],
+    blocking: list[str],
+    warnings: list[str],
+    check_expected: bool = False,
+) -> None:
+    """A12：结果出来后改契约 → 执行绑定摘要失效，旧批准与分析身份不再沿用。"""
+    if not contract:
+        if not check_expected:
+            return
+        detail = "缺少 03-idea-experiment-contract 的结构化契约（旧结构）；建议迁移后重跑关键比较。"
+        items.append({"name": "contract_binding", "status": "warn", "detail": detail})
+        warnings.append(detail)
+        return
+    bound = str((binding or {}).get("contract_digest") or "")
+    current = str(contract.get("digest") or "")
+    if bound and bound != current:
+        detail = (
+            "执行绑定的契约摘要与当前契约不一致：已有结果可能基于旧契约版本；"
+            "旧批准与分析身份不再沿用，必须生成新契约版本并人工确认后重跑比较（A12）。"
+        )
+        items.append({"name": "contract_binding", "status": "block", "detail": detail})
+        blocking.append(detail)
+        return
+    if bound:
+        items.append({"name": "contract_binding", "status": "pass", "detail": f"执行绑定摘要一致（{current[:12]}）"})
+    else:
+        detail = "04-experiment-runbook 缺少契约绑定记录（旧结构）；结果与契约的对应关系待人工确认。"
+        items.append({"name": "contract_binding", "status": "warn", "detail": detail})
+        warnings.append(detail)
+
+
 def _check_run_status(results: list[ExperimentResult], items: list[dict[str, Any]], blocking: list[str]) -> None:
     bad = [result for result in results if result.status in {"failed", "blocked", "timeout"}]
     if bad:
@@ -295,6 +347,14 @@ def _check_statistics(
         )
     if statistics.warnings:
         warnings.extend(str(item) for item in statistics.warnings)
+
+
+def _read_local_dict(path: Path) -> dict[str, Any]:
+    try:
+        data = read_json(path)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _as_list(value: Any) -> list[Any]:
