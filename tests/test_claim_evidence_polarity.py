@@ -65,5 +65,40 @@ class ClaimPolarityRuleTest(unittest.TestCase):
         self.assertEqual(assessment.conflicts, [])
 
 
+class ReviewerRegressionTest(unittest.TestCase):
+    """复审第 5 项的三个误放/误拦案例回归。"""
+
+    def test_target_number_missing_from_evidence_is_contradicted(self) -> None:
+        # 原文 80→81，主张 99：目标数值在证据中不存在 → 不得判支持。
+        assessment = assess_claim_polarity(
+            "该方法将准确率提升到 99%", "准确率从 80% 提升到 81%"
+        )
+        self.assertEqual(assessment.polarity, "contradicted")
+        self.assertTrue(any("number_conflict" in item for item in assessment.conflicts))
+
+    def test_directionless_evidence_is_insufficient_not_supported(self) -> None:
+        # 原文只说"2025 年评估了方法"，未支持任何方向 → 待核验而非 supported。
+        assessment = assess_claim_polarity(
+            "该方法提升了准确率", "我们在 2025 年评估了该方法"
+        )
+        self.assertEqual(assessment.polarity, "insufficient_evidence")
+        # 年份数字不参与数值比较，也不把证据误判为含方向信息。
+        self.assertEqual(assessment.conflicts, [])
+
+    def test_same_sentence_positive_and_negative_per_metric(self) -> None:
+        # 原文与主张完全相同（同句正反、不同指标）→ 不得因"没有提升"命中
+        # 否定词而整体判矛盾；按指标归因后为 supported。
+        text = "提高准确率，但没有提高速度"
+        self.assertEqual(assess_claim_polarity(text, text).polarity, "supported")
+        text2 = "提升了准确率，但没有提升速度"
+        self.assertEqual(assess_claim_polarity(text2, text2).polarity, "supported")
+        # 指标互换（主张准确率提升、证据却说准确率未提升）→ 正确判矛盾。
+        swapped = assess_claim_polarity(
+            "提升了准确率，但没有提升速度", "提升了速度，但没有提升准确率"
+        )
+        self.assertEqual(swapped.polarity, "contradicted")
+        self.assertTrue(any("direction_conflict[准确率]" in c for c in swapped.conflicts))
+
+
 if __name__ == "__main__":
     unittest.main()
