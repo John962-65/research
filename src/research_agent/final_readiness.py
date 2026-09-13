@@ -64,7 +64,7 @@ def build_final_readiness_report(
         deferred_tasks=rewrite_report.deferred_tasks,
         blocking_issues=blocking,
         recommendation=_recommendation(status, original_review, revised_review, unsupported_before, unsupported_after, weak_before, weak_after, availability_report, traceability_report),
-        next_actions=_next_actions(status, rewrite_report, revised_review.score, unsupported_after, weak_after, availability_report, submission_report, traceability_report),
+        next_actions=_next_actions(status, rewrite_report, revised_review.score, unsupported_after, weak_after, availability_report, submission_report, traceability_report, evidence_integrity=evidence_integrity),
         availability_status=availability_report.status if availability_report is not None else "",
         availability_blocking_issues=availability_report.blocking_issues if availability_report is not None else [],
         availability_manual_tasks=availability_report.manual_tasks if availability_report is not None else [],
@@ -163,11 +163,8 @@ def _blocking_issues(
     structured_audits_ready: bool = False,
 ) -> list[str]:
     issues: list[str] = []
-    if evidence_integrity is not None and not evidence_integrity.publishable_evidence:
-        if not evidence_integrity.real_experiment:
-            issues.append("实验结果为模拟/占位数据，不能支撑任何性能或比较结论；正式投稿前必须接入真实 benchmark 并重跑。")
-        if not evidence_integrity.real_llm:
-            issues.append("未检测到成功的真实 LLM 调用，论文文本可能来自离线兜底，不能作为正式产出。")
+    if evidence_integrity is not None and not evidence_integrity.real_experiment:
+        issues.append("实验结果为模拟/占位数据或未通过真实性校验，不能支撑任何性能或比较结论；正式投稿前必须接入真实 benchmark 并重跑。")
     if unsupported_after:
         issues.append(f"修订稿仍有 {unsupported_after} 条 unsupported claim。")
     if weak_after >= 3:
@@ -199,7 +196,7 @@ def _status(
     evidence_integrity: EvidenceIntegrity | None = None,
     structured_audits_ready: bool = False,
 ) -> str:
-    if evidence_integrity is not None and not evidence_integrity.publishable_evidence:
+    if evidence_integrity is not None and not evidence_integrity.real_experiment:
         return "requires_real_experiment"
     availability_blocked = availability_report is not None and availability_report.status == "blocked"
     submission_blocked = submission_report is not None and submission_report.status == "blocked"
@@ -251,7 +248,7 @@ def _structured_audits_ready(
 ) -> bool:
     if unsupported_after or rewrite_report.deferred_tasks:
         return False
-    if evidence_integrity is not None and not evidence_integrity.publishable_evidence:
+    if evidence_integrity is not None and not evidence_integrity.real_experiment:
         return False
     if not _traceability_fully_passed(traceability_report):
         return False
@@ -291,8 +288,9 @@ def _recommendation(
     claim_delta = (unsupported_before + weak_before) - (unsupported_after + weak_after)
     if status == "requires_real_experiment":
         return (
-            "本 run 未接入真实实验/真实 LLM，所有结果为模拟或离线兜底，不能作为科学结论或进入投稿核查。"
-            "请接入真实 benchmark 与真实 LLM 后重跑，再评估就绪度。"
+            "本 run 的实验证据未通过真实性校验（模拟、失败或来源不可核验），实验结果不能作为科学结论或进入投稿核查。"
+            "请接入真实 benchmark 重跑并产出可用结果后，再评估就绪度；"
+            "论文文本来源（模型/模板/人工）单独记录在 04-evidence-integrity，不与实验证据混判。"
         )
     if status == "requires_human_evidence":
         availability_note = _availability_note(availability_report)
@@ -327,6 +325,7 @@ def _next_actions(
     availability_report: CodeDataAvailabilityReport | None,
     submission_report: SubmissionCheckReport | None,
     traceability_report: ClaimTraceabilityReport | None,
+    evidence_integrity: EvidenceIntegrity | None = None,
 ) -> list[str]:
     if status == "requires_real_experiment":
         return [
@@ -370,6 +369,14 @@ def _next_actions(
         if submission_report is not None and (submission_report.blocking_issues or submission_report.manual_tasks):
             actions.append("按目标 venue 官方模板完成 LaTeX 和投稿格式人工检查。")
         return actions
+    if status != "requires_real_experiment" and evidence_integrity is not None and not evidence_integrity.real_llm:
+        return [
+            "人工核对所有 citation key、DOI、年份、作者和 venue。",
+            "核对数据/代码可用性、实验命令、随机种子和统计报告。",
+            "检查 LaTeX 输出、章节结构、图表引用和投稿格式。",
+            "论文文本未检测到成功的真实 LLM 调用（可能来自模板或人工撰写）；"
+            "如需模型生成或独立评审证据，接入真实端点后重跑对应阶段。",
+        ]
     return [
         "人工核对所有 citation key、DOI、年份、作者和 venue。",
         "核对数据/代码可用性、实验命令、随机种子和统计报告。",

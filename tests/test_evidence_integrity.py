@@ -41,6 +41,8 @@ def _write_results(run_dir: Path, statuses: list[str]) -> None:
             "stderr": "",
             "repeat_index": 0,
             "seed": "deadbeef",
+            "command": ["python3", "exp.py"],
+            "returncode": 0 if status in {"passed", "completed", "local"} else 1,
         }
         for index, status in enumerate(statuses)
     ]
@@ -48,10 +50,23 @@ def _write_results(run_dir: Path, statuses: list[str]) -> None:
 
 
 def _write_ledger(run_dir: Path, total_calls: int, successful_calls: int | None = None) -> None:
+    """写入带逐条 entries 的账本（llm_trace 真实结构）；缺省全部成功。"""
+    successful = total_calls if successful_calls is None else successful_calls
+    entries = []
+    for call_id in range(1, total_calls + 1):
+        status = "success" if call_id <= successful else "failed"
+        entries.append({"call_id": call_id, "stage": "research_planning", "purpose": "test", "status": status})
     payload = {
         "total_calls": total_calls,
-        "successful_calls": total_calls if successful_calls is None else successful_calls,
+        "successful_calls": successful,
+        "failed_calls": total_calls - successful,
+        "entries": entries,
     }
+    (run_dir / "run-llm-ledger.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+def _write_summary_only_ledger(run_dir: Path, total_calls: int, successful_calls: int) -> None:
+    payload = {"total_calls": total_calls, "successful_calls": successful_calls}
     (run_dir / "run-llm-ledger.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
@@ -78,13 +93,88 @@ class AssessEvidenceIntegrityTest(unittest.TestCase):
     def test_real_llm_and_real_experiment_is_publishable(self) -> None:
         with TemporaryDirectory() as tmp:
             run_dir = Path(tmp)
-            _write_results(run_dir, ["local", "local"])
+            _write_results(run_dir, ["passed", "passed"])
             _write_ledger(run_dir, 12)
             integrity = assess_evidence_integrity(run_dir)
             self.assertTrue(integrity.real_llm)
             self.assertTrue(integrity.real_experiment)
             self.assertTrue(integrity.publishable_evidence)
             self.assertEqual(integrity.status, "real_evidence")
+
+    def test_all_failed_llm_calls_are_not_real_evidence(self) -> None:
+        # A01：总调用 3、成功 0、失败 3 → 不能显示已有成功模型产物。
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            _write_results(run_dir, ["passed"])
+            _write_ledger(run_dir, 3, 0)
+            integrity = assess_evidence_integrity(run_dir)
+            self.assertFalse(integrity.real_llm)
+            self.assertEqual(integrity.llm_attempted_calls, 3)
+            self.assertEqual(integrity.llm_successful_calls, 0)
+            self.assertEqual(integrity.llm_evidence_status, "incomplete")
+            self.assertTrue(any("成功 0 次" in note for note in integrity.notes))
+            self.assertFalse(integrity.publishable_evidence)
+
+    def test_summary_only_ledger_is_incomplete(self) -> None:
+        # 仅有汇总、无逐条调用记录的账本 → incomplete，不能用总数冒充成功数。
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            _write_results(run_dir, ["passed"])
+            _write_summary_only_ledger(run_dir, 9, 9)
+            integrity = assess_evidence_integrity(run_dir)
+            self.assertFalse(integrity.real_llm)
+            self.assertEqual(integrity.llm_evidence_status, "incomplete")
+
+    def test_failed_only_results_are_attempts_not_verified_results(self) -> None:
+        # A02：只有 failed/timeout/cancelled 记录 → 无可用于主张的已验证结果。
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            _write_results(run_dir, ["failed", "timeout", "cancelled"])
+            integrity = assess_evidence_integrity(run_dir)
+            self.assertFalse(integrity.real_experiment)
+            self.assertEqual(integrity.experiment_evidence_status, "incomplete")
+            self.assertEqual(integrity.real_attempt_count, 3)
+            self.assertEqual(integrity.real_result_count, 0)
+            self.assertTrue(any("真实执行尝试" in note for note in integrity.notes))
+
+    def test_result_without_finite_metrics_is_not_verified(self) -> None:
+        # A03：完成状态但 NaN 指标 / 无指标 / 无来源绑定 → 不得判 verified。
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            rows = [
+                {"name": "nan_row", "status": "passed", "metrics": {"accuracy": float("nan")},
+                 "command": ["python3", "exp.py"], "returncode": 0},
+                {"name": "empty_row", "status": "passed", "metrics": {},
+                 "command": ["python3", "exp.py"], "returncode": 0},
+                {"name": "no_provenance", "status": "passed", "metrics": {"accuracy": 0.9}},
+            ]
+            (run_dir / "04-results.json").write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+            integrity = assess_evidence_integrity(run_dir)
+            self.assertNotEqual(integrity.experiment_evidence_status, "verified")
+            self.assertFalse(integrity.real_experiment)
+            self.assertEqual(len(integrity.unusable_result_reasons), 3)
+            self.assertTrue(any("非有限数值" in reason for reason in integrity.unusable_result_reasons))
+            self.assertTrue(any("无任何指标" in reason for reason in integrity.unusable_result_reasons))
+            self.assertTrue(any("来源绑定" in reason for reason in integrity.unusable_result_reasons))
+
+    def test_manual_report_with_real_experiment_is_not_simulated(self) -> None:
+        # A04：真实实验 + 无模型调用 → 实验证据 verified，不因无 LLM 判成模拟。
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            _write_results(run_dir, ["passed", "passed"])
+            integrity = assess_evidence_integrity(run_dir)
+            self.assertTrue(integrity.real_experiment)
+            self.assertEqual(integrity.experiment_evidence_status, "verified")
+            self.assertEqual(integrity.llm_evidence_status, "unknown")
+            self.assertFalse(integrity.real_llm)
+            banner = evidence_integrity_banner(integrity)
+            self.assertIn("真实 LLM", banner)
+            self.assertNotIn("实验结果缺少可用真实数据", banner)
+            readiness = build_final_readiness_report(
+                "机械臂路径规划", _paper_review(), _paper_review(), _rewrite_report(), evidence_integrity=integrity
+            )
+            self.assertNotEqual(readiness.status, "requires_real_experiment")
+            self.assertFalse(any("模拟/占位" in issue for issue in readiness.blocking_issues))
 
     def test_real_llm_but_simulated_experiment_is_partial(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -100,10 +190,11 @@ class AssessEvidenceIntegrityTest(unittest.TestCase):
     def test_zero_total_calls_ledger_counts_as_no_real_llm(self) -> None:
         with TemporaryDirectory() as tmp:
             run_dir = Path(tmp)
-            _write_results(run_dir, ["local"])
+            _write_results(run_dir, ["passed"])
             _write_ledger(run_dir, 0, 0)
             integrity = assess_evidence_integrity(run_dir)
             self.assertFalse(integrity.real_llm)
+            self.assertEqual(integrity.llm_evidence_status, "unknown")
             self.assertTrue(integrity.real_experiment)
             self.assertFalse(integrity.publishable_evidence)
 
