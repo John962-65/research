@@ -79,12 +79,20 @@ class GateAggregatorTest(unittest.TestCase):
                 return _finalize_gate_decision("test", out, AgentConfig(), None, **kwargs)[0]
             initial = finalize()
             override = dict(reviewer="reviewer", reason="Accepted limitation", approved=False,
-                            revision=0, verdict_sha256=initial["inputs"]["verdict_sha256"])
+                            revision=0, verdict_sha256=initial["inputs"]["verdict_sha256"],
+                            reason_code="documented_exception",
+                            approval_object="deterministic:claim_consistency",
+                            scope="仅接受 claim_consistency 的本次阻断，不影响其他审计")
             path = out / "10-gate-override.json"
             path.write_text(json.dumps(override))
             self.assertEqual(finalize()["status"], "blocked")
             path.write_text(json.dumps(override | {"approved": True}))
-            self.assertEqual(finalize()["status"], "publishable")
+            decided = finalize()
+            self.assertEqual(decided["status"], "publishable")
+            # 覆盖后保留原机器决定与原始阻断记录。
+            self.assertEqual(decided["override"]["original_status"], "blocked")
+            self.assertIn("deterministic:claim_consistency", decided["blocking_sources"])
+            self.assertTrue((out / "10-review-input-snapshot.json").exists())
             kwargs["claim_consistency"]["reason"] = "different evidence"
             self.assertEqual(finalize()["status"], "blocked")
 
@@ -149,34 +157,67 @@ class GateAggregatorTest(unittest.TestCase):
         self.assertEqual(partial.status, "blocked")
         self.assertTrue(any("override_rejected" in item for item in partial.warning_sources))
 
-        full = aggregate_final_decision(
-            **blocked_inputs,
-            human_override={
-                "reviewer": "amy",
-                "reason": "已知限制，人工接受",
-                "revision": 0,
-                "verdict_sha256": partial.inputs["verdict_sha256"],
-                "approved": True,
-            },
-        )
+        valid_override = {
+            "reviewer": "amy",
+            "reason": "已知限制，人工接受",
+            "reason_code": "documented_exception",
+            "approval_object": "deterministic:claim_consistency",
+            "scope": "仅本次 claim_consistency 阻断",
+            "revision": 0,
+            "verdict_sha256": partial.inputs["verdict_sha256"],
+            "approved": True,
+        }
+        full = aggregate_final_decision(**blocked_inputs, human_override=valid_override)
         self.assertEqual(full.status, "publishable")
         self.assertTrue(full.overridden)
         self.assertEqual(full.override["reviewer"], "amy")
+        self.assertEqual(full.override["original_status"], "blocked")
+        # 缺 reason_code 的旧格式覆盖不再生效。
+        legacy = {k: v for k, v in valid_override.items() if k != "reason_code"}
+        rejected = aggregate_final_decision(**blocked_inputs, human_override=legacy)
+        self.assertEqual(rejected.status, "blocked")
+        self.assertTrue(any("reason_code" in item for item in rejected.warning_sources))
+
+    def test_non_overridable_reasons_reject_override(self) -> None:
+        # decision-contract §3.2：不可覆盖原因码出现时覆盖一律不生效。
+        inputs = dict(deterministic_audits={"claim_consistency": {"status": "block"}}, independent_deliberation=None)
+        digest = aggregate_final_decision(**inputs).inputs["verdict_sha256"]
+        valid_override = {
+            "reviewer": "amy",
+            "reason": "试图覆盖数据损坏",
+            "reason_code": "scope_limitation",
+            "approval_object": "deterministic:claim_consistency",
+            "scope": "全部阻断",
+            "revision": 0,
+            "verdict_sha256": digest,
+            "approved": True,
+        }
+        decision = aggregate_final_decision(
+            **inputs, human_override=valid_override, non_overridable_reasons=["corrupted_input:04-results.json"]
+        )
+        self.assertEqual(decision.status, "blocked")
+        self.assertFalse(decision.overridden)
+        self.assertTrue(any("non_overridable:corrupted_input" in item for item in decision.warning_sources))
+        # 原因码本身落在不可覆盖词表 → 拒绝。
+        decision2 = aggregate_final_decision(**inputs, human_override=valid_override | {"reason_code": "invalid_approval"})
+        self.assertEqual(decision2.status, "blocked")
 
     def test_override_rejects_invalid_semantics_and_changed_evidence(self) -> None:
         inputs = dict(deterministic_audits={"audit": {"status": "block", "evidence": "original"}},
                       independent_deliberation=None, revision=3)
         digest = aggregate_final_decision(**inputs).inputs["verdict_sha256"]
         valid = dict(reviewer="reviewer", reason="Accepted limitation", revision=3,
-                     verdict_sha256=digest, approved=True)
+                     verdict_sha256=digest, approved=True,
+                     reason_code="scope_limitation", approval_object="deterministic:audit", scope="仅本次阻断")
         for change in ({"approved": False}, {"approved": "true"}, {"approved": 1},
                        {"revision": 2}, {"revision": "3"}, {"revision": True},
                        {"verdict_sha256": "a" * 64}, {"verdict_sha256": "哈希"},
-                       {"reviewer": " "}, {"reason": "\n"}):
+                       {"reviewer": " "}, {"reason": "\n"}, {"approval_object": "deterministic:other"}):
             with self.subTest(change=change):
                 decision = aggregate_final_decision(**inputs, human_override=valid | change)
                 self.assertEqual(decision.status, "blocked")
                 self.assertFalse(decision.overridden)
+        # A05：审计状态不变、证据正文变 → 摘要变化，旧批准失效。
         inputs["deterministic_audits"]["audit"]["evidence"] = "changed"
         self.assertEqual(aggregate_final_decision(**inputs, human_override=valid).status, "blocked")
 
@@ -271,6 +312,39 @@ class IndependentDeliberationTest(unittest.TestCase):
             report = run_independent_deliberation("独立审查测试", self.run_dir, config, traced)
         self.assertEqual(report["status"], "block")
         self.assertTrue(any(item["verdict"] == "invalid" for item in report["verdicts"]))
+
+    def test_stale_deliberation_is_rerun_on_resume(self) -> None:
+        # A06（前半）：恢复时旧 deliberation 的输入快照不一致 → 不复用，重新执行。
+        from research_agent.pipeline import _finalize_gate_decision
+
+        config = self._config()
+        (self.run_dir / "09-revised-paper.md").write_text("# 修订稿 v1", encoding="utf-8")
+        routed = AgentRoutedLLM(config, self.project_root, self.run_dir)
+        with mock.patch.object(routed, "_client_for", return_value=_VerdictLLM()):
+            traced = trace_llm(routed, self.run_dir, config.llm)
+            stale = run_independent_deliberation(
+                "独立审查测试", self.run_dir, config, traced, review_input_sha256="old-digest"
+            )
+        self.assertEqual(stale["review_input_sha256"], "old-digest")
+        # 稿件变化后恢复：快照 digest 与旧戳不一致，必须重跑 deliberation。
+        (self.run_dir / "09-revised-paper.md").write_text("# 修订稿 v2（已改动）", encoding="utf-8")
+        with mock.patch.object(routed, "_client_for", return_value=_VerdictLLM()):
+            traced2 = trace_llm(routed, self.run_dir, config.llm)
+            decision, outputs = _finalize_gate_decision(
+                "独立审查测试",
+                self.run_dir,
+                config,
+                traced2,
+                agent_deliberation={"status": "pass"},
+                claim_consistency={"status": "pass"},
+                citation_grounding=SimpleNamespace(status="pass"),
+                revised_review=SimpleNamespace(decision="accept"),
+                resume=True,
+            )
+        fresh = json.loads((self.run_dir / "10-independent-deliberation.json").read_text(encoding="utf-8"))
+        self.assertNotEqual(fresh["review_input_sha256"], "old-digest")
+        self.assertIn("10-independent-deliberation.json", outputs)
+        self.assertEqual(decision["status"], "publishable")
 
 
 class RouteEnumerationTest(unittest.TestCase):

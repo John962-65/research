@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, replace
+from dataclasses import asdict, is_dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -111,7 +111,8 @@ from .agent_verdict import INDEPENDENT_DELIBERATION_JSON, ROLE_EVIDENCE_VIEWS, r
 from .provenance import active_revision
 from .workflow_state import WorkflowEngine, NodeOutcome
 from .workflow_graph import WORKFLOW_NODES
-from .gate_aggregator import aggregate_final_decision, load_human_override, write_gate_decision_artifacts
+from .gate_aggregator import GATE_RULE_VERSION, aggregate_final_decision, load_human_override, write_gate_decision_artifacts
+from .evidence_snapshot import SnapshotError, load_review_input_snapshot, payload_sha256, verify_snapshot
 from .multi_agent_handoff_audit import MULTI_AGENT_HANDOFF_AUDIT_JSON, MULTI_AGENT_HANDOFF_AUDIT_MD, write_multi_agent_handoff_audit_artifacts
 from .multi_agent_paper_audit import MULTI_AGENT_PAPER_AUDIT_JSON, MULTI_AGENT_PAPER_AUDIT_MD, render_multi_agent_paper_audit_markdown, write_multi_agent_paper_audit_artifacts
 from .query_execution_audit import QUERY_EXECUTION_AUDIT_JSON, QUERY_EXECUTION_AUDIT_MD, write_query_execution_audit_artifacts
@@ -359,16 +360,100 @@ def _finalize_gate_decision(
     resume: bool,
 ) -> tuple[dict[str, Any], list[str]]:
     """GATE-02: aggregate deterministic audits, independent verdicts, and the
-    human override into the one final gate decision; returns (decision, outputs)."""
+    human override into the one final gate decision; returns (decision, outputs).
+
+    决策绑定评审输入快照（decision-contract §4）：稿件与结果文件哈希 +
+    确定性审计全量内容进入审批摘要；恢复时独立评审只有在快照一致时才复用；
+    提交前复核快照，材料在处理期间变化则丢弃本次决定并阻断（A05–A08）。
+    """
+    from dataclasses import asdict as _asdict, replace as _replace
+    from .evidence_snapshot import (
+        build_review_input_snapshot,
+        snapshot_digest,
+        verify_snapshot,
+        write_review_input_snapshot,
+    )
+
+    revision = active_revision(out_dir)
+
+    def _audit_payload(value: Any) -> dict[str, Any]:
+        if is_dataclass(value) and not isinstance(value, dict):
+            return _asdict(value)
+        if isinstance(value, dict):
+            return value
+        return {"status": str(getattr(value, "status", "") or ""), "repr": str(value)[:2000]}
+
+    def _review_payload(value: Any) -> dict[str, Any]:
+        """复审全量内容入快照；status 从 decision 派生（保持原门禁语义）。"""
+        if is_dataclass(value) and not isinstance(value, dict):
+            payload = _asdict(value)
+        elif isinstance(value, dict):
+            payload = dict(value)
+        else:
+            payload = {"decision": str(getattr(value, "decision", "") or "")}
+        decision = str(payload.get("decision") or "")
+        payload.setdefault(
+            "status",
+            "pass" if decision in {"accept", "accept_with_minor_revisions"} else "warn",
+        )
+        return payload
+
+    def _safe_payload(value: Any, name: str, non_overridable: list[str]) -> dict[str, Any]:
+        payload = _audit_payload(value)
+        try:
+            payload_sha256(payload)
+        except SnapshotError:
+            non_overridable.append("corrupted_input")
+            return {
+                "status": str(getattr(value, "status", "") or ""),
+                "snapshot_invalid": "canonicalization_failed",
+            }
+        return payload
+
+    non_overridable_reasons: list[str] = []
+    file_inputs = {"09-revised-paper.md": "manuscript"}
+    if (out_dir / "06-paper.md").exists():
+        file_inputs["06-paper.md"] = "manuscript_source"
+    if (out_dir / "04-results.json").exists():
+        file_inputs["04-results.json"] = "experiment_results"
+
+    def _build_snapshot() -> dict[str, Any]:
+        return build_review_input_snapshot(
+            out_dir,
+            revision=revision,
+            file_inputs=file_inputs,
+            inline_inputs={
+                "agent_deliberation": _safe_payload(agent_deliberation, "agent_deliberation", non_overridable_reasons),
+                "claim_consistency": _safe_payload(claim_consistency, "claim_consistency", non_overridable_reasons),
+                "citation_grounding": _safe_payload(citation_grounding, "citation_grounding", non_overridable_reasons),
+                "revised_paper_review": _safe_payload(_review_payload(revised_review), "revised_paper_review", non_overridable_reasons),
+            },
+            rule_versions={"gate_rule": GATE_RULE_VERSION},
+        )
+
+    snapshot = _build_snapshot()
+    non_overridable_reasons.extend(
+        f"corrupted_input:{item.get('name')}"
+        for item in snapshot.get("items", [])
+        if isinstance(item, dict) and item.get("invalid")
+    )
+    write_review_input_snapshot(out_dir, snapshot)
+    input_digest = snapshot_digest(snapshot)
+
     independent_report: dict[str, Any] | None = None
     independent_outputs: list[str] = []
     independent_path = out_dir / INDEPENDENT_DELIBERATION_JSON
     if config.multi_agent.enabled:
         if resume and independent_path.exists():
-            independent_report = _read_dict(independent_path)
-        else:
+            existing = _read_dict(independent_path)
+            # 恢复时仅在快照一致时复用旧独立评审；稿件/审计内容变化则重评（A06）。
+            if existing and existing.get("review_input_sha256") == input_digest:
+                independent_report = existing
+        if independent_report is None:
             try:
-                independent_report = run_independent_deliberation(topic, out_dir, config, llm)
+                independent_report = run_independent_deliberation(
+                    topic, out_dir, config, llm, review_input_sha256=input_digest
+                )
                 independent_outputs = [INDEPENDENT_DELIBERATION_JSON, "10-independent-deliberation.md"]
             except Exception as exc:
                 independent_report = {
@@ -377,23 +462,46 @@ def _finalize_gate_decision(
                     "verdicts": [],
                     "status": "block",
                     "error": str(exc)[:280],
+                    "review_input_sha256": input_digest,
                 }
-    gate_decision = aggregate_final_decision(
-        deterministic_audits={
-            "agent_deliberation": agent_deliberation if isinstance(agent_deliberation, dict) else {},
-            "claim_consistency": claim_consistency if isinstance(claim_consistency, dict) else {},
-            "citation_grounding": {"status": getattr(citation_grounding, "status", "")},
-            "revised_paper_review": {
-                "status": "pass" if getattr(revised_review, "decision", "") in {"accept", "accept_with_minor_revisions"} else "warn"
+
+    def _aggregate(snapshot_dict: dict[str, Any], allow_override: bool, extra_blocking: list[str]) -> Any:
+        decision = aggregate_final_decision(
+            deterministic_audits={
+                "agent_deliberation": agent_deliberation if isinstance(agent_deliberation, dict) else {},
+                "claim_consistency": claim_consistency if isinstance(claim_consistency, dict) else {},
+                "citation_grounding": _audit_payload(citation_grounding),
+                "revised_paper_review": _review_payload(revised_review),
             },
-        },
-        independent_deliberation=independent_report,
-        expected_roles=sorted(ROLE_EVIDENCE_VIEWS) if config.multi_agent.enabled else [],
-        revision=active_revision(out_dir),
-        human_override=load_human_override(out_dir),
-    )
+            independent_deliberation=independent_report,
+            expected_roles=sorted(ROLE_EVIDENCE_VIEWS) if config.multi_agent.enabled else [],
+            revision=revision,
+            human_override=load_human_override(out_dir) if allow_override else None,
+            review_input_snapshot=snapshot_dict,
+            non_overridable_reasons=non_overridable_reasons,
+        )
+        if extra_blocking:
+            decision = _replace(
+                decision,
+                status="blocked",
+                blocking_sources=[*decision.blocking_sources, *extra_blocking],
+                overridden=False,
+                override={},
+            )
+        return decision
+
+    gate_decision = _aggregate(snapshot, True, [])
+    # 提交前复核快照：处理期间材料变化 → 丢弃本次待提交决定（A08）。
+    changed_inputs = verify_snapshot(out_dir, snapshot)
+    if changed_inputs:
+        fresh_snapshot = _build_snapshot()
+        write_review_input_snapshot(out_dir, fresh_snapshot)
+        gate_decision = _aggregate(
+            fresh_snapshot,
+            False,
+            [f"snapshot:inputs_changed_during_processing:{name}" for name in changed_inputs[:4]],
+        )
     write_gate_decision_artifacts(out_dir, gate_decision)
-    from dataclasses import asdict as _asdict
 
     return _asdict(gate_decision), independent_outputs
 
@@ -4892,6 +5000,10 @@ def _paper_matches_benchmark_evidence(path: Path, benchmark_evidence: dict[str, 
 
 
 def _final_readiness_checkpoint_reusable(out_dir: Path, benchmark_evidence: dict[str, Any], execution_mode: str) -> bool:
+    # 评审输入快照（若存在）不一致 → 稿件/结果在终局后变化过，禁止复用（A06）。
+    snapshot = load_review_input_snapshot(out_dir)
+    if snapshot is not None and verify_snapshot(out_dir, snapshot):
+        return False
     if not _paper_matches_benchmark_evidence(out_dir / REVISED_PAPER_MD, benchmark_evidence, execution_mode):
         return False
     for name in [

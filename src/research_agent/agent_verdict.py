@@ -75,8 +75,13 @@ def run_independent_deliberation(
     config: Any,
     llm: Any,
     roles: list[str] | None = None,
+    review_input_sha256: str = "",
 ) -> dict[str, Any]:
-    """Run one independent LLM verdict per role; never raises on role failure."""
+    """Run one independent LLM verdict per role; never raises on role failure.
+
+    ``review_input_sha256`` 把本次评审绑定到评审输入快照（decision-contract
+    §4）；恢复时快照不一致的旧 deliberation 不得复用（A06）。
+    """
     from .agent_runtime import agent_for_stage
     from .multi_agent_assignment import AGENT_PROFILES
     from .provenance import active_revision
@@ -131,6 +136,7 @@ def run_independent_deliberation(
         "independent_agent_execution": True,
         "revision": revision,
         "attempt_id": attempt_id,
+        "review_input_sha256": str(review_input_sha256),
         "verdicts": verdicts,
         "status": _aggregate_status(verdicts),
         "created_at": _utc_now(),

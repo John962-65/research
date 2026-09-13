@@ -13,10 +13,10 @@
 | A02 | 只有 failed/cancelled/timed_out 结果 | 无可用于主张的已验证实验结果 | T01 | tests/test_evidence_integrity.py::test_failed_only_results_are_attempts_not_verified_results | tested |
 | A03 | 成功标签但无指标/NaN/Inf/来源缺失 | incomplete 或 invalid，给出原因 | T01 | tests/test_evidence_integrity.py::test_result_without_finite_metrics_is_not_verified | tested |
 | A04 | 人工报告 + 完整真实实验 | 来源分开显示，不因无模型调用而判模拟 | T01 | tests/test_evidence_integrity.py::test_manual_report_with_real_experiment_is_not_simulated | tested |
-| A05 | 审计状态不变，证据正文变 | 最终摘要变化，旧批准失效 | T02 | tests/test_gate_aggregator.py::test_status_only_binding_rejected_content_changes_invalidate | planned |
-| A06 | 稿件变化后恢复 | 相关评审重新执行（不按 revision 复用旧 deliberation） | T02 | tests/test_pipeline.py::test_resume_after_manuscript_change_reruns_deliberation | planned |
-| A07 | 无效或旧人工覆盖（缺字段/"true"/旧摘要） | 拒绝覆盖，保留原决定 | T02 | tests/test_gate_aggregator.py（既有）+ reason_code 用例 | planned |
-| A08 | 校验与提交之间材料变动 | 不提交基于旧输入的决定 | T02 | tests/test_evidence_snapshot.py::test_precommit_recheck_discards_stale_decision | planned |
+| A05 | 审计状态不变，证据正文变 | 最终摘要变化，旧批准失效 | T02 | tests/test_gate_aggregator.py::test_override_rejects_invalid_semantics_and_changed_evidence | tested |
+| A06 | 稿件变化后恢复 | 相关评审重新执行（不按 revision 复用旧 deliberation） | T02 | tests/test_gate_aggregator.py::test_stale_deliberation_is_rerun_on_resume + tests/test_evidence_snapshot.py::test_pipeline_reuse_gate_honors_snapshot | tested |
+| A07 | 无效或旧人工覆盖（缺字段/"true"/旧摘要） | 拒绝覆盖，保留原决定 | T02 | tests/test_gate_aggregator.py::test_human_override_requires_full_provenance、::test_override_rejects_invalid_semantics_and_changed_evidence、::test_non_overridable_reasons_reject_override | tested |
+| A08 | 校验与提交之间材料变动 | 不提交基于旧输入的决定 | T02 | tests/test_evidence_snapshot.py::test_build_digest_and_verify_roundtrip + tests/test_gate_aggregator.py::test_pipeline_rechecks_override_file_against_current_evidence | tested |
 | A09 | 伪造/失败 call_id 或无引用 pass | 不计作有效独立评审票 | T03 | tests/test_gate_aggregator.py::test_verdict_without_ledger_backing_is_invalid | planned |
 | A10 | 明确启用模板降级 | 保留失败和来源，必需评审仍待完成 | T04 | tests/test_ai_integration.py + tests/test_writing.py 来源标签用例 | planned |
 | A11 | 契约完整、idea 未重复执行细节 | 不因文案关键词缺失误拦 | T05 | tests/test_idea_experiment_contract.py::test_complete_contract_passes_without_keyword_echo | planned |

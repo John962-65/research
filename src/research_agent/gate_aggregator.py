@@ -23,7 +23,17 @@ GATE_DECISION_JSON = "10-gate-decision.json"
 GATE_DECISION_MD = "10-gate-decision.md"
 
 GATE_STATUSES = frozenset({"publishable", "repair_required", "blocked"})
+GATE_RULE_VERSION = "2"
 OVERRIDE_REQUIRED_FIELDS = ("reviewer", "reason", "revision", "verdict_sha256", "approved")
+
+# decision-contract §3.1：可覆盖原因码（人工可以接受的已知风险）。
+OVERRIDE_REASON_CODES = frozenset(
+    {"scope_limitation", "advisory_only", "documented_exception", "known_deferral", "resource_constraint"}
+)
+# decision-contract §3.2：不可覆盖原因码（出现即拒绝覆盖，补材料后重新检查）。
+NON_OVERRIDABLE_REASON_CODES = frozenset(
+    {"corrupted_input", "unverifiable_source", "invalid_approval", "missing_required_evidence", "contract_violation"}
+)
 
 
 @dataclass(frozen=True)
@@ -45,12 +55,18 @@ def aggregate_final_decision(
     expected_roles: list[str] | None = None,
     revision: int = 0,
     human_override: dict[str, Any] | None = None,
+    review_input_snapshot: dict[str, Any] | None = None,
+    non_overridable_reasons: list[str] | None = None,
 ) -> GateDecision:
     """Aggregate every gate input into the one final decision.
 
     ``deterministic_audits`` maps an audit name to its report dict (must have
-    a ``status``). ``independent_deliberation`` is the report produced by
-    ``run_independent_deliberation`` (verdict layer), if the feature is on.
+    a ``status``). Reports are bound by FULL content: any change to an audit
+    body changes ``verdict_sha256`` and invalidates prior approvals (A05).
+    ``review_input_snapshot`` is the decision-contract §4 review-input
+    snapshot (files + inline inputs, no review outputs); its digest joins the
+    approval binding. ``non_overridable_reasons`` marks blocking situations
+    that a human override may not clear (contract §3.2).
     """
     blocking_sources: list[str] = []
     warning_sources: list[str] = []
@@ -84,49 +100,54 @@ def aggregate_final_decision(
     if missing_roles:
         blocking_sources.extend(f"missing_verdict:{role_id}" for role_id in missing_roles)
 
+    snapshot_digest = ""
+    if isinstance(review_input_snapshot, dict) and review_input_snapshot.get("items"):
+        snapshot_digest = str(review_input_snapshot.get("digest") or "")
+        blocking_sources.extend(
+            f"snapshot:invalid_input:{item.get('name')}"
+            for item in review_input_snapshot.get("items", [])
+            if isinstance(item, dict) and item.get("invalid")
+        )
+
     status = "blocked" if blocking_sources else ("repair_required" if warning_sources else "publishable")
-    # Bind approval to the actual evidence, not just the names of its sources.
+    # Bind approval to the actual evidence content, not just the names of its
+    # sources: full audit bodies + the review-input snapshot digest.
     # Deliberately exclude the output timestamp and the override itself.
     verdict_sha256 = hashlib.sha256(json.dumps({
-        "schema_version": 1,
+        "rule_version": GATE_RULE_VERSION,
         "revision": revision,
         "deterministic_audits": deterministic_audits,
         "independent_deliberation": independent_deliberation,
         "expected_roles": sorted(set(expected_roles or [])),
+        "review_input_digest": snapshot_digest,
     }, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")).hexdigest()
 
     override_applied = False
     override_payload: dict[str, Any] = {}
     if human_override is not None and status == "blocked":
-        override = dict(human_override)
-        missing = [
-            name
-            for name in OVERRIDE_REQUIRED_FIELDS
-            if override.get(name) is None or override.get(name) == ""
-        ]
-        errors = [f"missing fields {','.join(missing)}"] if missing else []
-        if override.get("approved") is not True:
-            errors.append("approved must be true")
-        if type(override.get("revision")) is not int or override["revision"] != revision:
-            errors.append("revision does not match current decision")
-        for name, limit in (("reviewer", 120), ("reason", 500)):
-            value = override.get(name)
-            if not isinstance(value, str) or not value.strip() or len(value) > limit:
-                errors.append(f"{name} must be nonblank text of at most {limit} characters")
-        digest = override.get("verdict_sha256")
-        if not isinstance(digest, str) or not digest.isascii() or not hmac.compare_digest(digest, verdict_sha256):
-            errors.append("verdict_sha256 does not match current evidence")
+        errors = _validate_override(
+            human_override,
+            revision=revision,
+            verdict_sha256=verdict_sha256,
+            blocking_sources=blocking_sources,
+            non_overridable_reasons=non_overridable_reasons or [],
+        )
         if errors:
             warning_sources.extend(f"override_rejected:{error}" for error in errors)
         else:
+            override = dict(human_override)
             override_applied = True
             override_payload = {
                 "reviewer": str(override.get("reviewer"))[:120],
                 "reason": str(override.get("reason"))[:500],
+                "reason_code": str(override.get("reason_code")),
+                "approval_object": str(override.get("approval_object")),
+                "scope": str(override.get("scope"))[:300],
                 "revision": override.get("revision"),
                 "verdict_sha256": str(override.get("verdict_sha256"))[:64],
                 "approved": bool(override.get("approved")),
                 "original_status": status,
+                "original_blocking_sources": list(blocking_sources),
             }
             status = "publishable"
 
@@ -138,15 +159,61 @@ def aggregate_final_decision(
         overridden=override_applied,
         override=override_payload,
         inputs={
+            "rule_version": GATE_RULE_VERSION,
             "revision": revision,
             "deterministic_audits": sorted(deterministic_audits),
             "independent_deliberation": independent_deliberation is not None,
             "verdict_count": len(verdicts),
             "verdict_sha256": verdict_sha256,
+            "review_input_digest": snapshot_digest,
+            "non_overridable_reasons": sorted(set(non_overridable_reasons or [])),
         },
         created_at=_utc_now(),
     )
     return decision
+
+
+def _validate_override(
+    override: dict[str, Any],
+    *,
+    revision: int,
+    verdict_sha256: str,
+    blocking_sources: list[str],
+    non_overridable_reasons: list[str],
+) -> list[str]:
+    """decision-contract §3.3 的覆盖校验；返回错误列表（空 = 通过）。"""
+    errors: list[str] = []
+    missing = [
+        name
+        for name in (*OVERRIDE_REQUIRED_FIELDS, "reason_code", "approval_object", "scope")
+        if override.get(name) is None or override.get(name) == ""
+    ]
+    if missing:
+        errors.append(f"missing fields {','.join(missing)}")
+        return errors
+    if override.get("approved") is not True:
+        errors.append("approved must be true")
+    if type(override.get("revision")) is not int or override["revision"] != revision:
+        errors.append("revision does not match current decision")
+    for name, limit in (("reviewer", 120), ("reason", 500), ("approval_object", 200), ("scope", 300)):
+        value = override.get(name)
+        if not isinstance(value, str) or not value.strip() or len(value) > limit:
+            errors.append(f"{name} must be nonblank text of at most {limit} characters")
+    reason_code = override.get("reason_code")
+    if reason_code not in OVERRIDE_REASON_CODES:
+        errors.append(f"reason_code must be one of {sorted(OVERRIDE_REASON_CODES)}")
+    elif str(reason_code) in NON_OVERRIDABLE_REASON_CODES:
+        errors.append(f"reason_code {reason_code} is not overridable")
+    digest = override.get("verdict_sha256")
+    if not isinstance(digest, str) or not digest.isascii() or not hmac.compare_digest(digest, verdict_sha256):
+        errors.append("verdict_sha256 does not match current evidence")
+    approval_object = override.get("approval_object")
+    if isinstance(approval_object, str) and approval_object.strip() and blocking_sources:
+        if approval_object.strip() not in blocking_sources:
+            errors.append("approval_object must match one of the current blocking sources")
+    for reason in non_overridable_reasons:
+        errors.append(f"non_overridable:{reason}")
+    return errors
 
 
 def write_gate_decision_artifacts(run_dir: Path, decision: GateDecision) -> tuple[Path, Path]:
@@ -159,11 +226,14 @@ def write_gate_decision_artifacts(run_dir: Path, decision: GateDecision) -> tupl
 
 
 def render_gate_decision_markdown(decision: dict[str, Any]) -> str:
+    override = decision.get("override") or {}
     lines = [
         "# 最终 Gate 决策",
         "",
         f"- 状态：{decision.get('status')}",
-        f"- 人工覆盖：{'是（' + str((decision.get('override') or {}).get('reviewer')) + '）' if decision.get('overridden') else '否'}",
+        f"- 人工覆盖：{'是（' + str(override.get('reviewer')) + '，原因码 ' + str(override.get('reason_code')) + '）' if decision.get('overridden') else '否'}",
+        f"- 规则版本：{(decision.get('inputs') or {}).get('rule_version', '-')}",
+        f"- 评审输入快照：{(decision.get('inputs') or {}).get('review_input_digest') or '未绑定'}",
         f"- 生成时间：{decision.get('created_at')}",
         "",
         "## 阻断来源",
@@ -177,11 +247,22 @@ def render_gate_decision_markdown(decision: dict[str, Any]) -> str:
     if missing:
         lines.extend(["", "## 缺失的独立 Verdict 角色"])
         lines.extend(f"- {role}" for role in missing)
+    if decision.get("overridden"):
+        lines.extend([
+            "",
+            "## 覆盖记录",
+            f"- 审批对象：{override.get('approval_object')}",
+            f"- 范围：{override.get('scope')}",
+            f"- 理由：{override.get('reason')}",
+            f"- 覆盖前机器状态：{override.get('original_status')}（原始阻断来源保留在上方，不因批准消除）",
+        ])
     lines.extend([
         "",
         "## 说明",
-        "- blocked 状态下不允许生成 publishable handoff；人工 override 必须记录 reviewer/reason/revision/verdict 哈希。",
+        "- blocked 状态下不允许生成 publishable handoff；人工 override 必须记录 reviewer/reason/reason_code/approval_object/scope/revision/verdict 哈希。",
+        "- 覆盖只表示人工接受允许范围内的已知风险；原始阻断记录保留，缺失数据不会变成已验证证据。",
         "- 确定性审计与独立 verdict 是两层证据，彼此独立保存，不能互相冒充。",
+        "- publishable 仅表示通过本系统约定的发布前检查，不代表论文达到期刊发表标准。",
     ])
     return "\n".join(lines)
 
