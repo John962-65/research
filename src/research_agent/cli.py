@@ -246,6 +246,30 @@ def _print_gold_launch_dry_run_guidance(args, out_dir: Path) -> None:
     print(_research_agent_cli_command(["perfect-readiness", "--project-dir", ".", "--runs-dir", "runs", "--no-write"]))
 
 
+def _run_evaluate(run_dir):
+    from .existing_results import evaluate_imported_results
+
+    return evaluate_imported_results(run_dir)
+
+
+def _print_evaluate_summary(report) -> None:
+    print(f"评估报告：{report['run_dir'] / '00-import-report.json'} 与 04-experiment-decision")
+    for step in report.get("steps", []):
+        print(f"- {step}")
+    states = report.get("decision_states") or {}
+    print(f"- 决策：{report.get('decision')}")
+    print(
+        "- 四类状态："
+        f"execution={states.get('execution_status')} evidence={states.get('evidence_status')} "
+        f"outcome={states.get('research_outcome')} next={states.get('next_action')}"
+    )
+    print(f"- 证据（独立维度）：LLM={report.get('evidence', {}).get('llm')} 实验={report.get('evidence', {}).get('experiment')}")
+    for blocker in report.get("blockers", [])[:5]:
+        print(f"- 阻断：{blocker}")
+    for action in report.get("next_actions", [])[:5]:
+        print(f"- 下一步：{action}")
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="research-agent")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -260,6 +284,12 @@ def main(argv: list[str] | None = None) -> None:
     import_existing_parser.add_argument("--preregistration", type=Path, default=None, help="已有 03-preregistration JSON（可选）")
     import_existing_parser.add_argument("--replace", action="store_true", help="覆盖 run 目录中已有的 04-results.json")
     import_existing_parser.add_argument("--notes", default="", help="导入备注（来源、授权等）")
+    import_existing_parser.add_argument("--evaluate", action="store_true", help="导入后立即生成统计比较与实验后决策（完整评审路径）")
+    evaluate_imported_parser = subparsers.add_parser(
+        "evaluate-imported",
+        help="对已导入的已有结果生成统计比较、结果验证与实验后决策（不重新执行、不调用模型）",
+    )
+    evaluate_imported_parser.add_argument("--run-dir", type=Path, required=True, help="已导入结果的 run 目录")
 
     run_parser = subparsers.add_parser("run", help="Run the full research pipeline")
     run_parser.add_argument("--topic", required=True, help="Research topic or question")
@@ -774,6 +804,12 @@ def main(argv: list[str] | None = None) -> None:
             print(f"- LLM 证据：{evidence.get('llm_evidence_status')}")
             print(f"- 实验证据：{evidence.get('experiment_evidence_status')}")
         print(f"- 下一步：{evidence.get('next_step') or '见导入报告'}")
+        if args.evaluate:
+            _print_evaluate_summary(import_existing_results.__module__ and _run_evaluate(args.run_dir))
+        return
+
+    if args.command == "evaluate-imported":
+        _print_evaluate_summary(_run_evaluate(args.run_dir))
         return
 
     if args.command == "run":

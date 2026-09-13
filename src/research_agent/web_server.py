@@ -806,8 +806,15 @@ class RunStore:
             replace=payload.get("replace") is True,
             notes=str(payload.get("notes") or ""),
         )
-        # contract_json/preregistration_json 若传字符串需先转对象
-        return {"run": self.get(run_id), "import_report": report}
+        # 复审第 7 项：导入后自动进入分析与决策（完整用户路径），失败不阻断导入本身。
+        evaluate_summary = None
+        try:
+            from .existing_results import evaluate_imported_results
+
+            evaluate_summary = evaluate_imported_results(out_dir)
+        except Exception as exc:  # noqa: BLE001 - 评估失败原因如实返回给页面
+            evaluate_summary = {"error": str(exc)[:280]}
+        return {"run": self.get(run_id), "import_report": report, "evaluate": evaluate_summary}
 
     def approve(self, run_id: str, reviewer: str = "web") -> dict[str, Any] | None:
         return self.approve_with_config(run_id, reviewer=reviewer, payload={})

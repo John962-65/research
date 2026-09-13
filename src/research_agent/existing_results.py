@@ -194,6 +194,238 @@ def _missing_fields(rows: list[dict[str, Any]]) -> list[str]:
     return missing
 
 
+def evaluate_imported_results(run_dir: Path) -> dict[str, Any]:
+    """复审第 7 项：导入后的完整用户路径——
+
+    导入已有结果 → 补齐/核对比较条件 → 生成统计、结果验证、实验后决策
+    （读取契约主指标）与假设结论 → 输出定位到的问题与下一步动作。
+    不调用模型、不重新生成 idea：分析完全基于导入与已有材料。
+    """
+    from .artifacts import write_json as _write_json, write_text as _write_text
+    from .config import ExecutionConfig
+    from .evidence_integrity import write_evidence_integrity_artifacts
+    from .experiment_decision import write_experiment_decision_artifacts
+    from .hypothesis_outcome import write_hypothesis_outcome_artifacts
+    from .models import ExperimentCommand, ExperimentPlan, ExperimentResult, ResearchIdea, ResearchPlan
+    from .result_validation import write_result_validation_artifacts
+    from .statistics import build_statistics_report
+
+    run_dir = Path(run_dir)
+    report: dict[str, Any] = {"schema_version": 1, "run_dir": str(run_dir), "steps": [], "blockers": [], "next_actions": []}
+    rows_payload = _load_json_file(run_dir / "04-results.json")
+    rows = rows_payload if isinstance(rows_payload, list) else []
+    rows = [row for row in rows if isinstance(row, dict) and str(row.get("name") or "").strip()]
+    if not rows:
+        report["blockers"].append("04-results.json 缺失或没有可用结果行：请先运行 import-existing 导入结果。")
+        report["next_actions"].append("用 import-existing 导入已有结果后重试 evaluate-imported。")
+        write_json(run_dir / IMPORT_REPORT_JSON, {**(_load_json_file(run_dir / IMPORT_REPORT_JSON) or {}), "evaluate": report})
+        return report
+    report["steps"].append(f"读取导入结果 {len(rows)} 行")
+
+    plan = _imported_plan(rows, run_dir)
+    report["steps"].append(
+        f"比较条件：candidate={sum(1 for c in plan.commands if c.comparison_group == 'candidate')}"
+        f" baseline={sum(1 for c in plan.commands if c.comparison_group == 'baseline')}"
+        f" ablation={sum(1 for c in plan.commands if c.comparison_group == 'ablation')}"
+    )
+    # 池化分组以计划为准（计划已把 candidate/baseline 归入同一数据集/任务组），
+    # 导入行自带的 comparison_group 仅作参考。
+    plan_group = {command.name: command.comparison_group for command in plan.commands}
+    results = [
+        ExperimentResult(
+            name=str(row.get("name")),
+            status=str(row.get("status") or "unknown"),
+            metrics=row.get("metrics") or {},
+            artifacts=row.get("artifacts") or [],
+            stdout=str(row.get("stdout") or ""),
+            stderr=str(row.get("stderr") or ""),
+            repeat_index=_safe_int(row.get("repeat_index")),
+            seed=str(row.get("seed") or ""),
+            command=row.get("command") or [],
+            returncode=row.get("returncode"),
+            duration_seconds=row.get("duration_seconds"),
+            comparison_group=plan_group.get(str(row.get("name")), "default"),
+            adapter_id=str(row.get("adapter_id") or ""),
+            artifact_records=row.get("artifact_records") or [],
+            validation_issues=row.get("validation_issues") or [],
+        )
+        for row in rows
+    ]
+    statistics = build_statistics_report(plan, results)
+    _write_json(run_dir / "04-statistics.json", statistics)
+    report["steps"].append(f"统计比较 {len(statistics.comparisons)} 项")
+
+    prereg = _load_json_file(run_dir / "03-preregistration.json") or {}
+    contract_report = _load_json_file(run_dir / "03-idea-experiment-contract.json") or {}
+    contract = contract_report.get("contract") if isinstance(contract_report.get("contract"), dict) else None
+    binding = None
+    runbook = _load_json_file(run_dir / "04-experiment-runbook.json")
+    if isinstance(runbook, dict) and isinstance(runbook.get("contract_binding"), dict):
+        binding = runbook["contract_binding"]
+    result_validation = write_result_validation_artifacts(
+        plan,
+        results,
+        statistics,
+        run_dir,
+        expected_repeats=max(1, max((_safe_int(row.get("repeat_index")) or 0) for row in rows) + 1),
+        preregistration=prereg or None,
+        execution_mode="imported",
+    )
+    failure_analysis = _failure_summary(statistics, result_validation)
+    integrity = write_evidence_integrity_artifacts(str(prereg.get("topic") or plan.idea_title), run_dir)
+    decision = write_experiment_decision_artifacts(
+        plan,
+        statistics,
+        result_validation,
+        failure_analysis,
+        run_dir,
+        execution_mode="imported",
+        contract=contract,
+        experiment_evidence_status=integrity.experiment_evidence_status,
+    )
+    idea = _imported_idea(plan, prereg, contract)
+    write_hypothesis_outcome_artifacts(
+        idea, plan, statistics, result_validation, failure_analysis, decision, run_dir, execution_mode="imported",
+    )
+    states = decision.get("decision_states") if isinstance(decision.get("decision_states"), dict) else {}
+    report["decision"] = decision.get("decision")
+    report["decision_states"] = states
+    report["blockers"] = [
+        str(item)
+        for item in result_validation.get("blocking_issues", [])
+        if str(item).strip()
+    ]
+    if not statistics.comparisons:
+        report["blockers"].append("没有 candidate/baseline 可比较项：需要补齐另一侧的执行结果（比较条件不完整）。")
+    report["next_actions"] = [str(item) for item in decision.get("next_actions", [])]
+    report["evidence"] = {
+        "llm": integrity.llm_evidence_status,
+        "experiment": integrity.experiment_evidence_status,
+    }
+    merged = _load_json_file(run_dir / IMPORT_REPORT_JSON) or {}
+    merged["evaluate"] = report
+    write_json(run_dir / IMPORT_REPORT_JSON, merged)
+    return report
+
+
+_RESULT_FIELDS = (
+    "name", "status", "metrics", "artifacts", "stdout", "stderr", "repeat_index",
+    "seed", "command", "returncode", "duration_seconds", "comparison_group",
+    "adapter_id", "artifact_records", "validation_issues",
+)
+
+
+def _imported_plan(rows: list[dict[str, Any]], run_dir: Path) -> "ExperimentPlan":
+    """优先使用已导入/已有的 03-experiment-plan；否则从结果行构造最小计划。"""
+    from .models import ExperimentCommand, ExperimentPlan
+
+    stored = _load_json_file(run_dir / "03-experiment-plan.json")
+    if isinstance(stored, dict) and stored.get("commands"):
+        try:
+            from .models import ExperimentPlan as _Plan
+
+            return _Plan(
+                idea_title=str(stored.get("idea_title") or ""),
+                objective=str(stored.get("objective") or ""),
+                variables=[str(v) for v in (stored.get("variables") or [])],
+                metrics=[str(m) for m in (stored.get("metrics") or [])],
+                protocol=[str(p) for p in (stored.get("protocol") or [])],
+                commands=[ExperimentCommand(**c) for c in (stored.get("commands") or []) if isinstance(c, dict)],
+                baseline=str(stored.get("baseline") or ""),
+                evidence_keys=[str(k) for k in (stored.get("evidence_keys") or [])],
+            )
+        except TypeError:
+            pass
+    metrics: list[str] = []
+    names: list[str] = []
+    commands: list[ExperimentCommand] = []
+    baseline = ""
+    # comparison_group 是数据集/任务池化标识：candidate 与 baseline 必须同组
+    # 才可配对；角色区分由 role 承担。
+    row_groups = {str(row.get("comparison_group") or "") for row in rows if str(row.get("comparison_group") or "")}
+    common_group = row_groups.pop() if len(row_groups) == 1 else "default"
+    for row in rows:
+        name = str(row.get("name"))
+        if name not in names:
+            names.append(name)
+            role = _infer_group(name) or name
+            if role == "baseline" and not baseline:
+                baseline = name
+            command = row.get("command")
+            commands.append(
+                ExperimentCommand(
+                    name=name,
+                    command=[str(part) for part in command] if isinstance(command, list) else [name],
+                    role=role,
+                    comparison_group=common_group,
+                )
+            )
+        for key in (row.get("metrics") or {}):
+            if str(key) not in metrics:
+                metrics.append(str(key))
+    title = "导入结果的比较分析"
+    return ExperimentPlan(
+        idea_title=title,
+        objective="基于导入的已有实验结果重建统计比较与决策（不重新执行实验）。",
+        variables=["method_role"],
+        metrics=metrics,
+        protocol=["导入结果核对", "统计比较", "契约判据映射"],
+        commands=commands,
+        baseline=baseline,
+        evidence_keys=[],
+    )
+
+
+def _imported_idea(plan: "ExperimentPlan", prereg: dict[str, Any], contract: dict[str, Any] | None) -> "ResearchIdea":
+    from .models import ResearchIdea
+
+    hypothesis = str((prereg or {}).get("primary_hypothesis") or "")
+    if not hypothesis and isinstance((contract or {}).get("hypothesis"), dict):
+        hypothesis = str(contract["hypothesis"].get("question") or "")
+    return ResearchIdea(
+        title=plan.idea_title,
+        hypothesis=hypothesis or "由导入材料与契约判据评估。",
+        mechanism="导入路径：不做机制声明。",
+        expected_contribution="对已有结果的可复查评审。",
+        novelty=2,
+        feasibility=5,
+        risk=1,
+        evaluation=plan.metrics,
+        evidence_keys=[],
+        baseline=plan.baseline,
+    )
+
+
+def _failure_summary(statistics, result_validation: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": "pass" if result_validation.get("status") != "block" else "block",
+        "summary": {"failed_runs": sum(1 for row in result_validation.get("items", []) if False), "simulated_runs": 0},
+        "failed_runs": [],
+        "negative_metrics": [
+            {"metric": item.metric, "delta": item.delta, "direction": item.direction}
+            for item in statistics.comparisons
+            if item.direction == "baseline_better_or_equal"
+        ],
+        "uncertain_metrics": [
+            {"metric": item.metric, "delta": item.delta, "direction": item.direction}
+            for item in statistics.comparisons
+            if item.ci_low <= 0 <= item.ci_high
+        ],
+        "claim_boundaries": [],
+    }
+
+
+def _infer_group(name: str) -> str:
+    lowered = str(name or "").lower()
+    if any(token in lowered for token in ("candidate", "artifact", "proposed")):
+        return "candidate"
+    if any(token in lowered for token in ("baseline", "control")):
+        return "baseline"
+    if any(token in lowered for token in ("ablation", "without", "ablated")):
+        return "ablation"
+    return ""
+
+
 def _summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
     counts: dict[str, int] = {}
     for row in rows:
