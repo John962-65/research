@@ -1,9 +1,9 @@
 {
  "schema_version": 1,
- "generated_at": "2026-09-13T14:44:50.224428+00:00",
+ "generated_at": "2026-09-13T14:51:10.240653+00:00",
  "command": "bash scripts/run_tests.sh",
- "summary_line": "1435 passed, 1 skipped, 120 subtests passed in 291.32s (0:04:51)",
- "passed": 1435,
+ "summary_line": "1442 passed, 1 skipped, 120 subtests passed in 282.81s (0:04:42)",
+ "passed": 1442,
  "failed": 0,
  "skipped": 1,
  "subtests": 120,
