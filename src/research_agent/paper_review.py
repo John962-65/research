@@ -4,8 +4,17 @@ from typing import Any
 import json
 import re
 
+from .config import PaperConfig
 from .llm import LLM
 from .llm_trace import complete_with_purpose_detail, record_validation_result
+from .model_failure import (
+    INVALID_RESPONSE,
+    ModelFailure,
+    ModelSourceRecorder,
+    call_with_bounded_retry,
+    classify_model_failure,
+    fallback_permitted,
+)
 from .models import (
     Analysis,
     ExperimentPlan,
@@ -27,11 +36,20 @@ def review_paper_draft(
     paper_md: str,
     context: LiteratureContext | None = None,
     llm: LLM | None = None,
+    paper_config: PaperConfig | None = None,
+    model_source_recorder: ModelSourceRecorder | None = None,
 ) -> PaperReview:
     if llm is not None:
-        ai_review = _try_ai_review(topic, review, ideas, plan, analysis, paper_md, context, llm)
+        ai_review = _try_ai_review(topic, review, ideas, plan, analysis, paper_md, context, llm, paper_config, model_source_recorder)
         if ai_review is not None:
             return ai_review
+    if model_source_recorder is not None:
+        model_source_recorder({
+            "stage": "paper_review",
+            "source": "template",
+            "call_id": 0,
+            "independent_review_completed": False,
+        })
     return _fallback_review(topic, review, ideas, plan, analysis, paper_md, context)
 
 
@@ -75,28 +93,62 @@ def _try_ai_review(
     paper_md: str,
     context: LiteratureContext | None,
     llm: LLM,
+    paper_config: PaperConfig | None = None,
+    model_source_recorder: ModelSourceRecorder | None = None,
 ) -> PaperReview | None:
     try:
-        raw, call_id = complete_with_purpose_detail(
-            llm,
-            "Scientific peer review. You are a rigorous reviewer. Return only valid JSON in Chinese.",
-            _review_prompt(topic, review, ideas, plan, analysis, paper_md, context),
-            stage="paper_review_loop",
-            purpose="scientific peer review",
-            requires_validation=True,
+        raw, call_id = call_with_bounded_retry(
+            lambda: complete_with_purpose_detail(
+                llm,
+                "Scientific peer review. You are a rigorous reviewer. Return only valid JSON in Chinese.",
+                _review_prompt(topic, review, ideas, plan, analysis, paper_md, context),
+                stage="paper_review_loop",
+                purpose="scientific peer review",
+                requires_validation=True,
+            )
         )
     except Exception as exc:
+        # T04：评审失败默认停机；显式降级时规则草稿不得冒充已完成的独立评审。
+        failure = classify_model_failure(exc)
         record_validation_result(llm, stage="paper_review_loop", valid=False, error=f"AI review generation error: {exc}")
-        return None
+        if model_source_recorder is not None:
+            model_source_recorder({
+                "stage": "paper_review",
+                "source": "template" if fallback_permitted(paper_config, failure) else "paused",
+                "call_id": 0,
+                "failure": failure.to_dict(),
+                "independent_review_completed": False,
+            })
+        if fallback_permitted(paper_config, failure):
+            return None
+        raise
     data = _parse_json(raw)
     if not isinstance(data, dict):
         record_validation_result(llm, stage="paper_review_loop", valid=False, error="response is not a JSON object", call_id=call_id)
+        if model_source_recorder is not None:
+            model_source_recorder({
+                "stage": "paper_review",
+                "source": "template",
+                "call_id": call_id,
+                "failure": ModelFailure(INVALID_RESPONSE, "response is not a JSON object", retryable=False).to_dict(),
+                "independent_review_completed": False,
+            })
         return None
     summary = str(data.get("summary") or "").strip()
     if not summary:
         record_validation_result(llm, stage="paper_review_loop", valid=False, error="review schema is missing summary", call_id=call_id)
+        if model_source_recorder is not None:
+            model_source_recorder({
+                "stage": "paper_review",
+                "source": "template",
+                "call_id": call_id,
+                "failure": ModelFailure(INVALID_RESPONSE, "review schema is missing summary", retryable=False).to_dict(),
+                "independent_review_completed": False,
+            })
         return None
     record_validation_result(llm, stage="paper_review_loop", valid=True, call_id=call_id)
+    if model_source_recorder is not None:
+        model_source_recorder({"stage": "paper_review", "source": "model", "call_id": call_id, "independent_review_completed": True})
     claim_audit = _parse_claim_audit(data.get("claim_audit"))
     if claim_audit:
         claim_audit = _paper_only_claim_audit(claim_audit, paper_md)

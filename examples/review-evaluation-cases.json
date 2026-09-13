@@ -234,6 +234,9 @@
         "human_override": {
           "reviewer": "demo-reviewer",
           "reason": "Accepted limitation in this synthetic scenario only",
+          "reason_code": "scope_limitation",
+          "approval_object": "deterministic:comparison",
+          "scope": "仅限本合成场景的 split 不一致阻断，不豁免其他审计",
           "revision": 3,
           "approved": true,
           "verdict_sha256": "$current_evidence"

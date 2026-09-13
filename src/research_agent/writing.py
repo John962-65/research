@@ -13,6 +13,14 @@ from .evidence_integrity import (
 from .literature_context import citation_key_for_paper
 from .llm import LLM
 from .llm_trace import complete_with_purpose_detail, record_validation_result
+from .model_failure import (
+    INVALID_RESPONSE,
+    ModelFailure,
+    ModelSourceRecorder,
+    call_with_bounded_retry,
+    classify_model_failure,
+    fallback_permitted,
+)
 from .models import Analysis, ExperimentPlan, LiteratureReview, Paper, ResearchIdea
 from .artifacts import safe_int as _safe_int
 
@@ -40,6 +48,7 @@ def write_paper_markdown(
     benchmark_evidence: dict[str, Any] | None = None,
     evidence_integrity: EvidenceIntegrity | None = None,
     runbook: dict[str, Any] | None = None,
+    model_source_recorder: ModelSourceRecorder | None = None,
 ) -> str:
     citation_keys = _citation_keys(review, ideas, plan)
     claim_boundaries = _claim_boundaries(failure_analysis, experiment_decision, hypothesis_outcome, claim_boundary_preflight)
@@ -61,9 +70,13 @@ def write_paper_markdown(
             benchmark_evidence,
             evidence_integrity,
             runbook,
+            model_source_recorder,
         )
         if ai_draft:
             return _prepend_integrity_banner(ai_draft, evidence_integrity)
+    else:
+        if model_source_recorder is not None:
+            model_source_recorder({"stage": "paper_writing", "source": "template", "call_id": 0})
     fallback = _fallback_paper(
         topic,
         review,
@@ -107,25 +120,48 @@ def _try_ai_paper(
     benchmark_evidence: dict[str, Any] | None,
     evidence_integrity: EvidenceIntegrity | None = None,
     runbook: dict[str, Any] | None = None,
+    model_source_recorder: ModelSourceRecorder | None = None,
 ) -> str:
     try:
-        draft, call_id = complete_with_purpose_detail(
-            llm,
-            "Paper writing. You write concise Chinese academic Markdown. Use only provided evidence and experimental results. Keep the text concise, informative, and under 2500 words.",
-            _paper_prompt(topic, review, ideas, plan, analysis, config, failure_analysis, experiment_decision, hypothesis_outcome, claim_boundary_preflight, benchmark_evidence, evidence_integrity, runbook),
-            stage="paper_writing",
-            purpose="paper writing",
-            requires_validation=True,
+        draft, call_id = call_with_bounded_retry(
+            lambda: complete_with_purpose_detail(
+                llm,
+                "Paper writing. You write concise Chinese academic Markdown. Use only provided evidence and experimental results. Keep the text concise, informative, and under 2500 words.",
+                _paper_prompt(topic, review, ideas, plan, analysis, config, failure_analysis, experiment_decision, hypothesis_outcome, claim_boundary_preflight, benchmark_evidence, evidence_integrity, runbook),
+                stage="paper_writing",
+                purpose="paper writing",
+                requires_validation=True,
+            )
         )
-        draft = _strip_code_fence(draft).strip()
-        valid = _looks_like_paper(draft, citation_keys, claim_boundaries, claim_boundary_preflight)
-        record_validation_result(llm, stage="paper_writing", valid=valid, error="paper draft failed structure/evidence validation", call_id=call_id)
-        if valid:
-            return draft
-        return ""
     except Exception as exc:
+        # T04：模型调用失败默认停机可恢复；仅显式配置且临时/结构类失败才模板降级。
+        failure = classify_model_failure(exc)
         record_validation_result(llm, stage="paper_writing", valid=False, error=f"AI paper generation error: {exc}")
-        return ""
+        if model_source_recorder is not None:
+            model_source_recorder({
+                "stage": "paper_writing",
+                "source": "template" if fallback_permitted(config, failure) else "paused",
+                "call_id": 0,
+                "failure": failure.to_dict(),
+            })
+        if fallback_permitted(config, failure):
+            return ""
+        raise
+    draft = _strip_code_fence(draft).strip()
+    valid = _looks_like_paper(draft, citation_keys, claim_boundaries, claim_boundary_preflight)
+    record_validation_result(llm, stage="paper_writing", valid=valid, error="paper draft failed structure/evidence validation", call_id=call_id)
+    if valid:
+        if model_source_recorder is not None:
+            model_source_recorder({"stage": "paper_writing", "source": "model", "call_id": call_id})
+        return draft
+    if model_source_recorder is not None:
+        model_source_recorder({
+            "stage": "paper_writing",
+            "source": "template",
+            "call_id": call_id,
+            "failure": ModelFailure(INVALID_RESPONSE, "paper draft failed structure/evidence validation", retryable=False).to_dict(),
+        })
+    return ""
 
 
 def _paper_prompt(

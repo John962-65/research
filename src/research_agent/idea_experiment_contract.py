@@ -4,13 +4,16 @@ from pathlib import Path
 from typing import Any
 import re
 
-from .artifacts import write_json, write_text, cell as _cell, safe_int as _safe_int
+from .artifacts import read_json, write_json, write_text, cell as _cell, safe_int as _safe_int, utc_now as _utc_now
 from .config import ExecutionConfig
+from .evidence_snapshot import payload_sha256
 from .models import ExplorationMap, ExperimentPlan, ResearchIdea, ResearchPlan
 
 
 IDEA_EXPERIMENT_CONTRACT_JSON = "03-idea-experiment-contract.json"
 IDEA_EXPERIMENT_CONTRACT_MD = "03-idea-experiment-contract.md"
+CONTRACT_HISTORY_JSON = "03-experiment-contract-history.json"
+CONTRACT_SCHEMA_VERSION = 2
 
 
 def write_idea_experiment_contract_artifacts(
@@ -42,6 +45,168 @@ def write_idea_experiment_contract_artifacts(
     return report
 
 
+def read_json_local(path: Path) -> Any:
+    return read_json(path)
+
+
+def _slug(value: str) -> str:
+    slug = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]+", "-", str(value or "")).strip("-").lower()
+    return slug[:40]
+
+
+def _infer_group(name: str) -> str:
+    lowered = str(name or "").lower()
+    if any(token in lowered for token in ("candidate", "artifact", "proposed")):
+        return "candidate"
+    if any(token in lowered for token in ("baseline", "control")):
+        return "baseline"
+    if any(token in lowered for token in ("ablation", "without", "ablated")):
+        return "ablation"
+    return ""
+
+
+def build_execution_contract(
+    research_plan: ResearchPlan,
+    selected_idea: ResearchIdea,
+    experiment_plan: ExperimentPlan,
+    execution_config: ExecutionConfig,
+    *,
+    preregistration: dict[str, Any] | None = None,
+    ablation_plan: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """任务书 T05：执行与评估共同读取的权威结构化契约（八字段组）。
+
+    idea 自然语言只用于解释，不重复执行细节；契约冻结后修改必须产生新版本
+    并说明原因、受影响结果与是否需要重跑。
+    """
+    prereg = preregistration or {}
+    ablation = ablation_plan or {}
+    primary_metrics = [str(item) for item in (prereg.get("primary_metrics") or experiment_plan.metrics[:2]) if str(item).strip()]
+    secondary_metrics = [str(item) for item in (prereg.get("secondary_metrics") or experiment_plan.metrics[2:]) if str(item).strip()]
+    commands = [
+        {
+            "name": command.name,
+            "command": list(command.command),
+            "comparison_group": str(command.comparison_group or "") or _infer_group(command.name),
+        }
+        for command in experiment_plan.commands
+    ]
+    has_ablation = any(item["comparison_group"] == "ablation" for item in commands)
+    fingerprint = str(prereg.get("plan_fingerprint") or "")
+    data_block: dict[str, Any] = {
+        "mode": execution_config.mode,
+        "benchmark_manifests": list(execution_config.benchmark_manifest_paths),
+    }
+    if execution_config.mode in {"local", "benchmark"} and not execution_config.benchmark_manifest_paths:
+        data_block["reason"] = "本地固定输入执行，未使用外部数据划分；数据标识由实验命令与环境快照绑定。"
+    contract = {
+        "schema_version": CONTRACT_SCHEMA_VERSION,
+        "contract_id": "",
+        "revision": 0,
+        "frozen": True,
+        "frozen_at": "",
+        "hypothesis": {
+            "hypothesis_id": _slug(selected_idea.title) or "hypothesis",
+            "question": str(selected_idea.hypothesis or ""),
+            "task_boundary": str(experiment_plan.objective or ""),
+        },
+        "method": {
+            "candidate": str(experiment_plan.idea_title or selected_idea.title or ""),
+            "baseline": str(experiment_plan.baseline or selected_idea.baseline or ""),
+            "plan_fingerprint": fingerprint,
+            "allowed_changes": "仅允许修改候选实现与其实验命令；baseline、数据与主指标冻结，改动必须生成新契约版本。",
+        },
+        "data": data_block,
+        "evaluation": {
+            "primary_metrics": primary_metrics,
+            "secondary_metrics": secondary_metrics,
+            "direction": "candidate_better",
+            "computation": "04-statistics 的均值差与 95% CI（candidate - baseline）",
+            "comparison_unit": "candidate_vs_baseline",
+            "repeats": max(1, int(execution_config.repeats)),
+            "seed_policy": "由执行器按 repeat 序号派生固定种子，记录在 04-experiment-runbook。",
+        },
+        "criteria": {
+            "supported": "至少一个 primary metric 的均值差 95% CI 不跨 0 且方向为 candidate_better，且结果验证无阻断。",
+            "not_supported": "primary metric 的均值差 95% CI 明确偏负（baseline 更优）；此时输出准确负结果，不自动改写或搜索正结果。",
+            "inconclusive": "CI 跨 0、存在未检验 primary metric 或结果验证为 warn；不得把未显著简单等同无效。",
+        },
+        "verification": {
+            "has_ablation": has_ablation,
+            "ablation_commands": [item["name"] for item in commands if item["comparison_group"] == "ablation"],
+            "expected": "ablation（移除核心机制）相对 candidate 的表现应当变差；若不变差，机制贡献声明必须降级。",
+            "not_applicable_note": "" if has_ablation else str(ablation.get("required_actions") or ["本契约未声明 ablation；机制贡献只能作为未验证解释，不进入主要结论。"][0]) ,
+        },
+        "execution": {
+            "mode": execution_config.mode,
+            "commands": commands,
+            "timeout_seconds": int(execution_config.timeout_seconds),
+            "repeats": max(1, int(execution_config.repeats)),
+            "allowed_commands": list(execution_config.allowed_commands),
+            "stopping_rules": [str(item) for item in (prereg.get("stopping_rules") or [])],
+        },
+        "approvals": [],
+    }
+    contract["contract_id"] = f"contract-{payload_sha256({'topic': research_plan.topic, 'plan_fingerprint': fingerprint, 'evaluation': contract['evaluation'], 'method': contract['method']})[:12]}"
+    contract["digest"] = _contract_content_digest(contract)
+    return contract
+
+
+def _contract_content_digest(contract: dict[str, Any]) -> str:
+    """内容摘要：排除 revision/frozen_at/approvals 等过程字段，专用于版本比较。"""
+    payload = {key: value for key, value in contract.items() if key not in {"revision", "frozen_at", "approvals", "digest"}}
+    return payload_sha256(payload)
+
+
+def append_contract_history(
+    run_dir: Path,
+    contract: dict[str, Any],
+    *,
+    results_exist: bool = False,
+) -> dict[str, Any]:
+    """冻结/版本化：内容变化时追加新版本，说明原因、影响与是否需要重跑。"""
+    path = Path(run_dir) / CONTRACT_HISTORY_JSON
+    try:
+        history = read_json_local(path)
+    except (OSError, ValueError):
+        history = None
+    entries = history.get("entries") if isinstance(history, dict) else None
+    if not isinstance(entries, list):
+        entries = []
+    digest = str(contract.get("digest") or "")
+    if entries and str(entries[-1].get("digest") or "") == digest:
+        contract["revision"] = int(entries[-1].get("revision") or len(entries))
+        return history if isinstance(history, dict) else {"schema_version": 1, "entries": entries}
+    revision = len(entries) + 1
+    contract["revision"] = revision
+    if not contract.get("frozen_at"):
+        contract["frozen_at"] = _utc_now_local()
+    reason = "initial_freeze" if revision == 1 else "post_results_change" if results_exist else "contract_revised"
+    affected = "实验尚未执行，无受影响结果。" if not results_exist else (
+        "已有结果基于旧契约版本；旧批准与分析身份不再沿用，重新执行比较前必须人工确认。"
+    )
+    entry = {
+        "revision": revision,
+        "frozen_at": contract.get("frozen_at"),
+        "digest": digest,
+        "contract_id": contract.get("contract_id"),
+        "reason": reason,
+        "rerun_required": results_exist,
+        "affected_results": affected,
+    }
+    entries.append(entry)
+    write_json(path, {"schema_version": 1, "entries": entries})
+    return {"schema_version": 1, "entries": entries}
+
+
+def load_contract_history(run_dir: Path) -> dict[str, Any]:
+    try:
+        history = read_json_local(Path(run_dir) / CONTRACT_HISTORY_JSON)
+    except (OSError, ValueError):
+        return {"schema_version": 1, "entries": []}
+    return history if isinstance(history, dict) and isinstance(history.get("entries"), list) else {"schema_version": 1, "entries": []}
+
+
 def build_idea_experiment_contract_report(
     research_plan: ResearchPlan,
     selected_idea: ResearchIdea,
@@ -69,6 +234,14 @@ def build_idea_experiment_contract_report(
     manual = _unique(action for check in checks if check["status"] == "review_required" for action in check["required_actions"])
     status = "block" if blocking else "review_required" if manual else "pass"
     score = sum(_check_weight(str(check.get("status") or "")) for check in checks) / max(1, len(checks))
+    contract = build_execution_contract(
+        research_plan,
+        selected_idea,
+        experiment_plan,
+        execution_config,
+        preregistration=preregistration,
+        ablation_plan=ablation_plan,
+    )
     return {
         "topic": research_plan.topic,
         "status": status,
@@ -77,6 +250,8 @@ def build_idea_experiment_contract_report(
         "exploration_selected_title": exploration_map.selected_idea_title,
         "experiment_plan_title": experiment_plan.idea_title,
         "execution_mode": execution_config.mode,
+        "contract": contract,
+        "contract_digest": contract.get("digest") or "",
         "checks": checks,
         "blocking_issues": blocking,
         "manual_tasks": manual,
@@ -206,13 +381,20 @@ def _metric_contract(
 
 def _command_contract(plan: ExperimentPlan) -> dict[str, Any]:
     texts = [" ".join([command.name, *command.command, *command.expected_artifacts]) for command in plan.commands]
+    # A11：命令带显式 comparison_group（机器可读契约字段）时优先采用，
+    # 不因命令名未重复关键词而误拦。
+    explicit_groups = {
+        str(command.comparison_group or "").strip().lower()
+        for command in plan.commands
+        if str(command.comparison_group or "").strip().lower() in {"candidate", "baseline", "ablation"}
+    }
     missing_blockers: list[str] = []
     missing_manual: list[str] = []
-    if not _has_token(texts, {"candidate", "artifact", "proposed"}):
+    if "candidate" not in explicit_groups and not _has_token(texts, {"candidate", "artifact", "proposed"}):
         missing_blockers.append("candidate/proposed")
-    if not _has_token(texts, {"baseline", "control"}):
+    if "baseline" not in explicit_groups and not _has_token(texts, {"baseline", "control"}):
         missing_blockers.append("baseline/control")
-    if not _has_token(texts, {"ablation", "without", "ablated"}):
+    if "ablation" not in explicit_groups and not _has_token(texts, {"ablation", "without", "ablated"}):
         missing_manual.append("ablation")
     if missing_blockers:
         return _check("command_contract", "block", [f"commands={len(texts)}", "missing=" + ", ".join(missing_blockers + missing_manual)], ["补齐 candidate/proposed 与 baseline/control 命令后再申请执行。"])

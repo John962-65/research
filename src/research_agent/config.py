@@ -73,6 +73,9 @@ class ExecutionConfig:
 class PaperConfig:
     target_venue: str = "workshop"
     style: str = "concise"
+    # T04：默认 False——必需模型阶段失败时停机可恢复；显式开启且失败类别
+    # 属于 model_failure.FALLBACK_ALLOWED_KINDS 才允许模板降级。
+    allow_template_fallback: bool = False
 
 
 @dataclass(frozen=True)

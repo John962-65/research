@@ -264,5 +264,69 @@ class AIIntegrationTest(unittest.TestCase):
         self.assertEqual(public["llm"]["input_cost_per_million_tokens"], 2.0)
 
 
+class ExplicitTemplateFallbackTest(unittest.TestCase):
+    """A10：显式启用模板降级 → 保留失败与来源标签，必需评审标记未完成。"""
+
+    def _recorder(self):
+        records: list[dict] = []
+        return records, records.append
+
+    def test_transient_failure_with_explicit_fallback_labels_template(self) -> None:
+        records, sink = self._recorder()
+        paper = write_paper_markdown(
+            "机械臂路径规划", _sample_review(), [_sample_idea()], _sample_plan(), _sample_analysis(),
+            PaperConfig(allow_template_fallback=True), FailingLLM(), model_source_recorder=sink,
+        )
+        self.assertTrue(paper.startswith("# "))
+        entry = next(item for item in records if item["stage"] == "paper_writing")
+        self.assertEqual(entry["source"], "template")
+        self.assertEqual(entry["failure"]["kind"], "transient_network")
+
+    def test_credential_failure_blocks_even_with_explicit_fallback(self) -> None:
+        class CredentialLLM:
+            def complete(self, system: str, user: str) -> str:
+                raise RuntimeError("401 unauthorized: invalid api key")
+
+        records, sink = self._recorder()
+        with self.assertRaises(RuntimeError):
+            write_paper_markdown(
+                "机械臂路径规划", _sample_review(), [_sample_idea()], _sample_plan(), _sample_analysis(),
+                PaperConfig(allow_template_fallback=True), CredentialLLM(), model_source_recorder=sink,
+            )
+        entry = next(item for item in records if item["stage"] == "paper_writing")
+        self.assertEqual(entry["source"], "paused")
+        self.assertEqual(entry["failure"]["kind"], "credential_error")
+
+    def test_review_fallback_records_missing_independent_review(self) -> None:
+        records, sink = self._recorder()
+        review = review_paper_draft(
+            "机械臂路径规划", _sample_review(), [_sample_idea()], _sample_plan(), _sample_analysis(),
+            "# 摘要\n\n测试。", llm=FailingLLM(),
+            paper_config=PaperConfig(allow_template_fallback=True), model_source_recorder=sink,
+        )
+        self.assertTrue(review.summary)
+        entry = next(item for item in records if item["stage"] == "paper_review")
+        self.assertEqual(entry["source"], "template")
+        self.assertIs(entry["independent_review_completed"], False)
+
+    def test_transient_failures_retry_with_bound_then_raise(self) -> None:
+        class CountingTimeoutLLM:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def complete(self, system: str, user: str) -> str:
+                self.calls += 1
+                raise TimeoutError("timed out")
+
+        counter = CountingTimeoutLLM()
+        with self.assertRaises(TimeoutError):
+            write_paper_markdown(
+                "机械臂路径规划", _sample_review(), [_sample_idea()], _sample_plan(), _sample_analysis(),
+                PaperConfig(), counter,
+            )
+        # 1 次原始调用 + 2 次有界重试（MAX_TRANSIENT_RETRIES=2），然后停机。
+        self.assertEqual(counter.calls, 3)
+
+
 if __name__ == "__main__":
     unittest.main()

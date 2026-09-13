@@ -70,7 +70,13 @@ from .fulltext_corpus import FULLTEXT_CORPUS_JSON, FULLTEXT_CORPUS_MD, write_ful
 from .human_brief import HUMAN_BRIEF_JSON, HUMAN_BRIEF_MD, human_brief_agent_text, load_human_brief, render_human_brief_markdown, write_human_brief_artifacts
 from .human_gate_audit import HUMAN_GATE_AUDIT_JSON, HUMAN_GATE_AUDIT_MD, write_human_gate_audit_artifacts
 from .hypothesis_outcome import HYPOTHESIS_OUTCOME_JSON, HYPOTHESIS_OUTCOME_MD, write_hypothesis_outcome_artifacts
-from .idea_experiment_contract import IDEA_EXPERIMENT_CONTRACT_JSON, IDEA_EXPERIMENT_CONTRACT_MD, write_idea_experiment_contract_artifacts
+from .idea_experiment_contract import (
+    CONTRACT_HISTORY_JSON,
+    IDEA_EXPERIMENT_CONTRACT_JSON,
+    IDEA_EXPERIMENT_CONTRACT_MD,
+    append_contract_history,
+    write_idea_experiment_contract_artifacts,
+)
 from .idea_audit import IDEA_AUDIT_JSON, IDEA_AUDIT_MD, render_idea_audit_markdown, write_idea_audit_artifacts
 from .ideation import generate_ideas, render_ideas_markdown
 from .iteration_plan import ITERATION_PLAN_JSON, ITERATION_PLAN_MD, write_iteration_plan_artifacts
@@ -113,6 +119,7 @@ from .workflow_state import WorkflowEngine, NodeOutcome
 from .workflow_graph import WORKFLOW_NODES
 from .gate_aggregator import GATE_RULE_VERSION, aggregate_final_decision, load_human_override, write_gate_decision_artifacts
 from .evidence_snapshot import SnapshotError, load_review_input_snapshot, payload_sha256, verify_snapshot
+from .model_failure import record_model_stage_source
 from .multi_agent_handoff_audit import MULTI_AGENT_HANDOFF_AUDIT_JSON, MULTI_AGENT_HANDOFF_AUDIT_MD, write_multi_agent_handoff_audit_artifacts
 from .multi_agent_paper_audit import MULTI_AGENT_PAPER_AUDIT_JSON, MULTI_AGENT_PAPER_AUDIT_MD, render_multi_agent_paper_audit_markdown, write_multi_agent_paper_audit_artifacts
 from .query_execution_audit import QUERY_EXECUTION_AUDIT_JSON, QUERY_EXECUTION_AUDIT_MD, write_query_execution_audit_artifacts
@@ -2225,6 +2232,12 @@ def _run_after_review_approval(
             preregistration=preregistration,
             constraint_compliance=constraint_compliance,
         )
+        # T05：契约冻结/版本化——内容变化产生新版本并说明原因与影响（A12）。
+        contract_history = append_contract_history(
+            out_dir,
+            idea_experiment_contract.get("contract") if isinstance(idea_experiment_contract.get("contract"), dict) else {},
+            results_exist=(out_dir / "04-results.json").exists(),
+        )
         manifest.record(
             "idea_experiment_contract",
             inputs=[
@@ -2238,10 +2251,13 @@ def _run_after_review_approval(
                 REVIEW_CONSTRAINT_COMPLIANCE_JSON,
                 "run-config.json",
             ],
-            outputs=[IDEA_EXPERIMENT_CONTRACT_JSON, IDEA_EXPERIMENT_CONTRACT_MD],
+            outputs=[IDEA_EXPERIMENT_CONTRACT_JSON, IDEA_EXPERIMENT_CONTRACT_MD, CONTRACT_HISTORY_JSON],
             metrics={
                 "status": idea_experiment_contract.get("status"),
                 "contract_score": idea_experiment_contract.get("contract_score"),
+                "contract_digest": idea_experiment_contract.get("contract_digest"),
+                "contract_revision": (idea_experiment_contract.get("contract") or {}).get("revision") if isinstance(idea_experiment_contract.get("contract"), dict) else None,
+                "history_revisions": len(contract_history.get("entries", []) if isinstance(contract_history.get("entries"), list) else []),
                 "blocking_issues": len(idea_experiment_contract.get("blocking_issues", []) if isinstance(idea_experiment_contract.get("blocking_issues"), list) else []),
                 "manual_tasks": len(idea_experiment_contract.get("manual_tasks", []) if isinstance(idea_experiment_contract.get("manual_tasks"), list) else []),
             },
@@ -2582,6 +2598,7 @@ def _run_after_review_approval(
                 benchmark_evidence=benchmark_evidence,
                 evidence_integrity=evidence_integrity,
                 runbook=runbook,
+                model_source_recorder=_model_source_recorder(out_dir),
             )
             write_text(paper_path, paper_md)
             write_text(out_dir / "06-paper.tex", markdown_to_latex(paper_md))
@@ -2618,7 +2635,7 @@ def _run_after_review_approval(
                 metrics={"calibration_status": review_calibration.get("status")},
             )
         else:
-            paper_review = review_paper_draft(topic, review, ideas, plan, analysis, paper_md, context, llm)
+            paper_review = review_paper_draft(topic, review, ideas, plan, analysis, paper_md, context, llm, paper_config=config.paper, model_source_recorder=_model_source_recorder(out_dir))
             write_json(paper_review_path, paper_review)
             write_text(out_dir / "07-paper-review.md", render_paper_review_markdown(paper_review))
             review_calibration = write_paper_review_calibration_artifacts(
@@ -2692,7 +2709,7 @@ def _run_after_review_approval(
             )
         else:
             paper_md = paper_path.read_text(encoding="utf-8")
-            revised_paper_md, revision_report = revise_paper_draft(topic, paper_md, revision_plan, paper_review, llm, benchmark_evidence=benchmark_evidence)
+            revised_paper_md, revision_report = revise_paper_draft(topic, paper_md, revision_plan, paper_review, llm, benchmark_evidence=benchmark_evidence, paper_config=config.paper, model_source_recorder=_model_source_recorder(out_dir))
             write_text(revised_paper_path, revised_paper_md)
             write_text(out_dir / REVISED_PAPER_TEX, markdown_to_latex(revised_paper_md))
             write_json(revision_report_path, revision_report)
@@ -2871,7 +2888,7 @@ def _run_after_review_approval(
             )
         else:
             revised_paper_md = revised_paper_path.read_text(encoding="utf-8")
-            revised_review = review_paper_draft(topic, review, ideas, plan, analysis, revised_paper_md, context, llm)
+            revised_review = review_paper_draft(topic, review, ideas, plan, analysis, revised_paper_md, context, llm, paper_config=config.paper, model_source_recorder=_model_source_recorder(out_dir))
             write_json(revised_review_path, revised_review)
             write_text(out_dir / REVISED_PAPER_REVIEW_MD, render_paper_review_markdown(revised_review))
             claim_traceability = write_claim_traceability_artifacts(topic, out_dir, revised_review, context)
@@ -4987,6 +5004,23 @@ def _load_benchmark_plan(path: Path) -> BenchmarkPlan:
         required_actions=[str(item) for item in data.get("required_actions", [])],
         warnings=[str(item) for item in data.get("warnings", [])],
     )
+
+
+def _model_source_recorder(out_dir: Path):
+    """把模型阶段来源（model/template/paused）持久化到 04-model-stage-sources.json。"""
+    run_dir = Path(out_dir)
+
+    def _record(event: dict[str, Any]) -> None:
+        record_model_stage_source(
+            run_dir,
+            str(event.get("stage") or ""),
+            str(event.get("source") or ""),
+            call_id=int(event.get("call_id") or 0),
+            failure=event.get("failure"),
+            independent_completed=event.get("independent_review_completed"),
+        )
+
+    return _record
 
 
 def _read_dict(path: Path) -> dict[str, Any]:

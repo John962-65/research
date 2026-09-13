@@ -3,8 +3,17 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .config import PaperConfig
 from .llm import LLM
 from .llm_trace import complete_with_purpose_detail, record_validation_result
+from .model_failure import (
+    INVALID_RESPONSE,
+    ModelFailure,
+    ModelSourceRecorder,
+    call_with_bounded_retry,
+    classify_model_failure,
+    fallback_permitted,
+)
 from .models import PaperRewriteReport, PaperRevisionPlan, PaperRevisionTaskResult, PaperReview, RevisionTask
 from .paper_review import _claim_asserted_in_paper, _claim_explicitly_scoped_out
 from .artifacts import cell as _cell
@@ -17,11 +26,15 @@ def revise_paper_draft(
     paper_review: PaperReview,
     llm: LLM | None = None,
     benchmark_evidence: dict[str, Any] | None = None,
+    paper_config: PaperConfig | None = None,
+    model_source_recorder: ModelSourceRecorder | None = None,
 ) -> tuple[str, PaperRewriteReport]:
     if llm is not None:
-        revised = _try_ai_rewrite(topic, paper_md, revision_plan, paper_review, llm, benchmark_evidence)
+        revised = _try_ai_rewrite(topic, paper_md, revision_plan, paper_review, llm, benchmark_evidence, paper_config, model_source_recorder)
     else:
         revised = ""
+        if model_source_recorder is not None:
+            model_source_recorder({"stage": "paper_revision", "source": "template", "call_id": 0})
     if not revised:
         revised = _fallback_rewrite(topic, paper_md, revision_plan, benchmark_evidence)
     report = _build_report(topic, revision_plan, paper_review, revised)
@@ -64,23 +77,49 @@ def _try_ai_rewrite(
     paper_review: PaperReview,
     llm: LLM,
     benchmark_evidence: dict[str, Any] | None,
+    paper_config: PaperConfig | None = None,
+    model_source_recorder: ModelSourceRecorder | None = None,
 ) -> str:
     try:
-        draft, call_id = complete_with_purpose_detail(
-            llm,
-            "Paper revision. You revise Chinese academic Markdown without inventing evidence. Keep the revision concise and under 2500 words.",
-            _rewrite_prompt(topic, paper_md, revision_plan, paper_review, benchmark_evidence),
-            stage="paper_revision",
-            purpose="paper revision",
-            requires_validation=True,
+        draft, call_id = call_with_bounded_retry(
+            lambda: complete_with_purpose_detail(
+                llm,
+                "Paper revision. You revise Chinese academic Markdown without inventing evidence. Keep the revision concise and under 2500 words.",
+                _rewrite_prompt(topic, paper_md, revision_plan, paper_review, benchmark_evidence),
+                stage="paper_revision",
+                purpose="paper revision",
+                requires_validation=True,
+            )
         )
-        draft = _strip_code_fence(draft).strip()
-        valid = _looks_like_revised_paper(draft, benchmark_evidence)
-        record_validation_result(llm, stage="paper_revision", valid=valid, error="revised paper failed structure/evidence validation", call_id=call_id)
-        return draft if valid else ""
     except Exception as exc:
+        # T04：修订失败默认停机；显式降级时保留失败记录与模板来源。
+        failure = classify_model_failure(exc)
         record_validation_result(llm, stage="paper_revision", valid=False, error=f"AI rewrite generation error: {exc}")
-        return ""
+        if model_source_recorder is not None:
+            model_source_recorder({
+                "stage": "paper_revision",
+                "source": "template" if fallback_permitted(paper_config, failure) else "paused",
+                "call_id": 0,
+                "failure": failure.to_dict(),
+            })
+        if fallback_permitted(paper_config, failure):
+            return ""
+        raise
+    draft = _strip_code_fence(draft).strip()
+    valid = _looks_like_revised_paper(draft, benchmark_evidence)
+    record_validation_result(llm, stage="paper_revision", valid=valid, error="revised paper failed structure/evidence validation", call_id=call_id)
+    if valid:
+        if model_source_recorder is not None:
+            model_source_recorder({"stage": "paper_revision", "source": "model", "call_id": call_id})
+        return draft
+    if model_source_recorder is not None:
+        model_source_recorder({
+            "stage": "paper_revision",
+            "source": "template",
+            "call_id": call_id,
+            "failure": ModelFailure(INVALID_RESPONSE, "revised paper failed structure/evidence validation", retryable=False).to_dict(),
+        })
+    return ""
 
 
 def _rewrite_prompt(
