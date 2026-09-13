@@ -3499,16 +3499,15 @@ def _run_after_review_approval(
             "paper_revision": _node_paper_revision,
             "finalization": _node_finalization,
             "completed": _node_completed,
+        # T13/A29–A31：facts 由共享构造函数生成（CLI/Web/恢复三入口一致）；
+        # recheck_required 在每次边判定时从最新修订响应审计读取。
         }, facts=lambda: {
-            "execution_requires_approval": config.execution.mode in {"local", "benchmark"},
-            "writing_blocked": bool(experiment_decision and experiment_decision.get("downstream_writing_allowed") is False),
-            # T07/A15：负结果（pivot_or_refine）按契约 §1.4 为 proceed——正常完成
-            # 负结果报告后终止本轮（decision_states.stop_after_report=true），
-            # 不自动开新实验轮；修订轮保留用于收敛结论边界措辞，轮次受
-            # run_budget 冻结上限约束（A16）。真正的阻断路由走
-            # writing_blocked → awaiting_experiment_repair。
-            "revision_required": True,
-            "recheck_required": False,
+            **build_workflow_facts(
+                config_mode=config.execution.mode,
+                experiment_decision=experiment_decision,
+                paper_review=paper_review,
+            ),
+            "recheck_required": recheck_required_from_disk(out_dir),
         }, terminal_nodes={"completed"},
            before_node=lambda node: begin_workflow_node(out_dir, topic, node),
            on_edge=lambda source, target: manifest.record("workflow_dispatch", inputs=[], outputs=[], metrics={"from": source, "to": target}))
@@ -5103,6 +5102,48 @@ def _load_benchmark_plan(path: Path) -> BenchmarkPlan:
         required_actions=[str(item) for item in data.get("required_actions", [])],
         warnings=[str(item) for item in data.get("warnings", [])],
     )
+
+
+def build_workflow_facts(
+    *,
+    config_mode: str,
+    experiment_decision: dict[str, Any] | None,
+    paper_review: Any = None,
+) -> dict[str, bool]:
+    """T13/A29–A31：CLI、Web、恢复三入口共用的 workflow facts 构造函数。
+
+    - revision_required 不再固定为 True：合格负结果（stop_after_report）
+      默认只生成准确报告并停止自动扩展；确有复核任务（复核意见给出
+      必须修改项）时才进入一次修订，且受 paper_revisions 预算上限约束。
+    - recheck_required 由修订响应审计结果计算（见
+      recheck_required_from_disk），不能固定为 False。
+    """
+    decision = experiment_decision if isinstance(experiment_decision, dict) else {}
+    states = decision.get("decision_states") if isinstance(decision.get("decision_states"), dict) else {}
+    stop_after_report = states.get("stop_after_report") is True
+    review_tasks = bool(
+        paper_review is not None and list(getattr(paper_review, "required_revisions", []) or [])
+    )
+    return {
+        "execution_requires_approval": config_mode in {"local", "benchmark"},
+        "writing_blocked": bool(decision.get("downstream_writing_allowed") is False),
+        "revision_required": review_tasks if stop_after_report else True,
+    }
+
+
+def recheck_required_from_disk(out_dir: Path) -> bool:
+    """T13/A31：recheck_required 由 09-revision-response-audit 的实际结果计算。
+
+    审计判定为 block 或存在阻断项 → 需要再走一轮评审（受 paper_revisions
+    预算上限约束）；否则修订关闭，进入终局。
+    """
+    audit = _read_dict(Path(out_dir) / REVISION_RESPONSE_AUDIT_JSON)
+    if not audit:
+        return False
+    if str(audit.get("status") or "") == "block":
+        return True
+    blocking = audit.get("blocking_issues")
+    return bool(isinstance(blocking, list) and blocking)
 
 
 def _experiment_results_usable(results: Any) -> bool:

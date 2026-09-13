@@ -39,6 +39,10 @@
 | A27 | 目标数值缺失/无方向证据/同句正反混合 | 数值冲突判矛盾；无方向证据 → 待核验；按指标归因 → 不误拦 | 复审5 | tests/test_claim_evidence_polarity.py::ReviewerRegressionTest | verified |
 | A28 | 干净检出重放；预算中途异常；进程脚本不同 | 重放断言中断生效+期望数值+具体阻断原因；预算启动前预留；argv 全长比较 | 复审6–8 | scripts/replay_public_case.sh 实测 + tests/test_run_budget.py::test_event_history_survives_reload + tests/test_experiment_attempts.py::test_same_interpreter_different_script_is_rejected | verified |
 
+| A29 | 模拟执行 | 四态一致：execution=simulated（非 completed）、evidence=simulated、outcome=not_assessed、next=request_material | T13 | tests/test_workflow_facts.py::SimulatedStatesTest + ::test_simulated_result_maps_all_four_states | verified |
+| A30 | 合格负结果且复核无必须修改项 | 不进入无界修订，直达终局 | T13 | tests/test_workflow_facts.py::NegativeResultRoutingTest::test_negative_result_without_review_tasks_skips_revision | verified |
+| A31 | 负结果但有复核任务；修订后审计阻断；三入口 | 进入一次修订（受 paper_revisions 上限）；recheck 按审计实际结果；facts 由共享构造函数生成 | T13 | tests/test_workflow_facts.py::NegativeResultRoutingTest（3 用例） | verified |
+
 ## 使用规则
 
 1. 每个任务实现完成时把对应行的"测试载体"改为实际 `文件::用例名`，

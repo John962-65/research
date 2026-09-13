@@ -215,12 +215,15 @@ def _decision(
         return "repair_before_writing", "block"
     if validation_status == "block" or failure_status == "block" or failed_runs:
         return "repair_before_writing", "block"
+    # T13/A29：模拟结果的"方向"是模拟器产物、不承载真实信息——模拟判定
+    # 必须先于负向判定，保证四态一致（research_outcome=not_assessed 时
+    # next_action=request_material，而不是基于虚构方向的 proceed）。
+    if execution_mode == "simulated" or simulated_runs:
+        return "benchmark_upgrade", "warn"
     if negative_metrics:
         return "pivot_or_refine", "warn"
     if uncertain_metrics or validation_status == "warn" or failure_status == "warn":
         return "refine_experiment", "warn"
-    if execution_mode == "simulated" or simulated_runs:
-        return "benchmark_upgrade", "warn"
     if benchmark_evidence_status in {"smoke_only", "review_required"} or benchmark_evidence_grade in {"smoke_only", "local_experiment"}:
         return "benchmark_upgrade", "warn"
     if benchmark_actions:
@@ -329,8 +332,10 @@ def _decision_states(
         if row_status == "failed":
             execution_status = "failed"
             break
-    if simulated_runs and execution_status == "completed" and execution_mode == "simulated":
-        execution_status = "completed"  # 模拟执行也是一次完成的执行；证据维度单独标 simulated
+    # T13/A29：契约 §1.1 规定 simulated 不属于 completed——模拟执行映射为
+    # execution_status=simulated，与 evidence_status=simulated 一致。
+    if execution_mode == "simulated" or simulated_runs:
+        execution_status = "simulated"
 
     validation_status = str(result_validation.get("status") or "")
     # 复审第 4/6 项：证据真实性优先采纳 04-evidence-integrity 的独立判定
