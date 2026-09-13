@@ -16,7 +16,14 @@ class ProcessMatchTest(unittest.TestCase):
     def test_alive_process_with_matching_cmdline(self) -> None:
         process = subprocess.Popen(["/bin/sleep", "30"])
         try:
-            self.assertTrue(experiment_attempts.process_matches(process.pid, ["/bin/sleep", "30"]))
+            # fork 后 exec 前的短暂窗口内 /proc cmdline 可能仍是父进程的，轮询等待。
+            matched = False
+            for _ in range(40):
+                if experiment_attempts.process_matches(process.pid, ["/bin/sleep", "30"]):
+                    matched = True
+                    break
+                time.sleep(0.05)
+            self.assertTrue(matched)
         finally:
             process.terminate()
             process.wait()
