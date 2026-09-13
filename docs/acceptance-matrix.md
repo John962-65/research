@@ -23,8 +23,8 @@
 | A12 | 结果出来后改指标或划分 | 新版本/新分析身份，旧批准不沿用 | T05 | tests/test_idea_experiment_contract.py::test_contract_history_versions_after_results + tests/test_preregistration.py::test_posthoc_metric_change_creates_new_version + tests/test_result_validation.py::test_posthoc_contract_change_blocks_with_binding_mismatch | tested |
 | A13 | 即刻崩溃或任务重启 | 及时报错，不重复启动活任务 | T06 | tests/test_experiment_attempts.py（ProcessMatchTest 3 用例 + RunExperimentsResumeGuardTest 3 用例，含 PID 复用与中断保留） | tested |
 | A14 | 同 Run 线程/进程竞争 | 互斥成立，同线程嵌套仍正常 | T06 | tests/test_run_lease.py（既有回归，4 用例保留） | tested |
-| A15 | 正确完成但假设不成立 | 允许准确负结果报告，停止无意义循环 | T07 | tests/test_experiment_decision.py + workflow 路由用例 | planned |
-| A16 | 超出总预算/最大轮次 | 停止并保留已有证据 | T07 | tests/test_workflow_state.py::test_budget_exhaustion_stops_and_preserves | planned |
+| A15 | 正确完成但假设不成立 | 允许准确负结果报告，停止无意义循环 | T07 | tests/test_experiment_decision.py::test_negative_result_maps_to_not_supported_with_stop_after_report、::test_blocked_validation_maps_to_repair_and_not_assessed、::test_simulated_mode_maps_to_simulated_evidence | tested |
+| A16 | 超出总预算/最大轮次 | 停止并保留已有证据 | T07 | tests/test_run_budget.py（3 用例，含恢复不绕过） | tested |
 | A17 | 引用否定方向/数字/条件相反 | 不得自动宣称已支持 | T08 | tests/test_claim_consistency.py::test_negated_direction_not_supported | planned |
 | A18 | 正确主张且证据完整 | 可通过并定位证据 | T08 | tests/test_claim_traceability.py::test_supported_claim_locates_evidence | planned |
 | A19 | 页面提交旧版本批准 | 后端拒绝，提示材料变化 | T09 | tests/test_web_server.py::test_stale_approval_rejected | planned |

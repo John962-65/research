@@ -90,6 +90,16 @@ def build_experiment_decision_report(
         "decision": decision,
         "paper_policy": _paper_policy(decision),
         "downstream_writing_allowed": decision not in {"repair_before_writing"},
+        "decision_states": _decision_states(
+            decision=decision,
+            result_validation=result_validation,
+            execution_mode=execution_mode,
+            simulated_runs=simulated_runs,
+            comparisons=len(statistics.comparisons),
+            negative_metrics=negative_metrics,
+            uncertain_metrics=uncertain_metrics,
+            failed_runs=failed_runs,
+        ),
         "evidence_summary": {
             "validation_status": validation_status,
             "failure_status": failure_status,
@@ -120,6 +130,20 @@ def render_experiment_decision_markdown(report: dict[str, Any]) -> str:
         f"- 允许继续写作：{'是' if report.get('downstream_writing_allowed') is True else '否'}",
         f"- 理由：{report.get('rationale') or '-'}",
         "",
+        "## 四类决策状态",
+    ]
+    states = report.get("decision_states") if isinstance(report.get("decision_states"), dict) else {}
+    lines.extend(
+        [
+            f"- 执行状态（execution_status）：{states.get('execution_status') or '-'}——程序有没有正确执行结束",
+            f"- 证据状态（evidence_status）：{states.get('evidence_status') or '-'}——产物来源与内容是否可信",
+            f"- 研究结论（research_outcome）：{states.get('research_outcome') or '-'}——假设是否被支持",
+            f"- 下一步动作（next_action）：{states.get('next_action') or '-'}——接下来允许做什么",
+            f"- 负结果报告后停止（stop_after_report）：{'是' if states.get('stop_after_report') else '否'}",
+            "",
+        ]
+    )
+    lines.extend([
         "## 证据摘要",
         f"- 结果验证：{summary.get('validation_status') or '-'}",
         f"- 失败分析：{summary.get('failure_status') or '-'}",
@@ -133,7 +157,7 @@ def render_experiment_decision_markdown(report: dict[str, Any]) -> str:
         f"- Benchmark 证据：{summary.get('benchmark_evidence_status') or '-'} / {summary.get('benchmark_evidence_grade') or '-'}",
         "",
         "## 下一步动作",
-    ]
+    ])
     actions = report.get("next_actions") if isinstance(report.get("next_actions"), list) else []
     lines.extend(f"- {item}" for item in actions) if actions else lines.append("- 暂无")
     lines.extend(["", "## 结论边界"])
@@ -250,6 +274,79 @@ def _claim_boundaries(
     if uncertain_metrics:
         values.append("存在 CI 跨 0 的指标，论文不得表述为显著改进。")
     return _dedupe([str(item).strip() for item in values if str(item).strip()])[:10]
+
+
+def _decision_states(
+    *,
+    decision: str,
+    result_validation: dict[str, Any],
+    execution_mode: str,
+    simulated_runs: int,
+    comparisons: int,
+    negative_metrics: list[Any],
+    uncertain_metrics: list[Any],
+    failed_runs: list[Any],
+) -> dict[str, Any]:
+    """decision-contract §1 的四类状态映射（execution/evidence/research_outcome/next_action）。
+
+    四类状态独立保存、互不推导：completed 且 verified 仍可能 not_supported；
+    not_supported 是允许的准确负结果，不触发自动改写。
+    """
+    execution_status = "completed"
+    for item in failed_runs:
+        row_status = str(item.get("status") or "") if isinstance(item, dict) else ""
+        if row_status == "timeout":
+            execution_status = "timed_out"
+            break
+        if row_status == "blocked":
+            execution_status = "blocked"
+            break
+        if row_status == "failed":
+            execution_status = "failed"
+            break
+    if simulated_runs and execution_status == "completed" and execution_mode == "simulated":
+        execution_status = "completed"  # 模拟执行也是一次完成的执行；证据维度单独标 simulated
+
+    validation_status = str(result_validation.get("status") or "")
+    if validation_status == "block" or decision == "repair_before_writing":
+        evidence_status = "invalid"
+    elif validation_status == "warn":
+        evidence_status = "incomplete"
+    elif execution_mode == "simulated" or simulated_runs:
+        evidence_status = "simulated"
+    elif comparisons <= 0:
+        evidence_status = "unknown"
+    else:
+        evidence_status = "verified"
+
+    stable_positive = comparisons - len(negative_metrics) - len(uncertain_metrics)
+    if decision == "repair_before_writing" or execution_mode == "simulated" or decision == "benchmark_upgrade" or comparisons <= 0:
+        research_outcome = "not_assessed"
+    elif negative_metrics and stable_positive <= 0:
+        research_outcome = "not_supported"
+    elif uncertain_metrics or stable_positive <= 0:
+        research_outcome = "inconclusive"
+    else:
+        research_outcome = "supported"
+
+    next_action = _NEXT_ACTION_MAP.get(decision, "human_review")
+    return {
+        "execution_status": execution_status,
+        "evidence_status": evidence_status,
+        "research_outcome": research_outcome,
+        "next_action": next_action,
+        "stop_after_report": decision == "pivot_or_refine",
+        "contract_version": "decision-contract/1.0",
+    }
+
+
+_NEXT_ACTION_MAP = {
+    "proceed_to_paper": "proceed",
+    "pivot_or_refine": "proceed",
+    "refine_experiment": "request_material",
+    "benchmark_upgrade": "request_material",
+    "repair_before_writing": "repair",
+}
 
 
 def _paper_policy(decision: str) -> str:

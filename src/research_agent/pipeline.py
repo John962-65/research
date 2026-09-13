@@ -120,6 +120,7 @@ from .workflow_graph import WORKFLOW_NODES
 from .gate_aggregator import GATE_RULE_VERSION, aggregate_final_decision, load_human_override, write_gate_decision_artifacts
 from .evidence_snapshot import SnapshotError, load_review_input_snapshot, payload_sha256, verify_snapshot
 from .model_failure import record_model_stage_source
+from .run_budget import RunBudgetExhausted, ensure_budget, record_execution
 from .multi_agent_handoff_audit import MULTI_AGENT_HANDOFF_AUDIT_JSON, MULTI_AGENT_HANDOFF_AUDIT_MD, write_multi_agent_handoff_audit_artifacts
 from .multi_agent_paper_audit import MULTI_AGENT_PAPER_AUDIT_JSON, MULTI_AGENT_PAPER_AUDIT_MD, render_multi_agent_paper_audit_markdown, write_multi_agent_paper_audit_artifacts
 from .query_execution_audit import QUERY_EXECUTION_AUDIT_JSON, QUERY_EXECUTION_AUDIT_MD, write_query_execution_audit_artifacts
@@ -1688,9 +1689,12 @@ def _resume_pipeline_from_repair_queue_unlocked(
     gold_verification_report_path: Path | None = None,
 ) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
+    # T07/A16：修复恢复入口受冻结次数上限约束；恢复不能绕过预算。
+    ensure_budget(out_dir, "repair_resumes")
     preflight_report = build_repair_resume_plan(out_dir, doctor_report_path=doctor_report_path, gold_verification_report_path=gold_verification_report_path)
     if preflight_report.get("can_resume") is not True:
         raise RuntimeError(str(preflight_report.get("reason") or "repair queue cannot be used for resume"))
+    record_execution(out_dir, "repair_resumes", note="repair-resume accepted")
     _validate_repair_resume_identity(out_dir, topic, preflight_report)
     _validate_repair_resume_approval_cleanup(out_dir, preflight_report)
     missing_release = missing_repair_resume_required_release_values(config, preflight_report)
@@ -2403,6 +2407,8 @@ def _run_after_review_approval(
             )
         else:
 
+            # T07/A16：实验真实执行受冻结次数上限约束（checkpoint 复用不计数）。
+            ensure_budget(out_dir, "experiment_runs")
             # T05：执行启动时绑定当前契约内容摘要（审计器读取同一契约做一致性核对）。
             _contract_report = _read_dict(out_dir / IDEA_EXPERIMENT_CONTRACT_JSON)
             results = run_experiments(
@@ -2412,6 +2418,7 @@ def _run_after_review_approval(
                 paper_grade=config.paper_grade,
                 contract_digest=str(_contract_report.get("contract_digest") or ""),
             )
+            record_execution(out_dir, "experiment_runs", note="experiments node executed")
             write_json(results_path, results)
             runbook = _read_dict(out_dir / EXPERIMENT_RUNBOOK_JSON)
             benchmark_plan_report = _read_dict(out_dir / BENCHMARK_PLAN_JSON)
@@ -2689,6 +2696,8 @@ def _run_after_review_approval(
     def _node_paper_revision():
         nonlocal paper_md, revised_paper_md, revised_paper_path, revision_report
 
+        # T07/A16：修订轮次冻结上限；恢复同样在此被拦。
+        ensure_budget(out_dir, "paper_revisions")
         revision_plan_path = out_dir / REVISION_PLAN_JSON
         if resume and revision_plan_path.exists() and _paper_revision_plan_checkpoint_matches(
             _load_paper_revision_plan(revision_plan_path),
@@ -2735,6 +2744,7 @@ def _run_after_review_approval(
         else:
             paper_md = paper_path.read_text(encoding="utf-8")
             revised_paper_md, revision_report = revise_paper_draft(topic, paper_md, revision_plan, paper_review, llm, benchmark_evidence=benchmark_evidence, paper_config=config.paper, model_source_recorder=_model_source_recorder(out_dir))
+            record_execution(out_dir, "paper_revisions", note="paper_revision node executed")
             write_text(revised_paper_path, revised_paper_md)
             write_text(out_dir / REVISED_PAPER_TEX, markdown_to_latex(revised_paper_md))
             write_json(revision_report_path, revision_report)
@@ -2778,7 +2788,20 @@ def _run_after_review_approval(
         _check_cancelled(out_dir, topic, manifest, "revision_response_audit_completed")
 
     def _node_finalization():
-        nonlocal repair_queue, repair_resume, revised_paper_md
+        nonlocal repair_queue, repair_resume, revised_paper_md, revised_paper_path, revision_report
+        if revision_report is None:
+            from .models import PaperRewriteReport
+
+            revision_report = PaperRewriteReport(
+                topic=topic,
+                source_paper="06-paper.md",
+                revised_paper=REVISED_PAPER_MD,
+                revision_plan="08-revision-plan.json",
+                summary="实验后决策路由跳过修订轮（如负结果报告），本次未执行修订任务。",
+                task_results=[],
+                deferred_tasks=[],
+                next_checks=["如需修订，人工发起 revision 或 repair-resume。"],
+            )
         if experiment_decision.get("downstream_writing_allowed") is False:
             repair_report = _write_experiment_repair_gate(
                 topic,
@@ -2816,6 +2839,27 @@ def _run_after_review_approval(
             except Exception:
                 pass
             return NodeOutcome("waiting")
+
+        # T07/A15 兜底：正常写作路径上若修订稿缺失（旧 run 恢复或路由变化），
+        # 以复核后的原稿进入审计链路，并如实记录修订未执行。
+        paper_file = out_dir / "06-paper.md"
+        revised_paper_file = out_dir / REVISED_PAPER_MD
+        if revised_paper_path is None:
+            revised_paper_path = revised_paper_file
+        if revised_paper_md is None and revised_paper_file.exists():
+            revised_paper_md = revised_paper_file.read_text(encoding="utf-8")
+        if revised_paper_md is None and not resume:
+            revised_paper_md = paper_md if paper_md else paper_file.read_text(encoding="utf-8")
+            write_text(revised_paper_file, revised_paper_md)
+            if not (out_dir / REVISED_PAPER_TEX).exists():
+                write_text(out_dir / REVISED_PAPER_TEX, markdown_to_latex(revised_paper_md))
+            manifest.record(
+                "paper_revision_skipped_by_decision",
+                inputs=["06-paper.md", EXPERIMENT_DECISION_JSON],
+                outputs=[REVISED_PAPER_MD],
+                notes=["实验后决策路由跳过修订轮（如负结果报告），09 稿与 06 稿一致。"],
+                metrics={"decision": experiment_decision.get("decision") if experiment_decision else ""},
+            )
 
 
         revised_review_path = out_dir / REVISED_PAPER_REVIEW_JSON
@@ -3429,26 +3473,42 @@ def _run_after_review_approval(
         )
 
     engine = WorkflowEngine([node.node_id for node in WORKFLOW_NODES])
-    engine.run(out_dir, start="ideation", from_node="review_gate", handlers={
-        "ideation": _node_ideation,
-        "experiment_plan": _node_experiment_plan,
-        "execution_gate": _node_execution_gate,
-        "experiments": _node_experiments,
-        "analysis": _node_analysis,
-        "paper_writing": _node_paper_writing,
-        "paper_review": _node_paper_review,
-        "paper_revision": _node_paper_revision,
-        "finalization": _node_finalization,
-        "completed": _node_completed,
-    }, facts=lambda: {
-        "execution_requires_approval": config.execution.mode in {"local", "benchmark"},
-        "writing_blocked": bool(experiment_decision and experiment_decision.get("downstream_writing_allowed") is False),
-        # Existing product policy: every draft gets a revision pass; the
-        # revision handler is followed by the final audit/recheck bundle.
-        "revision_required": True, "recheck_required": False,
-    }, terminal_nodes={"completed"},
-       before_node=lambda node: begin_workflow_node(out_dir, topic, node),
-       on_edge=lambda source, target: manifest.record("workflow_dispatch", inputs=[], outputs=[], metrics={"from": source, "to": target}))
+    try:
+        engine.run(out_dir, start="ideation", from_node="review_gate", handlers={
+            "ideation": _node_ideation,
+            "experiment_plan": _node_experiment_plan,
+            "execution_gate": _node_execution_gate,
+            "experiments": _node_experiments,
+            "analysis": _node_analysis,
+            "paper_writing": _node_paper_writing,
+            "paper_review": _node_paper_review,
+            "paper_revision": _node_paper_revision,
+            "finalization": _node_finalization,
+            "completed": _node_completed,
+        }, facts=lambda: {
+            "execution_requires_approval": config.execution.mode in {"local", "benchmark"},
+            "writing_blocked": bool(experiment_decision and experiment_decision.get("downstream_writing_allowed") is False),
+            # T07/A15：负结果（pivot_or_refine）按契约 §1.4 为 proceed——正常完成
+            # 负结果报告后终止本轮（decision_states.stop_after_report=true），
+            # 不自动开新实验轮；修订轮保留用于收敛结论边界措辞，轮次受
+            # run_budget 冻结上限约束（A16）。真正的阻断路由走
+            # writing_blocked → awaiting_experiment_repair。
+            "revision_required": True,
+            "recheck_required": False,
+        }, terminal_nodes={"completed"},
+           before_node=lambda node: begin_workflow_node(out_dir, topic, node),
+           on_edge=lambda source, target: manifest.record("workflow_dispatch", inputs=[], outputs=[], metrics={"from": source, "to": target}))
+    except RunBudgetExhausted as exc:
+        # T07/A16：预算耗尽 → 停止并保留已有证据；状态可被人工识别。
+        _write_state(out_dir, topic, "stopped_budget_exhausted")
+        manifest.record(
+            "budget_exhausted",
+            inputs=["04-run-budget.json"],
+            outputs=["state.json"],
+            status="blocked",
+            notes=[str(exc)[:280]],
+        )
+        raise
 
 
 def _write_experiment_repair_gate(

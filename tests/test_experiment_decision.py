@@ -43,6 +43,52 @@ class ExperimentDecisionTest(unittest.TestCase):
         self.assertIn("planning_time", " ".join(report["next_actions"]))
         self.assertIn("实验后决策", rendered)
 
+    def test_negative_result_maps_to_not_supported_with_stop_after_report(self) -> None:
+        # A15：合格负结果 → not_supported + proceed + stop_after_report，四态独立。
+        report = build_experiment_decision_report(
+            _plan(),
+            _statistics([_comparison("planning_time", -0.2, "baseline_better_or_equal")]),
+            {"status": "pass"},
+            {"status": "warn", "summary": {"negative_metrics": 1}, "negative_metrics": [{"metric": "planning_time"}]},
+            execution_mode="benchmark",
+        )
+        states = report["decision_states"]
+        self.assertEqual(states["research_outcome"], "not_supported")
+        self.assertEqual(states["next_action"], "proceed")
+        self.assertTrue(states["stop_after_report"])
+        self.assertEqual(states["evidence_status"], "verified")
+        self.assertEqual(states["execution_status"], "completed")
+        rendered = render_experiment_decision_markdown(report)
+        self.assertIn("四类决策状态", rendered)
+        self.assertIn("not_supported", rendered)
+
+    def test_blocked_validation_maps_to_repair_and_not_assessed(self) -> None:
+        report = build_experiment_decision_report(
+            _plan(),
+            _statistics([]),
+            {"status": "block", "blocking_issues": ["x"]},
+            {"status": "block", "summary": {"failed_runs": 1}, "failed_runs": [{"name": "c", "status": "failed"}]},
+            execution_mode="local",
+        )
+        states = report["decision_states"]
+        self.assertEqual(states["next_action"], "repair")
+        self.assertEqual(states["research_outcome"], "not_assessed")
+        self.assertEqual(states["evidence_status"], "invalid")
+        self.assertEqual(states["execution_status"], "failed")
+
+    def test_simulated_mode_maps_to_simulated_evidence(self) -> None:
+        report = build_experiment_decision_report(
+            _plan(),
+            _statistics([_comparison("success_rate", 0.2, "candidate_better")]),
+            {"status": "pass"},
+            {"status": "pass", "summary": {"simulated_runs": 5}, "failed_runs": []},
+            execution_mode="simulated",
+        )
+        states = report["decision_states"]
+        self.assertEqual(states["evidence_status"], "simulated")
+        self.assertEqual(states["research_outcome"], "not_assessed")
+        self.assertEqual(states["next_action"], "request_material")
+
     def test_write_experiment_decision_outputs_json_and_markdown(self) -> None:
         with TemporaryDirectory() as tmp:
             report = write_experiment_decision_artifacts(
