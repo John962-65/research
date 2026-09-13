@@ -49,6 +49,9 @@ def build_benchmark_result_schema_audit_report(
     result_validation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     runbook = runbook if isinstance(runbook, dict) else {}
+    # overridable 标志由系统推导（复审第 1 项）：来源/provenance 类阻断
+    # 不可被人工覆盖；覆盖可覆盖性由 gate 聚合器读取本字段。
+    provenance_non_overridable = {"overridable": False, "block_reason_code": "unverifiable_source"}
     benchmark_plan = benchmark_plan if isinstance(benchmark_plan, dict) else {}
     adapter_report = adapter_report if isinstance(adapter_report, dict) else {}
     result_validation = result_validation if isinstance(result_validation, dict) else {}
@@ -68,7 +71,7 @@ def build_benchmark_result_schema_audit_report(
     _check_benchmark_metric_alignment(plan, results, benchmark_plan, checks, manual)
     _check_artifact_trace(runbook, checks, blocking, manual, warnings)
     _check_adapter_artifact_contract(runbook, adapter_report, execution_mode, checks, blocking, manual)
-    _check_adapter_provenance_contract(adapter_report, execution_mode, checks, blocking, manual)
+    _check_adapter_provenance_contract(adapter_report, execution_mode, checks, blocking, manual, provenance_non_overridable)
     _check_benchmark_execution_contract(adapter_report, execution_mode, runbook, checks, blocking, manual)
     _check_adapter_role_command_contract(adapter_report, execution_mode, checks, blocking, manual)
     _check_result_validation_status(result_validation, checks, blocking, manual)
@@ -491,6 +494,7 @@ def _check_adapter_provenance_contract(
     checks: list[dict[str, Any]],
     blocking: list[str],
     manual: list[str],
+    non_overridable: dict[str, Any] | None = None,
 ) -> None:
     if execution_mode != "benchmark":
         checks.append(_check("adapter_provenance_contract", "pass", f"mode={execution_mode or 'unknown'}; benchmark provenance not required", "无需处理。"))
@@ -524,7 +528,10 @@ def _check_adapter_provenance_contract(
         )
     if missing:
         detail = "benchmark result provenance 不完整：" + "；".join(missing[:8])
-        checks.append(_check("adapter_provenance_contract", "block", detail, "补齐 manifest provenance；结果不能作为正式 benchmark 证据。"))
+        check = _check("adapter_provenance_contract", "block", detail, "补齐 manifest provenance；结果不能作为正式 benchmark 证据。")
+        if non_overridable:
+            check = {**check, **non_overridable}
+        checks.append(check)
         blocking.append(detail)
         return
     if any(not str(item.get("baseline") or "").strip() for item in provenance.values()):

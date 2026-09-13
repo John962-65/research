@@ -139,6 +139,9 @@ def aggregate_final_decision(
     override_applied = False
     override_payload: dict[str, Any] = {}
     if human_override is not None and status == "blocked":
+        approved_blockers, override_errors = _override_approved_blockers(
+            human_override, blocking_sources=blocking_sources
+        )
         errors = _validate_override(
             human_override,
             revision=revision,
@@ -146,24 +149,48 @@ def aggregate_final_decision(
             blocking_sources=blocking_sources,
             non_overridable_reasons=non_overridable_reasons or [],
         )
+        errors = [*override_errors, *errors]
         if errors:
             warning_sources.extend(f"override_rejected:{error}" for error in errors)
         else:
+            # 逐项批准、逐项消解：覆盖只消解批准人明确列出且属于可覆盖类别
+            # 的阻断；任何未被合法覆盖的阻断（含系统判定的不可覆盖项）继续
+            # 阻止放行。原始阻断记录全部保留。
             override = dict(human_override)
+            dissolved: list[str] = []
+            remaining: list[str] = []
+            for name in blocking_sources:
+                overridable, why = _blocker_overridability(name, deterministic_audits)
+                if name in approved_blockers and overridable:
+                    dissolved.append(name)
+                    continue
+                remaining.append(name)
+                if name in approved_blockers and not overridable:
+                    warning_sources.append(f"override_rejected:non_overridable:{name}:{why}")
             override_applied = True
             override_payload = {
                 "reviewer": str(override.get("reviewer"))[:120],
                 "reason": str(override.get("reason"))[:500],
                 "reason_code": str(override.get("reason_code")),
                 "approval_object": str(override.get("approval_object")),
+                "approved_blockers": list(approved_blockers),
                 "scope": str(override.get("scope"))[:300],
                 "revision": override.get("revision"),
                 "verdict_sha256": str(override.get("verdict_sha256"))[:64],
                 "approved": bool(override.get("approved")),
                 "original_status": status,
                 "original_blocking_sources": list(blocking_sources),
+                "dissolved_blockers": dissolved,
+                "remaining_blockers": remaining,
+                "status_after": "publishable" if not remaining else "blocked",
             }
-            status = "publishable"
+            if remaining:
+                warning_sources.append(
+                    "override_partial:批准未覆盖全部阻断，剩余阻断继续阻止放行："
+                    + ", ".join(remaining[:5])
+                )
+            else:
+                status = "publishable"
 
     decision = GateDecision(
         status=status,
@@ -185,6 +212,54 @@ def aggregate_final_decision(
         created_at=_utc_now(),
     )
     return decision
+
+
+def _override_approved_blockers(
+    override: dict[str, Any], *, blocking_sources: list[str]
+) -> tuple[list[str], list[str]]:
+    """解析覆盖批准的阻断清单；返回 (批准清单, 错误列表)。
+
+    ``approved_blockers``（列表）为规范字段；旧的 ``approval_object``（单个）
+    作为兼容别名。批准的每一项都必须匹配当前实际阻断来源。
+    """
+    raw = override.get("approved_blockers")
+    items: list[str] = []
+    if isinstance(raw, list):
+        items = [str(item).strip() for item in raw if str(item).strip()]
+    elif isinstance(raw, str) and raw.strip():
+        items = [raw.strip()]
+    elif isinstance(override.get("approval_object"), str) and override.get("approval_object").strip():
+        items = [str(override.get("approval_object")).strip()]
+    errors: list[str] = []
+    if not items:
+        errors.append("approved_blockers must list at least one current blocking source")
+        return [], errors
+    unknown = [item for item in items if item not in blocking_sources]
+    if unknown:
+        errors.append("approved_blockers must match current blocking sources: unknown " + ", ".join(unknown[:4]))
+    deduped = list(dict.fromkeys(items))
+    return deduped, errors
+
+
+def _blocker_overridability(name: str, deterministic_audits: dict[str, dict[str, Any]]) -> tuple[bool, str]:
+    """由系统推导阻断来源是否可被人工覆盖（不依赖批准人填写的原因码）。
+
+    不可覆盖（任务书/decision-contract §3.2 的系统识别）：
+    - 缺少必需评审角色（missing_verdict:*）
+    - 评审输入快照损坏/不可核验（snapshot:*）
+    - verdict 与调用账本核验失败（verdict:*:unverified_call）
+    - 独立评审层整体阻断（independent_deliberation）
+    - 确定性审计自报 overridable=false（如 provenance/来源不可核验）
+    其余确定性阻断默认可覆盖（需合法覆盖字段齐全且逐项列出）。
+    """
+    if name.startswith(("missing_verdict:", "snapshot:", "verdict:")) or name == "independent_deliberation":
+        return False, "system_identified_non_overridable"
+    if name.startswith("deterministic:"):
+        audit_name = name.split(":", 1)[1]
+        report = deterministic_audits.get(audit_name) or {}
+        if report.get("overridable") is False:
+            return False, str(report.get("block_reason_code") or "audit_declared_non_overridable")
+    return True, ""
 
 
 def _verdict_ledger_problem(verdict: dict[str, Any], ledger_by_call: dict[int, dict[str, Any]]) -> str:
@@ -247,10 +322,6 @@ def _validate_override(
     digest = override.get("verdict_sha256")
     if not isinstance(digest, str) or not digest.isascii() or not hmac.compare_digest(digest, verdict_sha256):
         errors.append("verdict_sha256 does not match current evidence")
-    approval_object = override.get("approval_object")
-    if isinstance(approval_object, str) and approval_object.strip() and blocking_sources:
-        if approval_object.strip() not in blocking_sources:
-            errors.append("approval_object must match one of the current blocking sources")
     for reason in non_overridable_reasons:
         errors.append(f"non_overridable:{reason}")
     return errors

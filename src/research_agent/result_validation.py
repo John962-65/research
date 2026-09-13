@@ -260,7 +260,10 @@ def _check_contract_binding(
             "执行绑定的契约摘要与当前契约不一致：已有结果可能基于旧契约版本；"
             "旧批准与分析身份不再沿用，必须生成新契约版本并人工确认后重跑比较（A12）。"
         )
-        items.append({"name": "contract_binding", "status": "block", "detail": detail})
+        items.append({
+            "name": "contract_binding", "status": "block", "detail": detail,
+            "overridable": False, "block_reason_code": "contract_violation",
+        })
         blocking.append(detail)
         return
     if bound:

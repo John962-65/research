@@ -198,6 +198,72 @@ class GateAggregatorTest(unittest.TestCase):
         self.assertEqual(rejected.status, "blocked")
         self.assertTrue(any("reason_code" in item for item in rejected.warning_sources))
 
+    def test_partial_override_only_dissolves_approved_blockers(self) -> None:
+        # 复审场景 1：三条阻断同时存在（普通建议性 / 来源不可核验 / 缺统计角色），
+        # 人工批准明确只接受第一条 → 其余阻断（含缺失角色）继续阻止放行。
+        inputs = dict(
+            deterministic_audits={
+                "advisory_check": {"status": "block", "reason": "边界措辞需收紧"},
+                "provenance_check": {"status": "block", "overridable": False, "block_reason_code": "unverifiable_source"},
+            },
+            independent_deliberation={"verdicts": [{"agent_id": "statistician", "verdict": "pass"}]},
+            expected_roles=["statistician", "evidence_curator"],
+        )
+        decision = aggregate_final_decision(**inputs)
+        self.assertEqual(decision.status, "blocked")
+        blockers = decision.blocking_sources
+        self.assertIn("deterministic:advisory_check", blockers)
+        self.assertIn("deterministic:provenance_check", blockers)
+        self.assertIn("missing_verdict:evidence_curator", blockers)
+        digest = decision.inputs["verdict_sha256"]
+        override = {
+            "reviewer": "amy",
+            "reason": "只接受边界措辞问题",
+            "reason_code": "scope_limitation",
+            "approval_object": "deterministic:advisory_check",
+            "approved_blockers": ["deterministic:advisory_check"],
+            "scope": "仅收紧措辞问题",
+            "revision": 0,
+            "verdict_sha256": digest,
+            "approved": True,
+        }
+        partial = aggregate_final_decision(**inputs, human_override=override)
+        self.assertEqual(partial.status, "blocked", "未被覆盖的阻断必须继续阻止放行")
+        self.assertTrue(partial.overridden)
+        self.assertEqual(partial.override["dissolved_blockers"], ["deterministic:advisory_check"])
+        self.assertIn("deterministic:provenance_check", partial.override["remaining_blockers"])
+        self.assertIn("missing_verdict:evidence_curator", partial.override["remaining_blockers"])
+        # 来源不可核验与缺失角色即使被列入批准清单也不生效（系统推导不可覆盖）。
+        greedy = aggregate_final_decision(
+            **inputs,
+            human_override=override | {
+                "approved_blockers": [
+                    "deterministic:advisory_check",
+                    "deterministic:provenance_check",
+                    "missing_verdict:evidence_curator",
+                ]
+            },
+        )
+        self.assertEqual(greedy.status, "blocked")
+        self.assertTrue(any("non_overridable:deterministic:provenance_check" in w for w in greedy.warning_sources))
+        self.assertTrue(any("non_overridable:missing_verdict:evidence_curator" in w for w in greedy.warning_sources))
+        # 只批准第一条（唯一可覆盖项）→ 全部消解后才可放行。
+        inputs_single = dict(
+            deterministic_audits={"advisory_check": {"status": "block", "reason": "边界措辞需收紧"}},
+            independent_deliberation=None,
+        )
+        single_digest = aggregate_final_decision(**inputs_single).inputs["verdict_sha256"]
+        ok = aggregate_final_decision(**inputs_single, human_override=override | {"verdict_sha256": single_digest})
+        self.assertEqual(ok.status, "publishable")
+        self.assertEqual(ok.override["remaining_blockers"], [])
+        # 批准清单包含不存在的阻断 → 拒绝。
+        bad = aggregate_final_decision(
+            **inputs_single,
+            human_override=override | {"verdict_sha256": single_digest, "approved_blockers": ["deterministic:advisory_check", "ghost:missing"]},
+        )
+        self.assertEqual(bad.status, "blocked")
+        self.assertTrue(any("unknown ghost:missing" in w for w in bad.warning_sources))
+
     def test_non_overridable_reasons_reject_override(self) -> None:
         # decision-contract §3.2：不可覆盖原因码出现时覆盖一律不生效。
         inputs = dict(deterministic_audits={"claim_consistency": {"status": "block"}}, independent_deliberation=None)
