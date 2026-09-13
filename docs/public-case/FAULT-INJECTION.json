@@ -1,0 +1,23 @@
+{
+ "schema_version": 1,
+ "marked_as": "fault_injection（受控故障注入，非自然发生的用户错误）",
+ "injection": {
+  "method": "复制 benchmarks/uci-iris-classification 到 runs/fault-injection-benchmarks/uci-iris-tampered，从冻结测试划分中移除 3 个样本（30→27）",
+  "removed_indices": [
+   0,
+   1,
+   2
+  ],
+  "note": "manifest 中声明的 split_sha256 不再与被篡改的 split 文件一致"
+ },
+ "expected_behavior": "系统必须阻断：篡改数据后的结果不得支撑任何结论",
+ "observed": {
+  "benchmark_adapter_status": "ready（适配器允许执行，执行本身未被阻止）",
+  "benchmark_result_schema_audit_status": "block",
+  "blocking_issue": "benchmark result provenance 不完整：split_sha256 与 split_path 实际 SHA256 不一致（candidate/baseline/ablation 全部命中）",
+  "benchmark_pack_run_status": "block",
+  "cli_exit_code": 2,
+  "metrics_drift_example": "accuracy 0.966667→0.962963（test_cases 30→27），与冻结划分不一致被审计发现"
+ },
+ "conclusion": "篡改冻结数据被 provenance 审计阻断；被篡改副本的结果不能进入结论。执行通过≠证据通过。"
+}

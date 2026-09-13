@@ -11,7 +11,7 @@
 ## 目标用户、支持范围与真实限制（2026-09 更新）
 
 - **目标用户**：需要一个"基于冻结标准与真实证据做实验评审"工作台的个人研究者/小团队；也用于大疆数字管理研发岗位的项目能力展示。
-- **最短真实演示**：`bash scripts/replay_public_case.sh`——离线 CPU 重放 UCI Iris 公开案例（冻结契约 → 真实执行与一次真实中断恢复 → 证据核验 → 中性/负结果判定 → 受控故障注入被阻断）。案例报告：[`runs/public-iris-case/CASE-REPORT.md`](runs/public-iris-case/CASE-REPORT.md)（runs 为本地产物，生成方式见重放脚本），演示讲稿：[`docs/public-case-demo-script.md`](docs/public-case-demo-script.md)。
+- **最短真实演示**：`bash scripts/replay_public_case.sh`——离线 CPU 重放 UCI Iris 公开案例（冻结契约 → 真实执行与一次真实中断恢复 → 证据核验 → 中性/负结果判定 → 受控故障注入被阻断）。案例报告：[`docs/public-case/CASE-REPORT.md`](docs/public-case/CASE-REPORT.md)（完整证据包在 `runs/public-iris-case/`，由重放脚本确定性再生），演示讲稿：[`docs/public-case-demo-script.md`](docs/public-case-demo-script.md)。
 - **证据等级**：`04-evidence-integrity.json` 分开记录 LLM 证据与实验证据（verified/incomplete/invalid/simulated/unknown）；执行状态/证据状态/研究结论/下一步动作四类状态独立保存（见 [`docs/decision-contract.md`](docs/decision-contract.md)）。`publishable` 仅表示通过本系统的发布前检查，**不代表论文达到期刊发表标准**。
 - **真实限制**：本仓库目前没有真实用户试用数据，模块增益保持 `not_measured`（见 [`docs/review-evaluation.md`](docs/review-evaluation.md)）；公开案例未调用 LLM，模型相关步骤在该案例中为 not_verified；复杂分布式调度、任意领域从零生成实验代码、PDF 深度解析（可选适配器）与自动投稿不在支持范围。
 
