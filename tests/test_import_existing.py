@@ -91,9 +91,9 @@ class EvaluateImportedTest(unittest.TestCase):
         experiments.mkdir(parents=True, exist_ok=True)
         rows = []
         for index, (name, group, accuracy) in enumerate([
-            ("candidate", "candidate", 0.966),
-            ("baseline", "baseline", 0.933),
-            ("ablation", "ablation", 0.900),
+            ("candidate", "dataset-a", 0.966),
+            ("baseline", "dataset-a", 0.933),
+            ("ablation", "dataset-a", 0.900),
         ]):
             artifact = experiments / f"{name}_metrics.json"
             artifact.write_text(json.dumps({"accuracy": accuracy}), encoding="utf-8")
@@ -158,6 +158,70 @@ class EvaluateImportedTest(unittest.TestCase):
             report = evaluate_imported_results(run_dir)
             self.assertEqual(report["evidence"]["experiment"], "incomplete")
             self.assertNotEqual(report["decision_states"]["evidence_status"], "verified")
+
+
+class CrossDatasetImportTest(unittest.TestCase):
+    """复审第 9 轮第 1/2 项：不同数据集不得合并比较；模拟数据不得得出 supported。"""
+
+    @staticmethod
+    def _row(name: str, group: str, status: str, accuracy: float, run_dir: Path) -> dict:
+        import hashlib
+
+        experiments = run_dir / "experiments"
+        experiments.mkdir(parents=True, exist_ok=True)
+        artifact = experiments / f"{name}_metrics.json"
+        artifact.write_text(json.dumps({"accuracy": accuracy}), encoding="utf-8")
+        return {
+            "name": name, "status": status, "metrics": {"accuracy": accuracy},
+            "command": ["python3", f"{name}.py"], "returncode": 0, "seed": "s", "repeat_index": 0,
+            "comparison_group": group,
+            "artifact_records": [
+                {"path": f"experiments/{name}_metrics.json", "sha256": hashlib.sha256(artifact.read_bytes()).hexdigest()}
+            ],
+        }
+
+    def test_cross_dataset_import_is_not_paired(self) -> None:
+        # 候选在数据集 A、基线在数据集 B → 不得产生 0.20 提升的配对比较；
+        # 结论只能是未评估 + 明确的组身份阻断。
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            rows = [
+                self._row("candidate-a", "dataset-a", "passed", 0.91, run_dir),
+                self._row("baseline-b", "dataset-b", "passed", 0.71, run_dir),
+            ]
+            import_existing_results(run_dir, rows, replace=True,
+                                    contract_source={"schema_version": 2, "evaluation": {"primary_metrics": ["accuracy"]}})
+            report = evaluate_imported_results(run_dir)
+            self.assertNotIn("supported", str(report["decision_states"].get("research_outcome")))
+            self.assertEqual(report["decision_states"]["research_outcome"], "not_assessed")
+            self.assertEqual(report["decision"], "repair_before_writing")
+            self.assertTrue(
+                any("comparison_group" in blocker and "dataset-b" in blocker for blocker in report["blockers"]),
+                report["blockers"],
+            )
+            self.assertTrue(
+                any("明确映射" in blocker for blocker in report["blockers"]),
+                "必须要求明确映射而不是静默合并",
+            )
+
+    def test_all_simulated_import_cannot_claim_supported(self) -> None:
+        # 全部结果为 simulated → 证据 simulated、结论 not_assessed，二者必须一致。
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            rows = [
+                self._row("candidate", "dataset-a", "simulated", 0.91, run_dir),
+                self._row("baseline", "dataset-a", "simulated", 0.71, run_dir),
+            ]
+            for row in rows:
+                row["artifact_records"] = []
+            import_existing_results(run_dir, rows, replace=True,
+                                    contract_source={"schema_version": 2, "evaluation": {"primary_metrics": ["accuracy"]}})
+            report = evaluate_imported_results(run_dir)
+            states = report["decision_states"]
+            self.assertEqual(states["evidence_status"], "simulated")
+            self.assertEqual(states["research_outcome"], "not_assessed")
+            self.assertNotEqual(states["research_outcome"], "supported")
+            self.assertEqual(states["execution_status"], "simulated")
 
 
 if __name__ == "__main__":

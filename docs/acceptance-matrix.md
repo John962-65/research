@@ -28,7 +28,7 @@
 | A17 | 引用否定方向/数字/条件相反 | 不得自动宣称已支持 | T08 | tests/test_claim_evidence_polarity.py（6 用例）+ tests/test_claim_traceability.py::test_contradicted_direction_blocks_claim_with_claim_id | verified |
 | A18 | 正确主张且证据完整 | 可通过并定位证据 | T08 | tests/test_claim_traceability.py::test_supported_claim_with_complete_evidence_passes + citation_grounding evidence_locator（chunk/字符跨度/页码） | verified |
 | A19 | 页面提交旧版本批准 | 后端拒绝，提示材料变化 | T09 | tests/test_web_decision_state.py::StaleApprovalRejectionTest::test_stale_binding_approval_is_rejected_with_material_change_message | verified |
-| A20 | 正常真实案例 | 可重算关键结果并解释最终决策 | T10 | runs/public-iris-case（CASE-REPORT.md）+ scripts/replay_public_case.sh 实测：grader 复算 accuracy=0.966667 与案例一致；故障注入副本被 schema 审计阻断（status=block，exit 2）；中断恢复尝试账本 15 条 | verified |
+| A20 | 正常真实案例 | 可重算关键结果并解释最终决策 | T10 | runs/public-iris-case（CASE-REPORT.md）+ scripts/replay_public_case.sh 实测：grader 复算 accuracy=0.966667 与案例一致；故障注入副本被 schema 审计阻断（status=block，exit 2）；基线归档 15 条，干净重放按实际事件为 interrupted=1、passed=9、总数=10 | verified |
 | A21 | 无试用数据 | 保持 not_measured，不生成效率比例 | T11 | tests/test_review_evaluation.py（16 子测试通过；docs/review-evaluation.md 维持 not_measured 声明） | verified |
 | A22 | 同输入走 CLI/Web/恢复 | 决策、原因、证据版本一致 | T12 | 三入口共享同一决策实现（experiment_decision/gate_aggregator/evidence_snapshot 由 pipeline 单点调用，Web 仅做输入输出）；tests/test_web_resume.py 恢复等价性 + examples/review-evaluation-cases.json 直连真实决策函数 | verified |
 
@@ -42,6 +42,14 @@
 | A29 | 模拟执行 | 四态一致：execution=simulated（非 completed）、evidence=simulated、outcome=not_assessed、next=request_material | T13 | tests/test_workflow_facts.py::SimulatedStatesTest + ::test_simulated_result_maps_all_four_states | verified |
 | A30 | 合格负结果且复核无必须修改项 | 不进入无界修订，直达终局 | T13 | tests/test_workflow_facts.py::NegativeResultRoutingTest::test_negative_result_without_review_tasks_skips_revision | verified |
 | A31 | 负结果但有复核任务；修订后审计阻断；三入口 | 进入一次修订（受 paper_revisions 上限）；recheck 按审计实际结果；facts 由共享构造函数生成 | T13 | tests/test_workflow_facts.py::NegativeResultRoutingTest（3 用例） | verified |
+
+| A32 | T14 离线预检、无真实端点/凭据 | 预检链路可运行但 gold canary 保持 not_verified，不生成 publishable | T14 | docs/public-case/t14-canary-offline-doctor.txt + docs/gold-canary-runbook.md | verified |
+| A33 | T14 六角色真实账本缺失 | 缺少真实 call_id、角色输入摘要或证据定位时 gate 保持 blocked；当前真实 canary 未执行 | T14 | docs/gold-canary-runbook.md（验收条件，待真实端点） | planned |
+| A34 | T15 仅有 benchmark-only 产物 | 未生成论文/独立评审/最终 gate 时保持 benchmark-only 与 not_verified，不得宣称 paper-grade | T15 | docs/public-case/PAPER-GRADE-GAP.md + runs/public-iris-case/CASE-REPORT.md | verified |
+| A35 | T16 重放事件数量变化 | replay summary、CASE-REPORT 与 attempts 账本按实际事件一致；允许 interrupted=1、passed=9、总数=10 | T16 | scripts/replay_public_case.sh + scripts/check_public_case_consistency.py（三案例通过） | verified |
+| A36 | T17 旧 Run 迁移后进入发布门禁 | 迁移保留 legacy/unknown 标记并使旧批准失效；缺字段 Run 不得直接 publishable | T17 | tests/test_run_migration.py::test_migrated_run_is_blocked_by_publishable_gate + 迁移/幂等测试 | verified |
+| A37 | T18 仓库内置机器人 fixture | 真实 RRT 执行可复核但 fixture provenance 的 schema audit 保持 block，不得称外部正式 benchmark | T18 | docs/public-case/ROBOT-CASE.md + runs/robot-rrt2d-case/04-benchmark-result-schema-audit.json | verified |
+| A38 | T19/T20 无用户数据与文档漂移 | participants=0 时保持 not_measured；文档漂移检查通过，测试数字来自机器产物 | T19/T20 | docs/trial-kit.md + scripts/check_docs_drift.py + docs/test-evidence.json | verified |
 
 ## 使用规则
 

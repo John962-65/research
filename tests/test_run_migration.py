@@ -4,9 +4,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import json
 import unittest
+from types import SimpleNamespace
 
 from research_agent.run_migration import MIGRATION_RECORD_JSON, apply_migration, plan_migration
 from research_agent.artifacts import write_json
+from research_agent.config import AgentConfig
 
 
 class MigrationTest(unittest.TestCase):
@@ -64,6 +66,29 @@ class MigrationTest(unittest.TestCase):
             again = apply_migration(run_dir)
             self.assertTrue(again["already_migrated"])
             self.assertEqual((run_dir / MIGRATION_RECORD_JSON).read_text(encoding="utf-8"), before)
+
+    def test_migrated_run_is_blocked_by_publishable_gate(self) -> None:
+        """A36: migration metadata must affect the runtime gate, not only docs."""
+        from research_agent.pipeline import _finalize_gate_decision
+
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            self._legacy_run(run_dir)
+            apply_migration(run_dir)
+            decision, _ = _finalize_gate_decision(
+                "legacy",
+                run_dir,
+                AgentConfig(),
+                None,
+                agent_deliberation={"status": "pass"},
+                claim_consistency={"status": "pass"},
+                citation_grounding=SimpleNamespace(status="pass"),
+                revised_review=SimpleNamespace(decision="accept"),
+                resume=False,
+            )
+            self.assertEqual(decision["status"], "blocked")
+            self.assertIn("deterministic:schema_migration", decision["blocking_sources"])
+            self.assertFalse(decision["overridden"])
 
 
 if __name__ == "__main__":

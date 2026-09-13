@@ -292,7 +292,10 @@ def _result_row_problems(row: dict[str, Any], run_dir: Path) -> list[str]:
     if not record_list:
         problems.append(f"{name}: 来源不可核验（无任何产物记录；声明字段不构成核验）")
         return problems
+    # 复审第 9 轮第 3 项：文件身份（存在+哈希）只证明文件完整，不证明
+    # 报告的指标数值来自该文件。必须从产物重新提取并核对每个指标。
     any_verifiable = False
+    any_content_checked = False
     for record in record_list:
         rel = str(record.get("path") or "").strip()
         if not rel:
@@ -314,8 +317,55 @@ def _result_row_problems(row: dict[str, Any], run_dir: Path) -> list[str]:
                 problems.append(f"{name}: 产物哈希与声明不一致（{rel}）")
                 continue
         any_verifiable = True
+        content_problems = _verify_metrics_from_artifact(name, row.get("metrics") or {}, artifact, rel)
+        if content_problems:
+            problems.extend(content_problems)
+        elif _artifact_contains_any_metric(artifact):
+            any_content_checked = True
     if not any_verifiable:
         problems.append(f"{name}: 没有任何可核验的产物文件（声明不等于核验）")
+        return problems
+    if not any_content_checked:
+        # 复审第 9 轮第 3 项：区分"文件完整性已验证"与"指标来源已验证"。
+        problems.append(f"{name}: 文件完整性已验证，但指标来源未验证（产物不含可比对的指标值）")
+    return problems
+
+
+def _artifact_contains_any_metric(artifact: Path) -> bool:
+    try:
+        data = json.loads(artifact.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return False
+    return isinstance(data, dict) and bool(data)
+
+
+def _verify_metrics_from_artifact(name: str, metrics: dict[str, Any], artifact: Path, rel: str) -> list[str]:
+    """从产物 JSON 重新提取指标并核对数值；返回问题列表（空 = 来源已核验）。"""
+    import json as _json
+
+    try:
+        data = _json.loads(artifact.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return [f"{name}: 产物 {rel} 非 JSON/不可解析，指标来源未验证（文件完整性已验证）"]
+    if not isinstance(data, dict):
+        return [f"{name}: 产物 {rel} 不是指标对象，指标来源未验证（文件完整性已验证）"]
+    problems: list[str] = []
+    for key, declared in metrics.items():
+        if key not in data:
+            continue  # 产物只包含部分指标：不强制全含，由来源定位标注覆盖范围
+        try:
+            actual_value = float(data[key])
+        except (TypeError, ValueError):
+            problems.append(f"{name}: 产物 {rel} 的 {key} 非数值，指标来源未验证")
+            continue
+        try:
+            declared_value = float(declared)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(actual_value) or abs(actual_value - declared_value) > 1e-6:
+            problems.append(
+                f"{name}: 指标 {key} 与产物内容不一致（声明 {declared_value}，产物 {actual_value}，来源 {rel}）"
+            )
     return problems
 
 

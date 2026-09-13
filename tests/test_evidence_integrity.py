@@ -173,6 +173,49 @@ class AssessEvidenceIntegrityTest(unittest.TestCase):
                     for reason in integrity.unusable_result_reasons)
             )
 
+    def test_metric_value_mismatch_with_artifact_content_is_not_verified(self) -> None:
+        # 复审第 9 轮第 3 项：文件哈希正确 ≠ 报告指标来自文件。
+        # 产物内容 accuracy=0.1，导入行声明 0.91 → 不得判 verified。
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            (run_dir / "experiments").mkdir()
+            import hashlib
+
+            artifact = run_dir / "experiments" / "candidate_metrics.json"
+            artifact.write_text(json.dumps({"accuracy": 0.1}), encoding="utf-8")
+            rows = [{
+                "name": "candidate", "status": "passed", "metrics": {"accuracy": 0.91},
+                "command": ["python3", "c.py"], "returncode": 0, "repeat_index": 0,
+                "artifact_records": [{"path": "experiments/candidate_metrics.json",
+                                      "sha256": hashlib.sha256(artifact.read_bytes()).hexdigest()}],
+            }]
+            (run_dir / "04-results.json").write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+            integrity = assess_evidence_integrity(run_dir)
+            self.assertNotEqual(integrity.experiment_evidence_status, "verified")
+            self.assertTrue(any("与产物内容不一致" in r for r in integrity.unusable_result_reasons))
+            self.assertTrue(any("0.91" in r and "0.1" in r for r in integrity.unusable_result_reasons))
+
+    def test_unparseable_artifact_distinguishes_integrity_from_metric_source(self) -> None:
+        # 文件完整（哈希一致）但无法解析出指标 → "文件完整性已验证，
+        # 指标来源未验证"，不得判 verified。
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            (run_dir / "experiments").mkdir()
+            import hashlib
+
+            artifact = run_dir / "experiments" / "candidate_metrics.txt"
+            artifact.write_text("binary-ish output without json", encoding="utf-8")
+            rows = [{
+                "name": "candidate", "status": "passed", "metrics": {"accuracy": 0.91},
+                "command": ["python3", "c.py"], "returncode": 0, "repeat_index": 0,
+                "artifact_records": [{"path": "experiments/candidate_metrics.txt",
+                                      "sha256": hashlib.sha256(artifact.read_bytes()).hexdigest()}],
+            }]
+            (run_dir / "04-results.json").write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+            integrity = assess_evidence_integrity(run_dir)
+            self.assertEqual(integrity.experiment_evidence_status, "incomplete")
+            self.assertTrue(any("文件完整性已验证" in r and "指标来源未验证" in r for r in integrity.unusable_result_reasons))
+
     def test_manual_report_with_real_experiment_is_not_simulated(self) -> None:
         # A04：真实实验 + 无模型调用 → 实验证据 verified，不因无 LLM 判成模拟。
         with TemporaryDirectory() as tmp:

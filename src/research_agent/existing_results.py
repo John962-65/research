@@ -228,9 +228,6 @@ def evaluate_imported_results(run_dir: Path) -> dict[str, Any]:
         f" baseline={sum(1 for c in plan.commands if c.comparison_group == 'baseline')}"
         f" ablation={sum(1 for c in plan.commands if c.comparison_group == 'ablation')}"
     )
-    # 池化分组以计划为准（计划已把 candidate/baseline 归入同一数据集/任务组），
-    # 导入行自带的 comparison_group 仅作参考。
-    plan_group = {command.name: command.comparison_group for command in plan.commands}
     results = [
         ExperimentResult(
             name=str(row.get("name")),
@@ -244,7 +241,7 @@ def evaluate_imported_results(run_dir: Path) -> dict[str, Any]:
             command=row.get("command") or [],
             returncode=row.get("returncode"),
             duration_seconds=row.get("duration_seconds"),
-            comparison_group=plan_group.get(str(row.get("name")), "default"),
+            comparison_group=str(row.get("comparison_group") or "default"),
             adapter_id=str(row.get("adapter_id") or ""),
             artifact_records=row.get("artifact_records") or [],
             validation_issues=row.get("validation_issues") or [],
@@ -271,7 +268,11 @@ def evaluate_imported_results(run_dir: Path) -> dict[str, Any]:
         preregistration=prereg or None,
         execution_mode="imported",
     )
-    failure_analysis = _failure_summary(statistics, result_validation)
+    # 复审第 9 轮第 2 项：失败/模拟计数复用真实失败分析模块（从原始结果
+    # 统计），不再固定为零——否则全部 simulated 的导入会被当成真实比较。
+    from .failure_analysis import build_failure_analysis_report
+
+    failure_analysis = build_failure_analysis_report(plan, results, statistics, result_validation)
     integrity = write_evidence_integrity_artifacts(str(prereg.get("topic") or plan.idea_title), run_dir)
     decision = write_experiment_decision_artifacts(
         plan,
@@ -296,7 +297,15 @@ def evaluate_imported_results(run_dir: Path) -> dict[str, Any]:
         if str(item).strip()
     ]
     if not statistics.comparisons:
-        report["blockers"].append("没有 candidate/baseline 可比较项：需要补齐另一侧的执行结果（比较条件不完整）。")
+        groups = {str(row.get("comparison_group") or "default") for row in rows}
+        if len(groups) > 1:
+            report["blockers"].append(
+                "结果包含多个 comparison_group（数据集/任务/划分身份）："
+                + "、".join(sorted(groups)[:5])
+                + "；不同组之间不进入同一个统计比较。请明确映射或补齐同一数据集的 candidate/baseline 对照。"
+            )
+        else:
+            report["blockers"].append("没有 candidate/baseline 可比较项：需要补齐另一侧的执行结果（比较条件不完整）。")
     report["next_actions"] = [str(item) for item in decision.get("next_actions", [])]
     report["evidence"] = {
         "llm": integrity.llm_evidence_status,
@@ -340,10 +349,20 @@ def _imported_plan(rows: list[dict[str, Any]], run_dir: Path) -> "ExperimentPlan
     names: list[str] = []
     commands: list[ExperimentCommand] = []
     baseline = ""
-    # comparison_group 是数据集/任务池化标识：candidate 与 baseline 必须同组
-    # 才可配对；角色区分由 role 承担。
-    row_groups = {str(row.get("comparison_group") or "") for row in rows if str(row.get("comparison_group") or "")}
-    common_group = row_groups.pop() if len(row_groups) == 1 else "default"
+    # 复审第 9 轮第 1 项：comparison_group 是数据集/任务/划分身份，必须
+    # 逐条保留——不同 comparison_group 的结果不得进入同一个统计比较。
+    # candidate 与 baseline 是否可配对由统计模块的池化拒绝逻辑判定；
+    # 分组缺失（无 comparison_group）时要求明确映射（见 evaluate blockers）。
+    name_groups: dict[str, str] = {}
+    for row in rows:
+        name = str(row.get("name"))
+        group = str(row.get("comparison_group") or "")
+        if name in name_groups and name_groups[name] != group:
+            raise ValueError(
+                f"结果行 {name} 带有多种 comparison_group（{name_groups[name]} vs {group}）："
+                "同一命令的数据集/划分身份不一致，请先明确映射。"
+            )
+        name_groups.setdefault(name, group)
     for row in rows:
         name = str(row.get("name"))
         if name not in names:
@@ -357,7 +376,7 @@ def _imported_plan(rows: list[dict[str, Any]], run_dir: Path) -> "ExperimentPlan
                     name=name,
                     command=[str(part) for part in command] if isinstance(command, list) else [name],
                     role=role,
-                    comparison_group=common_group,
+                    comparison_group=name_groups[name] or "default",
                 )
             )
         for key in (row.get("metrics") or {}):
@@ -394,25 +413,6 @@ def _imported_idea(plan: "ExperimentPlan", prereg: dict[str, Any], contract: dic
         evidence_keys=[],
         baseline=plan.baseline,
     )
-
-
-def _failure_summary(statistics, result_validation: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "status": "pass" if result_validation.get("status") != "block" else "block",
-        "summary": {"failed_runs": sum(1 for row in result_validation.get("items", []) if False), "simulated_runs": 0},
-        "failed_runs": [],
-        "negative_metrics": [
-            {"metric": item.metric, "delta": item.delta, "direction": item.direction}
-            for item in statistics.comparisons
-            if item.direction == "baseline_better_or_equal"
-        ],
-        "uncertain_metrics": [
-            {"metric": item.metric, "delta": item.delta, "direction": item.direction}
-            for item in statistics.comparisons
-            if item.ci_low <= 0 <= item.ci_high
-        ],
-        "claim_boundaries": [],
-    }
 
 
 def _infer_group(name: str) -> str:

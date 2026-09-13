@@ -199,6 +199,63 @@ class GateAggregatorTest(unittest.TestCase):
         self.assertEqual(rejected.status, "blocked")
         self.assertTrue(any("reason_code" in item for item in rejected.warning_sources))
 
+    def test_item_level_non_overridable_flag_survives_into_gate(self) -> None:
+        # 复审第 9 轮第 4 项：用真实 result_validation 校验器生成的报告
+        # （overridable=False 写在 items[] 子项内）交给聚合器——契约违规
+        # 的不可覆盖限制必须保留，合法覆盖不得放行。
+        import sys as _sys
+
+        _sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+        from research_agent.result_validation import build_result_validation_report
+        from research_agent.models import ExperimentCommand, ExperimentPlan, ExperimentResult
+        from research_agent.statistics import build_statistics_report
+
+        plan = ExperimentPlan(
+            idea_title="gate 集成", objective="o", variables=["m"], metrics=["success_rate"],
+            protocol=["p"],
+            commands=[ExperimentCommand(name="candidate", command=["python3", "c.py"]),
+                      ExperimentCommand(name="baseline", command=["python3", "b.py"])],
+            baseline="base",
+        )
+        results = [
+            ExperimentResult(name="candidate", status="passed", metrics={"success_rate": 0.9},
+                             artifacts=[], repeat_index=0, command=["python3", "c.py"], comparison_group="g"),
+            ExperimentResult(name="baseline", status="passed", metrics={"success_rate": 0.7},
+                             artifacts=[], repeat_index=0, command=["python3", "b.py"], comparison_group="g"),
+        ]
+        statistics = build_statistics_report(plan, results)
+        contract = {"digest": "original", "contract_id": "c", "evaluation": {"primary_metrics": ["success_rate"]}}
+        # 结果出来后改契约内容、保留旧 digest（真实校验器生成 items[] 内的
+        # overridable=False 契约违规阻断）。
+        tampered = {**contract, "evaluation": {"primary_metrics": ["other_metric"]}}
+        validation = build_result_validation_report(
+            plan, results, statistics, expected_repeats=1, preregistration={},
+            contract=tampered, contract_binding={"contract_digest": "original"},
+        )
+        self.assertEqual(validation["status"], "block")
+        binding_item = next(i for i in validation["items"] if i["name"] == "contract_binding")
+        self.assertIs(binding_item["overridable"], False)
+
+        decision = aggregate_final_decision(
+            deterministic_audits={"result_validation": validation},
+            independent_deliberation=None,
+        )
+        self.assertEqual(decision.status, "blocked")
+        digest = decision.inputs["verdict_sha256"]
+        override = {
+            "reviewer": "amy", "reason": "试图覆盖契约违规", "reason_code": "scope_limitation",
+            "approval_object": "deterministic:result_validation",
+            "approved_blockers": ["deterministic:result_validation"],
+            "scope": "全部", "revision": 0, "verdict_sha256": digest, "approved": True,
+        }
+        overridden = aggregate_final_decision(
+            deterministic_audits={"result_validation": validation},
+            independent_deliberation=None,
+            human_override=override,
+        )
+        self.assertEqual(overridden.status, "blocked", "子项不可覆盖限制必须保留")
+        self.assertTrue(any("non_overridable:deterministic:result_validation" in w for w in overridden.warning_sources))
+
     def test_partial_override_only_dissolves_approved_blockers(self) -> None:
         # 复审场景 1：三条阻断同时存在（普通建议性 / 来源不可核验 / 缺统计角色），
         # 人工批准明确只接受第一条 → 其余阻断（含缺失角色）继续阻止放行。

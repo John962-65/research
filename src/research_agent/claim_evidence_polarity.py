@@ -43,6 +43,8 @@ _YEAR_PATTERN = re.compile(r"(?:^|\D)((?:19|20)\d{2})(?:\D|$)")
 _TARGET_PATTERN = re.compile(
     r"(?:提升到|提高到|提升至|提高至|增加到|增长到|上升到|达到|improve(?:s|d)?\s+to|reach(?:es|ed)?)\s*[\d.]+%?"
     r"|(?:从)\s*[\d.]+%?\s*(?:到|至|提升到|提高到|提升至)\s*[\d.]+%?"
+    # 复审第 9 轮第 6 项：指标词穿插形式——"提高准确率到 99%"。
+    r"|(?:提升|提高|增加|上升|达到)[^，。；%;]{0,12}?(?:到|至|为)\s*[\d.]+%?"
 )
 _DATASET_TOKEN_PATTERN = re.compile(r"\b(?:UCI|Iris|OMPL|RRT|RRT\*|PRM|CHOMP|STOMP|MoveIt|Ros|ROS|Gazebo|MNIST|CIFAR|GLUE|SQuAD)\b")
 
@@ -72,7 +74,9 @@ def assess_claim_polarity(claim_text: str, evidence_text: str) -> PolarityAssess
     claim_map = _metric_polarity_map(claim)
     evidence_map = _metric_polarity_map(evidence)
 
-    # 1) 同指标方向核对（复审第 5 项：从句极性按指标归因，不整句污染）。
+    # 1) 同指标方向核对（复审第 5 项：从句极性按指标归因，不整句污染）；
+    #    复审第 9 轮第 6 项：否定主张同样需要证据同指标同向确认——
+    #    "没有检测到矛盾"不等于"有证据支持"。
     direction_conflict = False
     for metric, claim_pols in claim_map.items():
         evidence_pols = evidence_map.get(metric, set())
@@ -92,6 +96,14 @@ def assess_claim_polarity(claim_text: str, evidence_text: str) -> PolarityAssess
             continue
         notes.append(f"指标 {metric} 在证据文本中无方向信息，待人工核验。")
 
+    # 1b) 方法/对象主体匹配（复审第 9 轮第 6 项）：
+    #     "Method A improves accuracy" ≠ "Method B improves accuracy"。
+    subject_conflict, subject_insufficient = _subject_conflict(claim, evidence)
+    if subject_conflict:
+        conflicts.append(subject_conflict)
+    if subject_insufficient:
+        notes.append(subject_insufficient)
+
     # 2) 目标数值核对：主张的目标数值必须出现在证据数值中（年份除外）。
     number_conflict = _number_conflict(claim, evidence)
     if number_conflict:
@@ -104,11 +116,16 @@ def assess_claim_polarity(claim_text: str, evidence_text: str) -> PolarityAssess
 
     if conflicts:
         return PolarityAssessment("contradicted", conflicts, notes)
-    # 4) 支持判定：主张的每个正向指标都必须在证据中找到同指标正向表述；
-    #    找不到 → insufficient_evidence（待核验），不得落回 supported。
-    positive_metrics = [metric for metric, pols in claim_map.items() if "pos" in pols]
-    if positive_metrics and not direction_conflict:
-        unverified = [m for m in positive_metrics if "pos" not in evidence_map.get(m, set())]
+    # 4) 支持判定：主张的每个方向断言（正向或否定）都必须在证据中找到
+    #    同指标同向表述；找不到 → insufficient_evidence（待核验），
+    #    不得落回 supported（复审第 9 轮第 6 项：否定主张同样需要确认）。
+    directional_metrics = [metric for metric, pols in claim_map.items() if pols]
+    if directional_metrics and not direction_conflict:
+        unverified = [
+            metric
+            for metric in directional_metrics
+            if not (claim_map[metric] & evidence_map.get(metric, set()))
+        ]
         if unverified:
             return PolarityAssessment(
                 "insufficient_evidence",
@@ -118,6 +135,14 @@ def assess_claim_polarity(claim_text: str, evidence_text: str) -> PolarityAssess
     # 5) 主张含数值但无法绑定目标语义（如差值表述）且证据有数字 → 待核验。
     if _numbers_without_years(claim) and not _targets(claim) and _numbers_without_years(evidence):
         return PolarityAssessment("insufficient_evidence", [], ["主张数值语义无法绑定目标值（如差值），需人工核对"] + notes)
+    # 5b) 复审第 9 轮第 6 项：主张声明了目标数值，而证据文本不含任何数值
+    #     → 无法确认该数值有来源，待核验（"提高准确率到 99%" vs "提高准确率"）。
+    if _targets(claim) and not _numbers_without_years(evidence):
+        return PolarityAssessment(
+            "insufficient_evidence",
+            [],
+            ["主张声明了目标数值，但证据文本不含任何数值，无法确认其来源，需人工核对"] + notes,
+        )
     return PolarityAssessment("supported", conflicts, notes)
 
 
@@ -192,6 +217,32 @@ def _number_conflict(claim: str, evidence: str) -> str:
             "引用数值必须与来源一致。"
         )
     return ""
+
+
+_SUBJECT_PATTERN = re.compile(
+    r"\b(?:method|model|approach|planner|agent|variant|algorithm)\s+[-]?[A-Za-z0-9]\b"
+    r"|(?:方法|模型|方案|算法|变体)\s*[-]?[A-Za-z0-9](?:[A-Za-z0-9]*)",
+    re.IGNORECASE,
+)
+
+
+def _subject_conflict(claim: str, evidence: str) -> tuple[str, str]:
+    """方法/对象主体核对：主张与证据的方法标识必须相交，否则矛盾或待核验。"""
+    claim_subjects = {match.group(0).lower() for match in _SUBJECT_PATTERN.finditer(claim)}
+    evidence_subjects = {match.group(0).lower() for match in _SUBJECT_PATTERN.finditer(evidence)}
+    if claim_subjects and evidence_subjects:
+        if not (claim_subjects & evidence_subjects):
+            return (
+                f"subject_conflict: 主张方法 {sorted(claim_subjects)[:3]} 与证据方法 {sorted(evidence_subjects)[:3]} 不一致；"
+                "不得把方法 A 的结果写成方法 B。"
+            ), ""
+        return "", ""
+    if claim_subjects and not evidence_subjects:
+        return "", (
+            f"主张声明了方法标识 {sorted(claim_subjects)[:3]}，但证据文本未提及任何方法标识，"
+            "无法确认是否同一方法，需人工核对。"
+        )
+    return "", ""
 
 
 def _condition_conflict(claim: str, evidence: str) -> str:

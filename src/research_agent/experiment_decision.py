@@ -76,6 +76,12 @@ def build_experiment_decision_report(
         for item in statistics.comparisons
         if item.direction == "candidate_better" and (not primary_metrics or item.metric in primary_metrics)
     )
+    # 复审第 2 项：契约声明的主指标必须全部得到评估；缺失主指标时不得
+    # 回退到"全部比较"得出 supported，也不得放行进入论文阶段。
+    primary_missing: list[str] = []
+    if primary_metrics:
+        compared_metrics = {item.metric for item in statistics.comparisons}
+        primary_missing = [metric for metric in primary_metrics if metric not in compared_metrics]
     decision, status = _decision(
         validation_status=validation_status,
         failure_status=failure_status,
@@ -87,6 +93,7 @@ def build_experiment_decision_report(
         benchmark_actions=benchmark_actions,
         benchmark_evidence_status=benchmark_evidence_status,
         benchmark_evidence_grade=benchmark_evidence_grade,
+        primary_missing=primary_missing,
     )
     next_actions = _next_actions(
         decision=decision,
@@ -100,6 +107,7 @@ def build_experiment_decision_report(
         benchmark_evidence_status=benchmark_evidence_status,
         benchmark_evidence_grade=benchmark_evidence_grade,
         benchmark_evidence_actions=benchmark_evidence_actions,
+        primary_missing=primary_missing,
     )
     claim_boundaries = _claim_boundaries(decision, failure_analysis, execution_mode, negative_metrics, uncertain_metrics, simulated_runs, benchmark_evidence)
     return {
@@ -122,6 +130,8 @@ def build_experiment_decision_report(
             failed_runs=failed_runs,
             positive_primary=positive_primary,
             experiment_evidence_status=experiment_evidence_status,
+            primary_metrics=primary_metrics,
+            primary_missing=primary_missing,
         ),
         "evidence_summary": {
             "validation_status": validation_status,
@@ -210,6 +220,7 @@ def _decision(
     benchmark_actions: list[Any],
     benchmark_evidence_status: str,
     benchmark_evidence_grade: str,
+    primary_missing: list[str] | None = None,
 ) -> tuple[str, str]:
     if benchmark_evidence_status == "block" or benchmark_evidence_grade == "blocked":
         return "repair_before_writing", "block"
@@ -220,6 +231,8 @@ def _decision(
     # next_action=request_material，而不是基于虚构方向的 proceed）。
     if execution_mode == "simulated" or simulated_runs:
         return "benchmark_upgrade", "warn"
+    if primary_missing:
+        return "refine_experiment", "warn"
     if negative_metrics:
         return "pivot_or_refine", "warn"
     if uncertain_metrics or validation_status == "warn" or failure_status == "warn":
@@ -243,8 +256,12 @@ def _next_actions(
     benchmark_evidence_status: str,
     benchmark_evidence_grade: str,
     benchmark_evidence_actions: list[Any],
+    primary_missing: list[str] | None = None,
 ) -> list[str]:
     actions: list[str] = []
+    if primary_missing:
+        names = ", ".join(primary_missing[:6])
+        actions.append(f"契约主指标未得到评估：{names}；请补齐这些指标的比较后重新评估。")
     if decision == "repair_before_writing":
         actions.append("先修复 04-result-validation 或 04-failure-analysis 的阻断项，再重新分析和写作。")
     if failed_runs:
@@ -314,12 +331,15 @@ def _decision_states(
     failed_runs: list[Any],
     positive_primary: int = 0,
     experiment_evidence_status: str = "",
+    primary_metrics: list[str] | None = None,
+    primary_missing: list[str] | None = None,
 ) -> dict[str, Any]:
     """decision-contract §1 的四类状态映射（execution/evidence/research_outcome/next_action）。
 
     四类状态独立保存、互不推导：completed 且 verified 仍可能 not_supported；
     not_supported 是允许的准确负结果，不触发自动改写。
     """
+    primary_metrics_declared = bool(primary_metrics)
     execution_status = "completed"
     for item in failed_runs:
         row_status = str(item.get("status") or "") if isinstance(item, dict) else ""
@@ -340,10 +360,15 @@ def _decision_states(
     validation_status = str(result_validation.get("status") or "")
     # 复审第 4/6 项：证据真实性优先采纳 04-evidence-integrity 的独立判定
     # （产物来源与内容可信度）；统计警告（如 CI 零宽）不属于证据缺失。
-    if validation_status == "block" or decision == "repair_before_writing":
-        evidence_status = "invalid"
-    elif experiment_evidence_status in {"verified", "incomplete", "invalid", "simulated", "unknown"}:
+    # 复审第 9 轮第 2 项：完整性工件的"非 verified"判定（simulated/incomplete/
+    # invalid/unknown）是证据来源的直接事实，优先于验证阻断启发式——
+    # 全模拟的导入必须显示 simulated，而不是被验证阻断掩盖成 invalid。
+    if experiment_evidence_status in {"simulated", "incomplete", "invalid", "unknown"}:
         evidence_status = experiment_evidence_status
+    elif validation_status == "block" or decision == "repair_before_writing":
+        evidence_status = "invalid"
+    elif experiment_evidence_status == "verified":
+        evidence_status = "verified"
     elif validation_status == "warn":
         evidence_status = "incomplete"
     elif execution_mode == "simulated" or simulated_runs:
@@ -353,12 +378,21 @@ def _decision_states(
     else:
         evidence_status = "verified"
 
-    if comparisons and (positive_primary or negative_metrics or uncertain_metrics):
+    # 复审第 2 项：有契约主指标时只允许用主指标正向计数，禁止回退到
+    # "全部比较"（次指标正向 + 主指标缺失 → supported 的反例封死）。
+    if primary_metrics_declared:
         stable_positive = positive_primary
     else:
         stable_positive = comparisons - len(negative_metrics) - len(uncertain_metrics)
-    if decision == "repair_before_writing" or execution_mode == "simulated" or decision == "benchmark_upgrade" or comparisons <= 0:
+    # 复审第 2 项：状态组合约束——
+    #   模拟/无效证据不能支撑真实实验结论 → not_assessed；
+    #   契约主指标未全部评估 → 只能 inconclusive（证据不足）。
+    if evidence_status in {"simulated", "invalid"} or execution_mode == "simulated" or simulated_runs:
         research_outcome = "not_assessed"
+    elif decision == "repair_before_writing" or decision == "benchmark_upgrade" or comparisons <= 0:
+        research_outcome = "not_assessed"
+    elif primary_missing:
+        research_outcome = "inconclusive"
     elif negative_metrics and stable_positive <= 0:
         research_outcome = "not_supported"
     elif uncertain_metrics or stable_positive <= 0:

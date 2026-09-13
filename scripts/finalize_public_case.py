@@ -92,16 +92,24 @@ def finalize_case(run_dir: Path) -> dict:
     )
     config = ExecutionConfig(mode="benchmark", repeats=3, timeout_seconds=300, allowed_commands=["python3"])
 
-    contract = build_execution_contract(research_plan, idea, plan, config, preregistration=prereg)
-    history = append_contract_history(run_dir, contract, results_exist=True)
-    contract_report = {
-        "topic": prereg.get("topic"),
-        "status": "pass",
-        "contract": contract,
-        "contract_digest": contract.get("digest"),
-        "note": "本契约由锁定计划与预注册生成（任务书 T10 冻结）；执行器与结果验证读取同一 digest。",
-    }
-    write_json(run_dir / "03-idea-experiment-contract.json", contract_report)
+    # 复审第 9 轮第 5 项：契约由 pack 流程在实验启动前冻结——此处只复用，
+    # 不再事后补建；仅在旧结构 run 缺契约时按 legacy 路径补建并显式注明。
+    stored_contract_report = _opt_json(run_dir / "03-idea-experiment-contract.json")
+    if isinstance(stored_contract_report.get("contract"), dict) and stored_contract_report["contract"].get("digest"):
+        contract = stored_contract_report["contract"]
+        contract_report = stored_contract_report
+        history = _opt_json(run_dir / "03-experiment-contract-history.json")
+    else:
+        contract = build_execution_contract(research_plan, idea, plan, config, preregistration=prereg)
+        history = append_contract_history(run_dir, contract, results_exist=True)
+        contract_report = {
+            "topic": prereg.get("topic"),
+            "status": "pass",
+            "contract": contract,
+            "contract_digest": contract.get("digest"),
+            "note": "legacy 路径：契约在结果产生后补建（results_exist=True，rerun_required 已记录）；新流程应由 pack 在执行前冻结。",
+        }
+        write_json(run_dir / "03-idea-experiment-contract.json", contract_report)
 
     integrity = write_evidence_integrity_artifacts(str(prereg.get("topic") or plan.idea_title), run_dir)
 

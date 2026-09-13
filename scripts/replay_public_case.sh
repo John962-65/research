@@ -189,6 +189,14 @@ assert integrity["experiment_evidence_status"] == "verified"
 assert integrity["llm_evidence_status"] == "unknown", "本案例无模型调用，必须如实记录"
 contract = json.load(open(sys.argv[1] + "/03-idea-experiment-contract.json"))
 assert contract["contract_digest"] == contract["contract"]["digest"]
+# 复审第 9 轮第 5 项：契约必须在执行前冻结并绑定；不得存在未处理的重跑要求。
+runbook = json.load(open(sys.argv[1] + "/04-experiment-runbook.json"))
+binding = runbook.get("contract_binding", {}).get("contract_digest")
+assert binding == contract["contract"]["digest"], "执行绑定摘要必须与冻结契约一致"
+history = json.load(open(sys.argv[1] + "/03-experiment-contract-history.json")).get("entries", [])
+unhandled = [e for e in history if e.get("rerun_required")]
+assert not unhandled, f"存在未处理的重跑要求：{unhandled}"
+assert all(e.get("reason") != "post_results_change" for e in history), "契约必须执行前冻结，不能事后补建"
 attempts = json.load(open(sys.argv[1] + "/04-experiment-attempts.json"))["attempts"]
 assert len(attempts) > 9, "中断恢复后的尝试总数应多于一次完整执行（9）"
 print(f"决策工件核验通过：research_outcome={states['research_outcome']}，尝试总数={len(attempts)}（含中断保留）")

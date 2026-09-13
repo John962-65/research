@@ -262,9 +262,23 @@ def _blocker_overridability(name: str, deterministic_audits: dict[str, dict[str,
     if name.startswith("deterministic:"):
         audit_name = name.split(":", 1)[1]
         report = deterministic_audits.get(audit_name) or {}
-        if report.get("overridable") is False:
+        if _report_declares_non_overridable(report):
             return False, str(report.get("block_reason_code") or "audit_declared_non_overridable")
     return True, ""
+
+
+def _report_declares_non_overridable(report: dict[str, Any]) -> bool:
+    """复审第 9 轮第 4 项：不可覆盖限制可能在报告顶层，也可能写在
+    items[] 的子项里（如 result_validation 的 contract_binding 阻断）。
+    聚合器必须两层都读，防止子项限制在跨模块传递时丢失。"""
+    if not isinstance(report, dict):
+        return False
+    if report.get("overridable") is False:
+        return True
+    for item in report.get("items", []) if isinstance(report.get("items"), list) else []:
+        if isinstance(item, dict) and item.get("overridable") is False:
+            return True
+    return False
 
 
 def _verdict_ledger_problem(

@@ -12,8 +12,9 @@ from .benchmark_plan import BENCHMARK_PLAN_JSON, BENCHMARK_PLAN_MD, render_bench
 from .benchmark_result_schema_audit import write_benchmark_result_schema_audit_artifacts
 from .config import ExecutionConfig
 from .execution_safety import write_execution_safety_audit_artifacts
+from .idea_experiment_contract import append_contract_history, build_execution_contract
 from .experiments import render_experiment_plan_markdown, run_experiments
-from .models import BenchmarkCandidate, BenchmarkPlan, ExperimentCommand, ExperimentPlan, ExperimentResult, ResearchIdea
+from .models import BenchmarkCandidate, BenchmarkPlan, ExperimentCommand, ExperimentPlan, ExperimentResult, ResearchIdea, ResearchPlan
 from .preregistration import PREREGISTRATION_JSON, PREREGISTRATION_MD, write_preregistration_artifacts
 from .result_validation import write_result_validation_artifacts
 from .statistics import build_statistics_report, render_statistics_markdown, write_statistics_figure_artifacts
@@ -65,6 +66,18 @@ def run_benchmark_pack(
     write_execution_safety_audit_artifacts(locked_plan, config, out_dir)
     preregistration = write_preregistration_artifacts(topic, _benchmark_pack_idea(topic, locked_plan), locked_plan, out_dir, results_exist=False)
 
+    # 复审第 9 轮第 5 项：统一执行契约必须在**实验启动前**冻结（执行前冻结
+    # → 执行时绑定 → 执行后校验），不能在结果产生后补建。
+    contract = _pack_contract(topic, locked_plan, preregistration)
+    append_contract_history(out_dir, contract, results_exist=False)
+    write_json(out_dir / "03-idea-experiment-contract.json", {
+        "topic": topic,
+        "status": "pass",
+        "contract": contract,
+        "contract_digest": contract.get("digest"),
+        "note": "本契约由 pack 流程在实验启动前冻结；执行绑定摘要写入 04-experiment-runbook。",
+    })
+
     # 复审第 8 项：pack 运行接入同一套 Run 预算；启动前预留并持久化。
     from .run_budget import ensure_budget, record_execution
 
@@ -72,7 +85,8 @@ def run_benchmark_pack(
     record_execution(out_dir, "experiment_runs", note="benchmark_pack_reserved_pre_execution")
     # T10/T06：resume 时 run_experiments 会核对尝试账本——活任务不重复启动，
     # 已消亡的中断尝试标记为 interrupted 并保留；随后重跑全部命令。
-    results = run_experiments(plan, config, out_dir)
+    # 执行启动时绑定契约内容摘要（T05）。
+    results = run_experiments(plan, config, out_dir, contract_digest=str(contract.get("digest") or ""))
     write_json(out_dir / "04-results.json", results)
     runbook = _read_dict(out_dir / "04-experiment-runbook.json")
     adapter_report = _read_dict(out_dir / "03-benchmark-adapters.json")
@@ -174,6 +188,27 @@ def render_benchmark_pack_run_markdown(report: dict[str, Any]) -> str:
     for artifact in report.get("artifacts", []) if isinstance(report.get("artifacts"), list) else []:
         lines.append(f"- `{artifact}`")
     return "\n".join(lines)
+
+
+def _pack_contract(topic: str, locked_plan: ExperimentPlan, preregistration: dict) -> dict:
+    """pack 流程的执行前冻结契约（复审第 9 轮第 5 项）。"""
+    from .config import ExecutionConfig
+
+    idea = _benchmark_pack_idea(topic, locked_plan)
+    research_plan = ResearchPlan(
+        topic=topic,
+        domain="robotics-benchmark" if "rrt" in topic.lower() else "machine-learning",
+        objective=locked_plan.objective,
+        search_queries=[],
+        benchmarks=[idea.title],
+        baselines=[locked_plan.baseline],
+        metrics=locked_plan.metrics,
+        constraints=["pack 执行，冻结 manifest"],
+        risks=["结果可能为中性/负结果"],
+        success_criteria=["完成 candidate/baseline 统计比较并如实报告"],
+    )
+    config = ExecutionConfig(mode="benchmark", repeats=3, timeout_seconds=300, allowed_commands=["python3"])
+    return build_execution_contract(research_plan, idea, locked_plan, config, preregistration=preregistration)
 
 
 def _base_plan(topic: str) -> ExperimentPlan:

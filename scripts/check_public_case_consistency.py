@@ -17,6 +17,13 @@ def _read_json(path: Path) -> dict:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
+def _read_json_safe(path: Path) -> dict:
+    try:
+        return _read_json(path)
+    except (OSError, ValueError):
+        return {}
+
+
 def check_case_dir(case_dir: Path) -> list[str]:
     problems: list[str] = []
     report_path = case_dir / "CASE-REPORT.md"
@@ -80,6 +87,18 @@ def check_case_dir(case_dir: Path) -> list[str]:
         recomputed = compute_contract_digest(contract.get("contract") or {})
         if (contract.get("contract") or {}).get("digest") != recomputed:
             problems.append("契约 digest 字段与内容重算不一致")
+        # 复审第 9 轮第 5 项：执行绑定摘要必须与当前契约一致，且不存在
+        # 未处理的重跑要求（执行前冻结 → 执行时绑定 → 执行后校验）。
+        runbook = _read_json_safe(case_dir / "04-experiment-runbook.json")
+        binding = (runbook.get("contract_binding") or {}).get("contract_digest") if isinstance(runbook.get("contract_binding"), dict) else ""
+        if not binding:
+            problems.append("04-experiment-runbook 缺少契约绑定（契约未在执行前冻结）")
+        elif binding != recomputed:
+            problems.append(f"执行绑定摘要 {binding[:12]} 与当前契约 {recomputed[:12]} 不一致")
+        history = _read_json_safe(case_dir / "03-experiment-contract-history.json").get("entries") or []
+        unhandled = [e for e in history if e.get("rerun_required") and not e.get("resolved")]
+        if unhandled:
+            problems.append(f"契约历史存在 {len(unhandled)} 条未处理的重跑要求（rerun_required=true）")
     return problems
 
 

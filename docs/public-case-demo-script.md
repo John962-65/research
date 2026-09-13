@@ -21,7 +21,7 @@ bash scripts/replay_public_case.sh   # 离线重放，生成 runs/public-iris-ca
 
 ### 2. 真实执行与中断恢复（60 秒）
 
-- `04-experiment-attempts.json`：15 条真实进程执行记录（task_id/尝试编号/
+- `04-experiment-attempts.json`：真实进程执行记录（数量由实际账本决定；基线归档为 15 条，干净重放通常为 10 条，含 1 次中断和 9 次最终成功）
   PID/起止时间/退出码）。指着编号 a1–a3 与 a4–a6 讲中断故事：
   第一次执行在 candidate/baseline 完成后被真实 SIGINT 终止，
   `--resume` 原地恢复，旧尝试保留、新尝试顺延编号。

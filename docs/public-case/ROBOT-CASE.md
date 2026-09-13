@@ -1,14 +1,11 @@
 # 公开真实闭环案例报告：2D RRT 贪婪采样 vs 保守采样（机器人规划基准案例）
 
-> 存档说明：由 `scripts/finalize_public_case.py` 从 `runs/robot-rrt2d-case` 产物生成（T18 机器人规划基准案例）。基准为仓库内置 fixture（真实 RRT 执行，非公开外部 benchmark）——schema 审计因此按 honest 策略判 block（fixture ≠ formal external benchmark），本案例用于证明执行/核验/决策链路，不用于正式 benchmark 主张。
-
-
 > 本报告由 `scripts/finalize_public_case.py` 从案例产物自动渲染（T16）：
 > 全部计数与状态来自 04-experiment-attempts / 04-experiment-decision /
 > 04-evidence-integrity / 03-experiment-contract-history，不手写。
 
 - 案例目录：`runs/robot-rrt2d-case`
-- 生成时间：2026-09-13T14:42:43.458810+00:00
+- 生成时间：2026-09-13T17:31:31.520444+00:00
 - 案例定位：benchmark-only（LLM/论文/独立评审/gate 步骤 not_verified，见 `docs/public-case/PAPER-GRADE-GAP.md`）
 
 ## 1. 冻结契约与预注册
@@ -39,10 +36,7 @@
 
 ## 4. 受控故障注入
 
-- 标记：fault_injection（受控故障注入，非自然发生的用户错误）
-- 注入方式：复制 examples/rrt-2d-benchmark 后把 split 的 scene_count_per_repeat 缩减 8 个场景
-- 观察结果：block（原因：split_sha256 provenance 不一致），pack 状态 block，CLI 退出码 2
-- 结论：篡改冻结场景划分被 provenance 审计阻断；被篡改副本的结果不能进入结论。
+- 本目录未包含故障注入副本。
 
 ## 5. 复核与限制
 

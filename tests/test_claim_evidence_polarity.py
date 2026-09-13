@@ -100,5 +100,30 @@ class ReviewerRegressionTest(unittest.TestCase):
         self.assertTrue(any("direction_conflict[准确率]" in c for c in swapped.conflicts))
 
 
+class ReviewerRound9Test(unittest.TestCase):
+    """复审第 9 轮第 6 项的三个误放案例回归。"""
+
+    def test_target_value_without_evidence_numbers_is_insufficient(self) -> None:
+        # 主张"提高到 99%"，证据只说"提高准确率"（无任何数值）→ 无法确认
+        # 数值来源 → 待核验，不得判支持。
+        assessment = assess_claim_polarity("方法提高准确率到 99%", "方法提高准确率")
+        self.assertEqual(assessment.polarity, "insufficient_evidence")
+        self.assertTrue(any("目标数值" in n for n in assessment.notes))
+
+    def test_negative_claim_without_evidence_direction_is_insufficient(self) -> None:
+        # 否定主张（"没有提高"）在证据无任何方向信息时 → 待核验，
+        # 不得因"未检测到矛盾"而判支持。
+        assessment = assess_claim_polarity("方法没有提高准确率", "我们在 2025 年研究了此方法")
+        self.assertEqual(assessment.polarity, "insufficient_evidence")
+
+    def test_method_subject_mismatch_is_contradicted(self) -> None:
+        # Method A ≠ Method B → 不得判支持。
+        assessment = assess_claim_polarity(
+            "Method A improves accuracy on MNIST", "Method B improves accuracy on MNIST"
+        )
+        self.assertEqual(assessment.polarity, "contradicted")
+        self.assertTrue(any("subject_conflict" in c for c in assessment.conflicts))
+
+
 if __name__ == "__main__":
     unittest.main()

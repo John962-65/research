@@ -492,13 +492,26 @@ def _finalize_gate_decision(
             ledger_payload = _read_dict(out_dir / "run-llm-ledger.json")
             entries = ledger_payload.get("entries")
             llm_ledger = entries if isinstance(entries, list) else []
+        deterministic_audits = {
+            "agent_deliberation": agent_deliberation if isinstance(agent_deliberation, dict) else {},
+            "claim_consistency": claim_consistency if isinstance(claim_consistency, dict) else {},
+            "citation_grounding": _audit_payload(citation_grounding),
+            "revised_paper_review": _review_payload(revised_review),
+        }
+        # T17/A36: migrated legacy runs remain browsable, but cannot enter a
+        # publishable gate until their evidence is rechecked under the current
+        # schema. Keep this as a normal deterministic blocker so the reason is
+        # included in the final gate artifact.
+        migration_record = _read_dict(out_dir / "00-migration.json")
+        if migration_record.get("migration_status") == "legacy_unscoped":
+            deterministic_audits["schema_migration"] = {
+                "status": "block",
+                "reason_code": "legacy_unscoped",
+                "message": "该 Run 已迁移但尚未按当前 schema 重新核验；不得直接进入 publishable gate。",
+                "overridable": False,
+            }
         decision = aggregate_final_decision(
-            deterministic_audits={
-                "agent_deliberation": agent_deliberation if isinstance(agent_deliberation, dict) else {},
-                "claim_consistency": claim_consistency if isinstance(claim_consistency, dict) else {},
-                "citation_grounding": _audit_payload(citation_grounding),
-                "revised_paper_review": _review_payload(revised_review),
-            },
+            deterministic_audits=deterministic_audits,
             independent_deliberation=independent_report,
             expected_roles=sorted(ROLE_EVIDENCE_VIEWS) if config.multi_agent.enabled else [],
             revision=revision,
@@ -5631,5 +5644,4 @@ def _load_final_readiness_report(path: Path) -> FinalReadinessReport:
     if not isinstance(data, dict):
         raise RuntimeError(f"Invalid final readiness JSON: {path}")
     return FinalReadinessReport(**data)
-
 
