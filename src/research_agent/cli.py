@@ -290,6 +290,12 @@ def main(argv: list[str] | None = None) -> None:
         help="对已导入的已有结果生成统计比较、结果验证与实验后决策（不重新执行、不调用模型）",
     )
     evaluate_imported_parser.add_argument("--run-dir", type=Path, required=True, help="已导入结果的 run 目录")
+    migrate_parser = subparsers.add_parser(
+        "migrate-run",
+        help="旧 Run 迁移：默认 dry-run 盘点 schema 差异；--apply 备份后标记 legacy 并使旧批准失效",
+    )
+    migrate_parser.add_argument("--run-dir", type=Path, required=True, help="目标 run 目录")
+    migrate_parser.add_argument("--apply", action="store_true", help="显式执行迁移（默认仅 dry-run 盘点）")
 
     run_parser = subparsers.add_parser("run", help="Run the full research pipeline")
     run_parser.add_argument("--topic", required=True, help="Research topic or question")
@@ -810,6 +816,21 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == "evaluate-imported":
         _print_evaluate_summary(_run_evaluate(args.run_dir))
+        return
+
+    if args.command == "migrate-run":
+        from .run_migration import apply_migration, plan_migration
+
+        report = apply_migration(args.run_dir) if args.apply else plan_migration(args.run_dir)
+        print(f"迁移报告（{report['mode']}）：{args.run_dir}")
+        print(f"- 已迁移：{report.get('already_migrated')}")
+        for finding in report.get("findings", [])[:8]:
+            print(f"- 发现：{finding}")
+        for action in report.get("actions", [])[:6]:
+            print(f"- 动作：{action}")
+        if args.apply and report.get("backup_dir"):
+            print(f"- 备份：{report['backup_dir']}")
+        print(f"- 说明：{report.get('note')}")
         return
 
     if args.command == "run":
