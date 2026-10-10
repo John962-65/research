@@ -86,13 +86,13 @@ def test_stub_llm_finding_with_wrong_number_gets_downgraded(store: ProjectStore,
                         {
                             "statement": "Candidate 比 Baseline 快了 80%，因为调度策略更好",
                             "claim_type_hint": "statistical_finding",
-                            "observation_ids": ["OBS-001"],
+                            "observation_ids": ["DIAG-0001/OBS-003"],
                             "numeric_assertions": [
                                 {
                                     "metric": "planning_time_s",
                                     "value": 80.0,
                                     "check": "percent_change_from_baseline",
-                                    "basis_observation": "OBS-001",
+                                    "basis_observation": "DIAG-0001/OBS-003",
                                 }
                             ],
                             "alternative_explanations": ["调度策略更好"],
@@ -125,13 +125,13 @@ def test_stub_llm_honest_finding_passes_and_question_proposed(store: ProjectStor
                         {
                             "statement": "Candidate 在全部查询上耗时比 Baseline 低 20%（置信区间不包含零）",
                             "claim_type_hint": "statistical_finding",
-                            "observation_ids": ["OBS-001"],
+                            "observation_ids": ["DIAG-0001/OBS-003"],
                             "numeric_assertions": [
                                 {
                                     "metric": "planning_time_s",
                                     "value": 20.0,
                                     "check": "percent_change_from_baseline",
-                                    "basis_observation": "OBS-001",
+                                    "basis_observation": "DIAG-0001/OBS-003",
                                 }
                             ],
                             "alternative_explanations": ["场景分布不均（已由协变量画像排除/提示）"],

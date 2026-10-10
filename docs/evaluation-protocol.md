@@ -20,27 +20,55 @@
 - 规模：先取 **20–30 个任务**作开发期评测（如 real/train 14 + real/test 前 6–16）。
 - **AstaBench 中的 DiscoveryBench 子任务与本评测同源，不得重复计入。**
 
-## 三组对照（统一条件）
+## 三组对照（统一条件，v2 公平性协议）
 
-| 组 | 配置 | 目的 |
-|---|---|---|
-| A | 普通 LLM + 相同数据分析工具（python 沙箱），ReAct 循环 | 基础模型能做到什么 |
-| B | Copilot 框架，关闭诊断与证据约束（只给列/统计画像） | 框架本身是否产生收益 |
-| C | 完整 Copilot（确定性画像 + 诊断观测 + 证据校验） | 诊断与证据层是否有效 |
+| 组 | 上下文注入 | 诊断观测 | 证据自检闭环 |
+|---|---|---|---|
+| A | 数据概要（表名/列/前几行） | 无 | 无 |
+| B | 确定性统计画像 | 无 | 无 |
+| C | 统计画像 + 诊断观测 | 有 | 有（数值断言程序复核失败→预算内重答） |
 
-统一约束：同一被测模型、同一推理预算（max_steps / max LLM calls）、同一工具集、
-同一任务输入、同一时限、同一作答 schema（hypothesis/variables/relationships/
-mechanism/numeric_assertions，对齐 HMS 结构化抽取字段）。
+**公平性约定（修复 2026-10 审查 P0-1）**：三组共用**同一个** ReAct 循环、同一个
+python 工具沙箱（相同限额/隔离级别）、同一 `GroupBudget`（max_steps /
+max_tool_calls / 时限）、同一模型与作答 schema。组间唯一差异 = 注入的上下文，
+即 Copilot 模块本身的输出。任何成绩差异都可归因于 Copilot 模块。
+
+## 工具沙箱（P0 安全项）
+
+- **环境变量白名单**：子进程只获得 PATH/LANG 等最小 env——API Key 等凭据不可能被
+  生成代码读取（有测试断言）；
+- **资源限额**：RLIMIT_CPU / AS(2GB) / FSIZE / NPROC / NOFILE；
+- **网络隔离**：系统支持非特权 `unshare -Urn` 时启用 user+net namespace；不支持时
+  执行记录如实标注 `network_isolated=false`（残余风险：生成代码可访问网络与用户
+  文件，正式评测不可信代码应使用容器级隔离——见 roadmap P2 工作区安全路径）；
+- 隔离级别写入每次运行的 config.json，评测报告必须展示。
+
+## 评分（P0-2：官方协议对齐）
+
+- **主指标 = 官方单子假设协议**（`evaluation/official_scoring.py`）：
+  `accuracy = context(0/1) × var_F1 × rel(1.0/0.5/0.0)`；
+  三个维度的 judge prompt、温度（0）与解析规则**逐字镜像**官方
+  `eval/new_eval.py`（溯源 sha256 记录于 config.json 与每条评分记录）；
+  自定义 0/1/2 评分降级为辅助指标 `hms_custom`。
+- 已知偏差（如实声明）：官方完整流程含 LLM 子假设切分（recall_context × mean），
+  本实现按单子假设计——与多数外部论文的单假设报告口径一致，但与官方脚本数值
+  不保证完全一致；需要严格对齐时用官方脚本复核同一批答案。
+- judge 模型与被测模型无关，单独计量（每任务 judge_calls）。
 
 ## 指标
 
-1. **HMS（Hypothesis Matching Score）**：官方两步协议（结构化摘要 → 0/1/2 匹配分），
-   优先使用官方评分实现；本仓库内置协议实现（`metrics.hms_score`）作备选。
-   **judge 模型与被测模型无关，单独记录**；judge 不可用时 HMS=None，绝不伪造。
-2. **无依据结论比例**：数值断言确定性重算失败数 + 无因果依据的机制表述数，
-   除以总检查数。全程序判定，不用 LLM 判断数值。
-3. **任务完成率**：产出符合 schema 的非空答案比例。
-4. **单任务成本**：LLM 调用次数、工具调用次数、token 用量、时延。
+1. **官方协议 accuracy**（主）：跨任务均值 ± 95% CI；分项 context 匹配率 / var_F1 / rel。
+2. **无依据结论比例**：只对 **evaluable** 任务取均值；无有效答案或无数据的任务记
+   `not_evaluable` 并单独报告 `n_not_evaluable`——失败任务不当作零风险。
+3. **任务完成率**：与无依据比例分开报告。
+4. **单任务成本**：每任务记录 usage **差值**（调用前后 snapshot 相减），不累计
+   重复计算；含 LLM 调用、工具调用、token、时延、judge 调用。
+
+## 多表数据
+
+任务数据集按表加载（`load_task_tables`），保留每张表的独立 schema 与行集；
+概要/画像/诊断观测均按表分别计算，禁止跨 schema 盲目合并
+（`load_task_rows` 的合并行为仅供兼容，评测路径不使用）。
 
 ## 统计不确定性
 

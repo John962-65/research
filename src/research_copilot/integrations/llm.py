@@ -86,14 +86,14 @@ class OpenAICompatibleLLM:
                 "（API Key 经 RESEARCH_COPILOT_LLM_API_KEY 传入，仅存进程环境）"
             )
 
-    def complete(self, system: str, user: str, purpose: str = "complete") -> str:
+    def complete(self, system: str, user: str, purpose: str = "complete", temperature: float | None = None) -> str:
         payload: dict[str, Any] = {
             "model": self.config.model,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            "temperature": self.config.temperature,
+            "temperature": self.config.temperature if temperature is None else temperature,
         }
         if self.config.max_tokens:
             payload["max_tokens"] = self.config.max_tokens
@@ -155,7 +155,8 @@ class StubLLM:
         self.calls: list[LLMCallRecord] = []
         self.prompts: list[tuple[str, str]] = []
 
-    def complete(self, system: str, user: str, purpose: str = "complete") -> str:
+    def complete(self, system: str, user: str, purpose: str = "complete", temperature: float | None = None) -> str:
+        _ = temperature  # stub 不模拟温度；接受该参数以与真实客户端签名一致
         self.prompts.append((system, user))
         record = LLMCallRecord(
             ts=time.time(), model="stub", purpose=purpose, prompt_chars=len(system) + len(user), completion_chars=0

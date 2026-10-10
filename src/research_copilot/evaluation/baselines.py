@@ -1,10 +1,17 @@
-"""A/B/C 三组基线（同一模型、同一工具集、同一预算——对照评测的关键）。
+"""A/B/C 三组对照（评测公平性协议，v2）。
 
-- A  plain_llm      ：普通 LLM + 相同数据分析工具（python 执行沙箱），ReAct 循环；
-- B  copilot_no_diag：Copilot 框架但关闭诊断与证据约束（只给表格头/摘要，直接作答）；
-- C  copilot_full   ：完整 Copilot：确定性画像 + 诊断观测 + 证据校验后再作答。
+公平性约定（修复 2026-10 审查的 P0-1）：
+- 三组共用**同一个** ReAct 循环、同一个 python 工具沙箱（相同限额/隔离）、
+  相同的模型调用与工具调用预算、相同的时限与作答 schema；
+- 组间唯一差异 = 注入的上下文（Copilot 模块的输出）：
+  * A  plain_llm      ：仅数据概要（表名/列/前几行）；
+  * B  copilot_no_diag：确定性统计画像（无诊断观测、无证据校验）；
+  * C  copilot_full   ：统计画像 + 诊断观测（异常/长尾/混杂/关系方向），
+    且答案经过**确定性自检闭环**：numeric_assertions 程序复核失败时，
+    在预算内带错误信息重答一次，最终答案附自检结果。
+- 任何组的成绩差异都可归因于 Copilot 模块本身，而不是工具/预算差异。
 
-统一作答 schema（对齐 HMS 结构化抽取字段）：
+作答 schema（对齐 HMS 结构化抽取字段）：
     {"hypothesis": str, "variables": [...], "relationships": [...],
      "mechanism": str, "numeric_assertions": [...]}
 """
@@ -12,12 +19,11 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
-import sys
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
+
+from .sandbox import ToolSandbox
 
 ANSWER_SCHEMA = {
     "hypothesis": "一句话主假设陈述",
@@ -42,44 +48,20 @@ ANSWER_SYSTEM_PROMPT = f"""你是数据分析驱动的科研发现助手。基�
 规则：数字必须放入 numeric_assertions 并说明依据；数据不足以支持因果/机制时必须如实写
 "数据不足以支持机制解释"，不得编造机制；不得引入数据之外的知识作为发现依据。"""
 
-
-class ToolSandbox:
-    """python 代码执行沙箱：任务数据集目录为 cwd，禁网络靠不提供（公平地同样用于所有组）。
-
-    记录每次执行的代码与输出（轨迹可复现）。零依赖：LLM 生成代码可用 stdlib csv；
-    环境若装有 pandas 也可用（版本记录进成本台账）。
-    """
-
-    def __init__(self, dataset_dir: str | Path, timeout_s: float = 60.0) -> None:
-        self.dataset_dir = Path(dataset_dir) if dataset_dir else None
-        self.timeout_s = timeout_s
-        self.executions: list[dict[str, Any]] = []
-
-    def run_python(self, code: str) -> dict[str, Any]:
-        with tempfile.TemporaryDirectory() as tmp:
-            script = Path(tmp) / "snippet.py"
-            script.write_text(code, encoding="utf-8")
-            try:
-                completed = subprocess.run(
-                    [sys.executable, str(script)],
-                    cwd=str(self.dataset_dir) if self.dataset_dir else str(tmp),
-                    capture_output=True,
-                    text=True,
-                    timeout=self.timeout_s,
-                )
-                result = {
-                    "ok": completed.returncode == 0,
-                    "stdout": completed.stdout[-4000:],
-                    "stderr": completed.stderr[-2000:],
-                }
-            except subprocess.TimeoutExpired:
-                result = {"ok": False, "stdout": "", "stderr": f"timeout after {self.timeout_s}s"}
-        self.executions.append({"code": code, **result})
-        return result
+TOOL_INSTRUCTION = (
+    '你可以调用工具 python：输出 JSON {"tool": "python", "code": "..."}，'
+    "代码将在数据集目录内的隔离沙箱执行并返回 stdout/stderr。"
+    "分析完成后输出最终 JSON 答案（不再调用工具）。"
+)
 
 
-class AnswerLLM(Protocol):
-    def complete(self, system: str, user: str, purpose: str = "") -> str: ...
+@dataclass
+class GroupBudget:
+    """三组共享的资源预算（公平性关键）。"""
+
+    max_steps: int = 6
+    max_tool_calls: int = 8
+    timeout_s: float = 60.0
 
 
 @dataclass
@@ -92,6 +74,7 @@ class GroupResult:
     tool_calls: int
     ok: bool
     error: str = ""
+    self_check: dict[str, Any] = field(default_factory=dict)
     trace: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -109,170 +92,87 @@ def _parse_answer(text: str) -> dict[str, Any]:
     return {}
 
 
-def _dataset_brief(rows: list[dict[str, Any]], head_n: int = 8) -> str:
-    if not rows:
+# ---------- 共享上下文构建 ----------
+def _dataset_brief(tables: list[dict[str, Any]], head_n: int = 5) -> str:
+    if not tables:
         return "（无数据集文件）"
-    columns: list[str] = []
-    for row in rows[:20]:
-        for key in row:
-            if key not in columns:
-                columns.append(key)
-    head = rows[:head_n]
-    brief = {
-        "n_rows": len(rows),
-        "columns": columns,
-        "head": head,
-    }
-    return json.dumps(brief, ensure_ascii=False, default=str)
+    brief = [
+        {
+            "table": table["name"],
+            "n_rows": len(table["rows"]),
+            "columns": _columns(table["rows"]),
+            "head": table["rows"][:head_n],
+        }
+        for table in tables
+    ]
+    return json.dumps({"tables": brief}, ensure_ascii=False, default=str)
 
 
-def _data_profile_for_copilot(rows: list[dict[str, Any]]) -> str:
-    """B/C 组共享的数据画像：列 + 每数值列 describe（不含 LLM）。
-
-    B 组拿到同样的画像但跳过诊断观测与证据校验 —— 差异只在 Copilot 模块本身。
-    """
-    from ..analysis.statistics import describe, numeric
-
-    if not rows:
-        return "（无数据集文件）"
-    columns: list[str] = []
+def _columns(rows: list[dict[str, Any]]) -> list[str]:
+    seen: list[str] = []
     for row in rows[:50]:
         for key in row:
-            if key not in columns:
-                columns.append(key)
-    profile: dict[str, Any] = {"n_rows": len(rows), "columns": columns, "column_stats": {}}
-    for column in columns:
-        values = numeric(rows, column)
-        if values and len(values) >= max(2, int(0.3 * len(rows))):
-            stats = describe(values, column)
-            profile["column_stats"][column] = {
-                "n": stats["n"],
-                "mean": stats["mean"],
-                "median": stats["median"],
-                "min": stats["min"],
-                "max": stats["max"],
-                "p90": stats["percentiles"].get("p90"),
-            }
-    return json.dumps(profile, ensure_ascii=False, default=str)
+            if key not in seen:
+                seen.append(key)
+    return seen
 
 
-def run_group_a(llm: AnswerLLM, task, max_steps: int = 6, sandbox: ToolSandbox | None = None) -> GroupResult:
-    """A：普通 LLM + python 工具的 ReAct 循环。"""
-    sandbox = sandbox or ToolSandbox(task.dataset_dir)
-    from ..integrations.material_importer import read_rows
-    from pathlib import Path as _Path
+def _data_profile(tables: list[dict[str, Any]]) -> str:
+    """确定性统计画像（B/C 共享；无 LLM 参与）。"""
+    from ..analysis.statistics import describe, numeric
 
-    rows: list[dict[str, Any]] = []
-    if task.dataset_dir and _Path(task.dataset_dir).exists():
-        for csv_path in sorted(_Path(task.dataset_dir).rglob("*.csv")):
-            try:
-                rows.extend(read_rows(csv_path))
-            except ValueError:
-                continue
-    tool_desc = (
-        "你可以调用工具 python：给我一段 python 代码（操作 cwd 下的数据集文件），我会返回 stdout/stderr。"
-        "需要分析时输出 JSON：{\"tool\": \"python\", \"code\": \"...\"}；"
-        "最终答案输出 JSON：{\"hypothesis\": ..., \"variables\": [...], \"relationships\": [...], "
-        "\"mechanism\": ..., \"numeric_assertions\": [...]}"
-    )
-    context = f"研究问题：{task.query}\n\n数据集概要：{_dataset_brief(rows)}\n\n{tool_desc}"
-    trace: list[dict[str, Any]] = []
-    answer: dict[str, Any] = {}
-    raw = ""
-    llm_calls = 0
-    for step in range(max_steps):
-        raw = llm.complete(ANSWER_SYSTEM_PROMPT, context, purpose=f"react_step_{step}")
-        llm_calls += 1
-        parsed = _parse_answer(raw) or {}
-        if parsed.get("tool") == "python" and isinstance(parsed.get("code"), str):
-            outcome = sandbox.run_python(parsed["code"])
-            trace.append({"step": step, "kind": "tool", "code": parsed["code"], "outcome": outcome})
-            context += f"\n\n工具结果（第 {step + 1} 步）：{json.dumps(outcome, ensure_ascii=False)[:4000]}"
-            continue
-        if parsed:
-            answer = parsed
-            trace.append({"step": step, "kind": "answer", "answer": answer})
-            break
-        trace.append({"step": step, "kind": "unparseable", "raw": raw[:500]})
-    return GroupResult(
-        group="A",
-        task_id=task.task_id,
-        answer=answer,
-        raw_answer=raw,
-        llm_calls=llm_calls,
-        tool_calls=len(sandbox.executions),
-        ok=bool(answer.get("hypothesis")),
-        error="" if answer.get("hypothesis") else "未在步数预算内产出有效答案",
-        trace=trace,
-    )
+    if not tables:
+        return "（无数据集文件）"
+    out = {"tables": []}
+    for table in tables:
+        rows = table["rows"]
+        profile: dict[str, Any] = {"table": table["name"], "n_rows": len(rows), "column_stats": {}}
+        for column in _columns(rows):
+            values = numeric(rows, column)
+            if values and len(values) >= max(2, int(0.3 * len(rows))):
+                stats = describe(values, column)
+                profile["column_stats"][column] = {
+                    "n": stats["n"],
+                    "mean": stats["mean"],
+                    "median": stats["median"],
+                    "min": stats["min"],
+                    "max": stats["max"],
+                    "p90": stats["percentiles"].get("p90"),
+                }
+        out["tables"].append(profile)
+    return json.dumps(out, ensure_ascii=False, default=str)
 
 
-def run_group_b(llm: AnswerLLM, task, sandbox: ToolSandbox | None = None) -> GroupResult:
-    """B：Copilot 框架但关闭诊断与证据约束。"""
-    from ..integrations.material_importer import read_rows
-    from pathlib import Path as _Path
-
-    rows: list[dict[str, Any]] = []
-    if task.dataset_dir and _Path(task.dataset_dir).exists():
-        for csv_path in sorted(_Path(task.dataset_dir).rglob("*.csv")):
-            try:
-                rows.extend(read_rows(csv_path))
-            except ValueError:
-                continue
-    context = (
-        f"研究问题：{task.query}\n\n数据画像（无诊断/证据模块）：{_data_profile_for_copilot(rows)}"
-    )
-    raw = llm.complete(ANSWER_SYSTEM_PROMPT, context, purpose="group_b_answer")
-    answer = _parse_answer(raw)
-    return GroupResult(
-        group="B",
-        task_id=task.task_id,
-        answer=answer,
-        raw_answer=raw,
-        llm_calls=1,
-        tool_calls=0,
-        ok=bool(answer.get("hypothesis")),
-        error="" if answer.get("hypothesis") else "答案解析失败",
-    )
-
-
-def run_group_c(llm: AnswerLLM, task, project_store: Any | None = None) -> GroupResult:
-    """C：完整 Copilot——确定性画像 + 诊断观测（含异常/长尾/混杂）→ LLM 作答。
-
-    注意：与 A/B 同一 LLM、同一作答 schema；C 的额外信息全部来自确定性分析模块，
-    且作答提示同样禁止编造机制 —— 差异即 Copilot 诊断与证据层本身的贡献。
-    """
+def compute_task_observations(tables: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """C 组的诊断观测（确定性）：异常/长尾/混杂/组间比较/关系方向，按表分别计算。"""
     from ..analysis.anomaly_detection import detect_anomalies
-    from ..analysis.statistics import compare_metric
-    from pathlib import Path as _Path
-    from ..integrations.material_importer import read_rows, summarize_rows
-
-    rows: list[dict[str, Any]] = []
-    if task.dataset_dir and _Path(task.dataset_dir).exists():
-        for csv_path in sorted(_Path(task.dataset_dir).rglob("*.csv")):
-            try:
-                rows.extend(read_rows(csv_path))
-            except ValueError:
-                continue
-    summary = summarize_rows(rows) if rows else {}
-    metric_columns = summary.get("numeric_columns") or []
-    metric_directions = summary.get("metric_directions") or {}
-    query_field = summary.get("query_field") or "query_id"
-    group_field = summary.get("group_field") or "comparison_group"
+    from ..analysis.statistics import compare_metric, relation_signs
+    from ..integrations.material_importer import summarize_rows
 
     observations: list[dict[str, Any]] = []
-    for metric in metric_columns:
-        for candidate in detect_anomalies(rows, metric, metric_directions, query_field):
-            observations.append({"kind": candidate["kind"], "statement": candidate["statement"], "value": candidate["value"]})
-    if summary.get("group_field"):
-        groups = sorted({str(row.get(group_field)) for row in rows if row.get(group_field) is not None})
-        if len(groups) >= 2:
+    for table in tables:
+        rows = table["rows"]
+        if not rows:
+            continue
+        summary = summarize_rows(rows)
+        metric_columns = summary.get("numeric_columns") or []
+        directions = summary.get("metric_directions") or {}
+        query_field = summary.get("query_field") or "query_id"
+        group_field = summary.get("group_field") or "comparison_group"
+        for metric in metric_columns:
+            for candidate in detect_anomalies(rows, metric, directions, query_field):
+                observations.append(
+                    {"table": table["name"], "kind": candidate["kind"], "statement": candidate["statement"], "value": candidate["value"]}
+                )
+        group_values = sorted({str(row.get(group_field)) for row in rows if row.get(group_field) is not None})
+        if summary.get("group_field") and len(group_values) >= 2:
             for metric in metric_columns:
-                comparison = compare_metric(rows, metric, groups[-1], groups[0], metric_directions, group_field, query_field)
+                comparison = compare_metric(rows, metric, group_values[-1], group_values[0], directions, group_field, query_field)
                 observations.append(
                     {
+                        "table": table["name"],
                         "kind": "group_comparison",
-                        "statement": f"{metric}: {groups[-1]} vs {groups[0]} → {comparison['interpretation']}",
+                        "statement": f"{metric}: {group_values[-1]} vs {group_values[0]} → {comparison['interpretation']}",
                         "value": {
                             "candidate_mean": comparison["candidate"]["mean"],
                             "baseline_mean": comparison["baseline"]["mean"],
@@ -280,25 +180,136 @@ def run_group_c(llm: AnswerLLM, task, project_store: Any | None = None) -> Group
                             "delta_ci95": list(comparison["delta_ci95"]) if comparison.get("delta_ci95") else None,
                             "interpretation": comparison["interpretation"],
                             "direction_declared": comparison["direction_declared"],
+                            "lower_is_better": comparison["lower_is_better"],
                         },
                     }
                 )
+        if metric_columns and len(rows) >= 5:
+            relations = relation_signs(rows, metric_columns)
+            observations.append(
+                {
+                    "table": table["name"],
+                    "kind": "relation_map",
+                    "statement": "数值列两两相关方向（供关系主张核对）",
+                    "value": {"relations": relations},
+                }
+            )
+    return observations
+
+
+# ---------- 共享 ReAct 循环（三组唯一执行路径） ----------
+def _react_loop(
+    llm: Any,
+    context: str,
+    sandbox: ToolSandbox,
+    budget: GroupBudget,
+    group: str,
+    task_id: str,
+    purpose_prefix: str,
+) -> tuple[dict[str, Any], str, int, int, list[dict[str, Any]]]:
+    trace: list[dict[str, Any]] = []
+    answer: dict[str, Any] = {}
+    raw = ""
+    llm_calls = 0
+    tool_calls = 0
+    for step in range(budget.max_steps):
+        raw = llm.complete(ANSWER_SYSTEM_PROMPT, context, purpose=f"{purpose_prefix}_step_{step}")
+        llm_calls += 1
+        parsed = _parse_answer(raw) or {}
+        if parsed.get("tool") == "python" and isinstance(parsed.get("code"), str):
+            if tool_calls >= budget.max_tool_calls:
+                trace.append({"step": step, "kind": "tool_budget_exhausted"})
+                continue
+            outcome = sandbox.run_python(parsed["code"])
+            tool_calls += 1
+            trace.append({"step": step, "kind": "tool", "code": parsed["code"], "outcome": {k: outcome.get(k) for k in ("ok", "stdout", "stderr")}})
+            context += f"\n\n工具结果（第 {step + 1} 步）：{json.dumps({'ok': outcome.get('ok'), 'stdout': outcome.get('stdout', '')[:3000], 'stderr': outcome.get('stderr', '')[:800]}, ensure_ascii=False)}"
+            continue
+        if parsed:
+            answer = parsed
+            trace.append({"step": step, "kind": "answer"})
+            break
+        trace.append({"step": step, "kind": "unparseable", "raw": raw[:400]})
+    return answer, raw, llm_calls, tool_calls, trace
+
+
+def run_group_a(llm: Any, task, budget: GroupBudget | None = None, sandbox: ToolSandbox | None = None) -> GroupResult:
+    """A：普通 LLM + 同一工具沙箱。上下文只有数据概要。"""
+    budget = budget or GroupBudget()
+    sandbox = sandbox or ToolSandbox(task.dataset_dir, timeout_s=budget.timeout_s)
+    from .discoverybench_adapter import load_task_tables
+
+    tables = load_task_tables(task)
+    context = f"研究问题：{task.query}\n\n数据集概要：{_dataset_brief(tables)}\n\n{TOOL_INSTRUCTION}"
+    answer, raw, llm_calls, tool_calls, trace = _react_loop(llm, context, sandbox, budget, "A", task.task_id, "react_a")
+    return GroupResult("A", task.task_id, answer, raw, llm_calls, tool_calls, bool(answer.get("hypothesis")),
+                       error="" if answer.get("hypothesis") else "未在步数预算内产出有效答案", trace=trace)
+
+
+def run_group_b(llm: Any, task, budget: GroupBudget | None = None, sandbox: ToolSandbox | None = None) -> GroupResult:
+    """B：Copilot 框架但关闭诊断与证据约束。上下文 = 确定性统计画像。"""
+    budget = budget or GroupBudget()
+    sandbox = sandbox or ToolSandbox(task.dataset_dir, timeout_s=budget.timeout_s)
+    from .discoverybench_adapter import load_task_tables
+
+    tables = load_task_tables(task)
+    context = f"研究问题：{task.query}\n\n数据画像（无诊断/证据模块）：{_data_profile(tables)}\n\n{TOOL_INSTRUCTION}"
+    answer, raw, llm_calls, tool_calls, trace = _react_loop(llm, context, sandbox, budget, "B", task.task_id, "react_b")
+    return GroupResult("B", task.task_id, answer, raw, llm_calls, tool_calls, bool(answer.get("hypothesis")),
+                       error="" if answer.get("hypothesis") else "未在步数预算内产出有效答案", trace=trace)
+
+
+def run_group_c(llm: Any, task, budget: GroupBudget | None = None, sandbox: ToolSandbox | None = None) -> GroupResult:
+    """C：完整 Copilot——画像 + 诊断观测 + 答案确定性自检闭环。
+
+    自检 = 对答案的 numeric_assertions 程序重算（与 research-copilot 的 L2 校验同一套
+    确定性检查）；复核失败时在预算内带错误重答一次；最终答案附 self_check 结果。
+    """
+    budget = budget or GroupBudget()
+    sandbox = sandbox or ToolSandbox(task.dataset_dir, timeout_s=budget.timeout_s)
+    from .discoverybench_adapter import load_task_tables
+    from .metrics import check_numeric_assertions, causal_claims_without_basis
+
+    tables = load_task_tables(task)
+    observations = compute_task_observations(tables)
     context = (
-        f"研究问题：{task.query}\n\n数据画像：{_data_profile_for_copilot(rows)}\n\n"
-        f"诊断观测（确定性分析，含异常/长尾/混杂提示）：\n{json.dumps(observations, ensure_ascii=False, default=str)[:8000]}"
+        f"研究问题：{task.query}\n\n数据画像：{_data_profile(tables)}\n\n"
+        f"诊断观测（确定性分析，含异常/长尾/混杂/关系方向）：\n"
+        f"{json.dumps(observations, ensure_ascii=False, default=str)[:9000]}\n\n{TOOL_INSTRUCTION}"
     )
-    raw = llm.complete(ANSWER_SYSTEM_PROMPT, context, purpose="group_c_answer")
-    answer = _parse_answer(raw)
-    return GroupResult(
-        group="C",
-        task_id=task.task_id,
-        answer=answer,
-        raw_answer=raw,
-        llm_calls=1,
-        tool_calls=0,
-        ok=bool(answer.get("hypothesis")),
-        error="" if answer.get("hypothesis") else "答案解析失败",
-    )
+    answer, raw, llm_calls, tool_calls, trace = _react_loop(llm, context, sandbox, budget, "C", task.task_id, "react_c")
+
+    all_rows = [row for table in tables for row in table["rows"]]
+    checks = check_numeric_assertions(answer, all_rows) if answer else []
+    failed = [c for c in checks if c.get("status") == "fail"]
+    causal = causal_claims_without_basis(answer) if answer else []
+    self_check: dict[str, Any] = {
+        "checks": checks,
+        "n_fail": len(failed),
+        "causal_without_basis": causal,
+        "corrective_round": False,
+    }
+    # 预算内自检重答（C 组专属能力：证据约束闭环）
+    if failed and llm_calls < budget.max_steps:
+        error_report = json.dumps({"numeric_assertion_failures": failed}, ensure_ascii=False)
+        context += (
+            f"\n\n[证据自检未通过——数值断言与数据重算不一致，请修正后重新输出最终 JSON 答案]\n{error_report}"
+        )
+        raw2 = llm.complete(ANSWER_SYSTEM_PROMPT, context, purpose="react_c_selfcheck")
+        llm_calls += 1
+        parsed = _parse_answer(raw2) or {}
+        if parsed.get("hypothesis"):
+            answer = parsed
+            raw = raw2
+            trace.append({"step": llm_calls - 1, "kind": "selfcheck_answer"})
+            rechecks = check_numeric_assertions(answer, all_rows)
+            self_check["checks"] = rechecks
+            self_check["n_fail"] = len([c for c in rechecks if c.get("status") == "fail"])
+            self_check["causal_without_basis"] = causal_claims_without_basis(answer)
+            self_check["corrective_round"] = True
+    return GroupResult("C", task.task_id, answer, raw, llm_calls, tool_calls, bool(answer.get("hypothesis")),
+                       error="" if answer.get("hypothesis") else "未在步数预算内产出有效答案",
+                       self_check=self_check, trace=trace)
 
 
 GROUP_RUNNERS = {"A": run_group_a, "B": run_group_b, "C": run_group_c}

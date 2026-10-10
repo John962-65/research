@@ -383,6 +383,65 @@ def group_report(
     return report
 
 
+def pearson(x: list[float], y: list[float]) -> float | None:
+    """Pearson 相关系数；方差为 0 或样本 <3 返回 None。"""
+    n = len(x)
+    if n < 3 or n != len(y):
+        return None
+    mx, my = mean(x), mean(y)
+    sxy = sum((a - mx) * (b - my) for a, b in zip(x, y))
+    sxx = sum((a - mx) ** 2 for a in x)
+    syy = sum((b - my) ** 2 for b in y)
+    denom = math.sqrt(sxx * syy)
+    if denom <= 0:
+        return None
+    return sxy / denom
+
+
+RELATION_SIGN_THRESHOLD = 0.05  # |r| 低于该值视为无单调方向
+
+
+def relation_sign(r: float | None) -> str:
+    if r is None:
+        return "unverifiable"
+    if r >= RELATION_SIGN_THRESHOLD:
+        return "positive"
+    if r <= -RELATION_SIGN_THRESHOLD:
+        return "negative"
+    return "none"
+
+
+def relation_signs(
+    rows: list[dict[str, Any]], columns: list[str] | None = None, max_columns: int = 8
+) -> list[dict[str, Any]]:
+    """数值列两两 Pearson 方向（供关系主张的程序化核对）。"""
+    if columns is None:
+        seen: list[str] = []
+        for row in rows[:50]:
+            for key in row:
+                if key not in seen:
+                    seen.append(key)
+        columns = seen
+    numeric_cols = [c for c in columns if numeric(rows, c)] [:max_columns]
+    out: list[dict[str, Any]] = []
+    for i in range(len(numeric_cols)):
+        for j in range(i + 1, len(numeric_cols)):
+            a, b = numeric_cols[i], numeric_cols[j]
+            xs = [float(r.get(a)) for r in rows if _is_num(r.get(a)) and _is_num(r.get(b))]
+            ys = [float(r.get(b)) for r in rows if _is_num(r.get(a)) and _is_num(r.get(b))]
+            r = pearson(xs, ys)
+            out.append({"a": a, "b": b, "pearson_r": r, "sign": relation_sign(r), "n": len(xs)})
+    return out
+
+
+def _is_num(value: Any) -> bool:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return False
+    return not (math.isnan(parsed) or math.isinf(parsed))
+
+
 def group_profile(
     rows: list[dict[str, Any]], covariate_fields: list[str], group_field: str = "comparison_group"
 ) -> dict[str, Any]:

@@ -151,12 +151,87 @@ def _unverified_numbers_in_text(statement: str, assertions: list[NumericAssertio
     return suspicious
 
 
-def _has_controlled_experiment_evidence(refs: list[EvidenceRef], materials_by_id: dict[str, Material]) -> bool:
+def _has_controlled_experiment_evidence(
+    refs: list[EvidenceRef], materials_by_id: dict[str, Material], claim_variables: list[str] | None = None
+) -> bool:
+    """受控实验证据必须与主张变量相关：meta 需声明 experiment_kind=controlled，
+    且（若声明了 intervention_variables）干预变量须与主张变量有交集。"""
     for ref in refs:
         material = materials_by_id.get(ref.material_id)
-        if material and str(material.meta.get("experiment_kind") or "").lower() in ("controlled", "randomized", "rct"):
+        if not material or str(material.meta.get("experiment_kind") or "").lower() not in ("controlled", "randomized", "rct"):
+            continue
+        interventions = [str(v).lower() for v in (material.meta.get("intervention_variables") or [])]
+        if not interventions or not claim_variables:
+            return True  # 未声明干预变量时保守放行（仍需人工复核整体合理性）
+        claim_vars = {v.lower() for v in claim_variables if v}
+        if claim_vars & set(interventions):
             return True
     return False
+
+
+def _check_relation_claims(
+    finding: Finding, observations_by_id: dict[str, Observation]
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """L2b：结构化关系主张的方向核对。
+
+    - 有匹配观测且方向一致 → pass；
+    - 有匹配观测且方向矛盾 → fail（数值性错误，触发降级）；
+    - 找不到可核对的相关计算 → unverifiable（不 fail，但阻止自动升级）。
+    """
+    checks: list[dict[str, Any]] = []
+    issues: list[str] = []
+    for claim in finding.claims or []:
+        relation = claim.relation
+        if relation not in ("positive", "negative", "none"):
+            continue
+        candidates = [observations_by_id[cid] for cid in finding.observation_ids if cid in observations_by_id]
+        if claim.basis_observation:
+            target = observations_by_id.get(claim.basis_observation)
+            if target is not None and target.id in finding.observation_ids:
+                candidates = [target]
+        matched = None
+        for observation in candidates:
+            for rel in (observation.value or {}).get("relations") or []:
+                pair = {str(rel.get("a", "")).lower(), str(rel.get("b", "")).lower()}
+                if {claim.variable_a.lower(), claim.variable_b.lower()} == pair:
+                    matched = rel
+                    break
+            if matched:
+                break
+        if matched is None:
+            checks.append(
+                {
+                    "claim": f"{claim.variable_a}~{claim.variable_b}",
+                    "claimed_relation": relation,
+                    "status": "unverifiable",
+                    "note": "被引观测中没有该变量对的计算相关，无法程序核对",
+                }
+            )
+            # unverifiable 不算 L2 失败（不是数值错误），只阻止自动升级（见 needs_human_review）
+        elif matched.get("sign") != relation:
+            checks.append(
+                {
+                    "claim": f"{claim.variable_a}~{claim.variable_b}",
+                    "claimed_relation": relation,
+                    "computed_relation": matched.get("sign"),
+                    "computed_r": matched.get("pearson_r"),
+                    "status": "fail",
+                }
+            )
+            issues.append(
+                f"关系方向不符：声称 {claim.variable_a}~{claim.variable_b}={relation}，"
+                f"计算结果为 {matched.get('sign')}(r={matched.get('pearson_r')})"
+            )
+        else:
+            checks.append(
+                {
+                    "claim": f"{claim.variable_a}~{claim.variable_b}",
+                    "claimed_relation": relation,
+                    "computed_relation": matched.get("sign"),
+                    "status": "pass",
+                }
+            )
+    return checks, issues
 
 
 def validate_finding(
@@ -231,13 +306,20 @@ def validate_finding(
     for number in _unverified_numbers_in_text(finding.statement, finding.numeric_assertions, primary_obs):
         l2_issues.append(f"陈述含无依据数字 {number}（未在数值断言或被引观测中出现）")
 
-    l2_status = "fail" if l2_issues else ("pass" if l2_checks else "not_applicable")
+    # ---- L2b 关系主张方向核对 ----
+    relation_checks, relation_issues = _check_relation_claims(finding, observations_by_id)
+    l2_issues.extend(relation_issues)
+    relation_unverifiable = any(c["status"] == "unverifiable" for c in relation_checks)
+    relation_failed = any(c["status"] == "fail" for c in relation_checks)
+
+    l2_status = "fail" if l2_issues else ("pass" if (l2_checks or relation_checks) else "not_applicable")
 
     # ---- L3 解释有效性 ----
     l3_note = "无因果标记"
     if CAUSAL_MARKERS.search(finding.statement or ""):
-        if _has_controlled_experiment_evidence(resolved_refs, materials_by_id):
-            l3_note = "存在受控实验证据，因果表述可保留"
+        claim_variables = [v for claim in (finding.claims or []) for v in (claim.variable_a, claim.variable_b)]
+        if _has_controlled_experiment_evidence(resolved_refs, materials_by_id, claim_variables):
+            l3_note = "存在与主张变量相关的受控实验证据，因果表述可保留"
         else:
             if claim_type in ("observation", "statistical_finding"):
                 downgrades.append(
@@ -249,17 +331,31 @@ def validate_finding(
     # ---- L2 失败降级 ----
     if l2_status == "fail":
         if claim_type in ("observation", "statistical_finding"):
-            downgrades.append("L2: 数值复核未通过，降级为 unverified_conjecture")
+            downgrades.append("L2: 数值/关系复核未通过，降级为 unverified_conjecture")
             claim_type = "unverified_conjecture"
         elif claim_type in ("hypothesis", "causal_claim"):
-            downgrades.append("L2: 数值复核未通过，假设保留但标记证据不足")
+            downgrades.append("L2: 数值/关系复核未通过，假设保留但标记证据不足")
             claim_type = "unverified_conjecture"
 
+    # ---- 不可程序核对的关系主张：阻止自动升级，转人工复核 ----
     final_status = "verified" if claim_type in ("observation", "statistical_finding") else "downgraded"
+    if final_status == "verified" and relation_unverifiable:
+        final_status = "needs_human_review"
+        downgrades.append(
+            "L2b: 关系主张方向无法由程序核对（无计算依据），不自动升级为已证实结果，转人工复核"
+        )
+
     validation = {
         "l1": {"status": "pass", "issues": []},
-        "l2": {"status": l2_status, "checks": l2_checks, "issues": l2_issues},
-        "l3": {"status": "downgraded" if downgrades else "pass", "note": l3_note},
+        "l2": {
+            "status": l2_status,
+            "checks": l2_checks,
+            "relation_checks": relation_checks,
+            "relation_unverifiable": relation_unverifiable,
+            "relation_failed": relation_failed,
+            "issues": l2_issues,
+        },
+        "l3": {"status": "downgraded" if any("L3" in d for d in downgrades) else "pass", "note": l3_note},
         "downgrades": downgrades,
         "final_claim_type": claim_type,
         "status": final_status,

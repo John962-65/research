@@ -262,6 +262,8 @@ def cmd_evaluate(args: Any) -> int:
 
     groups = [g.strip().upper() for g in (args.groups or "A,B,C").split(",") if g.strip()]
     task_ids = args.task_ids if args.task_ids else None
+    from .evaluation.baselines import GroupBudget
+
     summary = run_evaluation(
         bench_root=args.bench_root,
         out_dir=args.out_dir,
@@ -269,14 +271,15 @@ def cmd_evaluate(args: Any) -> int:
         subset=args.subset,
         limit=args.limit,
         task_ids=task_ids,
-        max_steps=args.max_steps,
+        budget=GroupBudget(max_steps=args.max_steps),
         dry_run=args.dry_run,
     )
     print(f"评测完成 → {summary['task_ids'][:3]}…（n={len(summary['task_ids'])}, dry_run={summary['dry_run']}）")
     for group, agg in summary["group_summaries"].items():
         print(
-            f"  {group}: 完成率 {agg['completion_rate']:.0%}, HMS {agg['hms_mean']}, "
-            f"CI {agg['hms_ci95']}, 无依据比例 {agg['unsupported_rate_mean']}"
+            f"  {group}: 完成率 {agg['completion_rate']:.0%}, 官方accuracy {agg['official_accuracy_mean']}, "
+            f"CI {agg['official_accuracy_ci95']}, 无依据比例(可评) {agg['unsupported_rate_mean_evaluable']}, "
+            f"不可评任务 {agg['n_not_evaluable']}"
         )
     print("汇总: summary.json / summary.md（见 out_dir）")
     return 0

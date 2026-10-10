@@ -155,15 +155,40 @@ class Observation:
 
 
 @dataclass
+class RelationClaim:
+    """结构化科学关系主张：可被程序核对其方向（与观测的相关符号一致）。"""
+
+    variable_a: str
+    variable_b: str
+    relation: str = "unspecified"  # positive / negative / none / unspecified
+    basis_observation: str = ""  # OBS id（其 value.relations 提供计算依据）
+    conditions: str = ""  # 适用条件/范围
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RelationClaim":
+        return cls(
+            variable_a=str(data.get("variable_a") or ""),
+            variable_b=str(data.get("variable_b") or ""),
+            relation=str(data.get("relation") or "unspecified"),
+            basis_observation=str(data.get("basis_observation") or ""),
+            conditions=str(data.get("conditions") or ""),
+        )
+
+
+@dataclass
 class Finding:
     """科学发现（诊断输出）。带三层校验结果与最终主张级别。"""
 
-    id: str  # F-001
+    id: str  # DIAG-NNNN/F-NNN 或 F-001（旧格式兼容）
     statement: str
     claim_type: str = "unverified_conjecture"  # 校验后的最终级别
     claim_type_hint: str = ""  # LLM 自称的级别（仅参考）
     observation_ids: list[str] = _new_list()
     numeric_assertions: list[NumericAssertion] = _new_list()
+    claims: list[RelationClaim] = _new_list()  # 结构化关系主张（L2b 方向核对）
     alternative_explanations: list[str] = _new_list()
     verification_method: str = ""
     confidence: str = ""  # low / medium / high
@@ -180,6 +205,7 @@ class Finding:
             "claim_type_hint": self.claim_type_hint,
             "observation_ids": list(self.observation_ids),
             "numeric_assertions": [a.to_dict() for a in self.numeric_assertions],
+            "claims": [c.to_dict() for c in self.claims],
             "alternative_explanations": list(self.alternative_explanations),
             "verification_method": self.verification_method,
             "confidence": self.confidence,
@@ -198,6 +224,7 @@ class Finding:
             claim_type_hint=str(data.get("claim_type_hint") or ""),
             observation_ids=[str(x) for x in data.get("observation_ids") or []],
             numeric_assertions=[NumericAssertion.from_dict(a) for a in data.get("numeric_assertions") or []],
+            claims=[RelationClaim.from_dict(c) for c in data.get("claims") or []],
             alternative_explanations=[str(x) for x in data.get("alternative_explanations") or []],
             verification_method=str(data.get("verification_method") or ""),
             confidence=str(data.get("confidence") or ""),

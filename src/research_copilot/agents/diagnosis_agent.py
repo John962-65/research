@@ -14,7 +14,7 @@ from typing import Any
 from ..analysis.anomaly_detection import detect_anomalies, tail_report
 from ..analysis.evidence_validator import apply_validation, validate_finding
 from ..analysis.statistics import compare_metric, group_profile, resolve_direction
-from ..core.models import EvidenceRef, Finding, Material, NumericAssertion, Observation
+from ..core.models import EvidenceRef, Finding, Material, NumericAssertion, Observation, RelationClaim
 from ..core.storage import ProjectStore, now_iso
 from ..integrations.llm import LLMUnavailable
 
@@ -22,10 +22,13 @@ SYSTEM_PROMPT = """你是科研诊断助手。你只能基于给定的观测（o
 1. 每条发现必须引用至少一个 observation_id；不得引用不存在的观测。
 2. 发现中的每个数字都必须放入 numeric_assertions，并给出 check 类型与依据观测；
    正文中的其他数字会被程序校验，校验不过该发现会被降级。
-3. 因果/机制表述（"因为/导致/机制是"）在没有受控实验证据时会被自动降级为 hypothesis；
+3. 关于变量间关系的方向（正/负相关），必须写入 claims（variable_a/variable_b/relation），
+   并引用提供关系计算（value.relations）的观测作为 basis_observation；
+   方向与计算不一致会被程序判定失败并降级；无计算依据的方向主张不会自动升级为已证实结果。
+4. 因果/机制表述（"因为/导致/机制是"）在没有受控实验证据时会被自动降级为 hypothesis；
    数据只支持现象与相关性时请使用 statistical_finding。
-4. 数据不足或观测之间矛盾时，宁可不输出发现；不要强行制造问题。
-5. 每条发现给出 alternative_explanations（竞争性解释）与 verification_method（如何用新实验验证/证伪）。
+5. 数据不足或观测之间矛盾时，宁可不输出发现；不要强行制造问题。
+6. 每条发现给出 alternative_explanations（竞争性解释）与 verification_method（如何用新实验验证/证伪）。
 只输出 JSON：{"findings": [...]}，不要输出其他文字。"""
 
 FINDING_JSON_SHAPE = """{
@@ -38,6 +41,10 @@ FINDING_JSON_SHAPE = """{
         {"metric": "...", "value": 20.0, "unit": "percent_improvement",
          "check": "percent_change_from_baseline|mean|median|percentile_p95|direction|ratio|lookup",
          "basis_observation": "OBS-001"}
+      ],
+      "claims": [
+        {"variable_a": "...", "variable_b": "...", "relation": "positive|negative|none|unspecified",
+         "basis_observation": "提供关系计算的 OBS id", "conditions": "适用条件"}
       ],
       "alternative_explanations": ["..."],
       "verification_method": "如何用受控实验验证或证伪",
@@ -124,6 +131,36 @@ def profile_material(
                     created_at=now_iso(),
                 )
                 observations.append(observation)
+
+    # 数值列两两相关方向（结构化关系主张的程序化核对依据），按组分段计算
+    from ..analysis.statistics import relation_signs
+
+    for segment_label, segment_rows in segments:
+        if len(segment_rows) < 5:
+            continue
+        relations = relation_signs(segment_rows, metric_columns)
+        significant = [rel for rel in relations if rel["sign"] in ("positive", "negative")]
+        statement = (
+            f"数值列相关方向（|r|>{'%.2f' % 0.05} 视为有方向）："
+            + "；".join(f"{rel['a']}~{rel['b']}={rel['sign']}(r={rel['pearson_r']:.2f})" for rel in significant[:5])
+            if significant
+            else "数值列两两相关均无明确方向"
+        )
+        observations.append(
+            Observation(
+                id="",
+                statement=statement + (f"（{segment_label}）" if segment_label else ""),
+                value={
+                    "material_id": material.id,
+                    "segment": segment_label,
+                    "relations": relations,
+                    "metric": "relation_map",
+                },
+                evidence_refs=[ref],
+                computed_by="statistics.relation_signs",
+                created_at=now_iso(),
+            )
+        )
 
     groups = _split_groups(rows, group_field) if any(group_field in row for row in rows) else []
     if len(groups) >= 2:
@@ -268,8 +305,14 @@ def run_diagnosis(
     llm: Any | None = None,
     material_ids: list[str] | None = None,
 ) -> dict[str, Any]:
-    """执行完整诊断。llm 为 None 或不可用时自动退化为离线模式。"""
+    """执行完整诊断。llm 为 None 或不可用时自动退化为离线模式。
+
+    ID 方案：观测/发现 ID 带诊断轮次前缀（DIAG-NNNN/OBS-NNN），全局唯一、
+    只追加不覆盖——历史研究问题对旧发现的引用永远有效。
+    """
     project = store.load_project(project_id)
+    diag_number = store.next_diagnosis_number(project_id)
+    diag_id = f"DIAG-{diag_number:04d}"
     materials = store.load_materials(project_id)
     if material_ids:
         materials = [m for m in materials if m.id in set(material_ids)]
@@ -301,9 +344,9 @@ def run_diagnosis(
         all_observations.extend(observations)
         all_comparison_specs.extend(comparison_specs)
 
-    # 编号并保存观测
+    # 全局唯一编号：DIAG-NNNN/OBS-NNN
     for index, observation in enumerate(all_observations, start=1):
-        observation.id = f"OBS-{index:03d}"
+        observation.id = f"{diag_id}/OBS-{index:03d}"
     store.save_observations(project_id, all_observations)
     observations_by_id = {o.id: o for o in all_observations}
 
@@ -322,9 +365,9 @@ def run_diagnosis(
     else:
         findings = _offline_findings(all_observations, all_comparison_specs, materials_by_id)
 
-    # 三层校验
+    # 三层校验（本轮新发现按本轮前缀编号）
     for index, finding in enumerate(findings, start=1):
-        finding.id = f"F-{index:03d}"
+        finding.id = f"{diag_id}/F-{index:03d}"
         validation = validate_finding(finding, observations_by_id, materials_by_id, project_dir)
         apply_validation(finding, validation)
     store.save_findings(project_id, findings)
@@ -344,6 +387,8 @@ def run_diagnosis(
         "schema_version": "rc/1.0",
         "generated_at": now_iso(),
         "project_id": project_id,
+        "diag_id": diag_id,
+        "diag_number": diag_number,
         "llm_mode": llm_mode,
         "llm_error": llm_error,
         "llm_usage": usage,
@@ -408,6 +453,7 @@ def _llm_findings(llm: Any, observations: list[Observation], materials: list[Mat
                 numeric_assertions=[
                     NumericAssertion.from_dict(a) for a in raw.get("numeric_assertions") or [] if isinstance(a, dict)
                 ],
+                claims=[RelationClaim.from_dict(c) for c in raw.get("claims") or [] if isinstance(c, dict)],
                 alternative_explanations=[str(x) for x in raw.get("alternative_explanations") or []],
                 verification_method=str(raw.get("verification_method") or ""),
                 confidence=str(raw.get("confidence") or ""),
@@ -422,6 +468,7 @@ def render_diagnosis_markdown(report: dict[str, Any], project_name: str) -> str:
     lines = [f"# 科研诊断报告：{project_name}", ""]
     lines += [
         f"- 生成时间：{report['generated_at']}",
+        f"- 诊断轮次：{report.get('diag_id', 'DIAG-0001')}（观测/发现 ID 带此前缀，历史只追加不覆盖）",
         f"- 模式：{report['llm_mode']}" + (f"（{report['llm_error']}）" if report.get("llm_error") else ""),
         f"- 观测 {report['n_observations']} 条；发现 {report['n_findings']} 条；建议问题 {report['n_questions_proposed']} 个",
         f"- {report['honesty_note']}",

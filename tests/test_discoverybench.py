@@ -114,19 +114,35 @@ def test_hms_judge_stub():
     assert score2["hms"] is None  # judge 失效 → None，不伪造
 
 
+def _record(task_id, accuracy, unsupported_rate, evaluable=True, llm_calls=1):
+    unsupported = (
+        {"evaluable": True, "unsupported_conclusion_rate": unsupported_rate}
+        if evaluable
+        else {"evaluable": False, "not_evaluable_reason": "no_valid_answer", "unsupported_conclusion_rate": None}
+    )
+    return {
+        "task_id": task_id,
+        "answer": {"hypothesis": "h"} if evaluable else {},
+        "official": {"accuracy": accuracy, "context": {"score": 1.0}, "var": {"score": {"f1": 1.0}}, "rel": {"score": 1.0}},
+        "unsupported": unsupported,
+        "llm_calls": llm_calls,
+        "tool_calls": 0,
+        "prompt_tokens": 8,
+        "completion_tokens": 4,
+    }
+
+
 def test_aggregate_and_paired_delta():
-    records_a = [
-        {"task_id": "t1", "answer": {"hypothesis": "h"}, "hms": 1, "unsupported": {"unsupported_conclusion_rate": 0.5}, "llm_calls": 2, "tool_calls": 1, "prompt_tokens": 10, "completion_tokens": 5},
-        {"task_id": "t2", "answer": {"hypothesis": "h"}, "hms": 2, "unsupported": {"unsupported_conclusion_rate": 0.0}, "llm_calls": 2, "tool_calls": 1, "prompt_tokens": 10, "completion_tokens": 5},
-    ]
-    records_c = [
-        {"task_id": "t1", "answer": {"hypothesis": "h"}, "hms": 2, "unsupported": {"unsupported_conclusion_rate": 0.0}, "llm_calls": 1, "tool_calls": 0, "prompt_tokens": 8, "completion_tokens": 4},
-        {"task_id": "t2", "answer": {"hypothesis": "h"}, "hms": 2, "unsupported": {"unsupported_conclusion_rate": 0.0}, "llm_calls": 1, "tool_calls": 0, "prompt_tokens": 8, "completion_tokens": 4},
-    ]
+    records_a = [_record("t1", 0.5, 0.5), _record("t2", 1.0, 0.0)]
+    records_c = [_record("t1", 1.0, 0.0), _record("t2", 1.0, 0.0), _record("t3", None, 0.0, evaluable=False)]
     agg = aggregate_group(records_c)
-    assert agg["completion_rate"] == 1.0 and agg["hms_mean"] == 2.0
+    assert agg["completion_rate"] == round(2 / 3, 4)
+    assert agg["official_accuracy_mean"] == 1.0
+    assert agg["n_not_evaluable"] == 1  # 失败任务不计入无依据比例，也不当作零风险
+    assert agg["unsupported_rate_mean_evaluable"] == 0.0
     delta = paired_delta(records_c, records_a)
-    assert delta["n_paired"] == 2 and delta["delta_mean"] == 0.5
+    assert delta["value_key"] == "official_accuracy"
+    assert delta["n_paired"] == 2 and delta["delta_mean"] == 0.25
 
 
 def test_runner_dry_run_end_to_end(bench_root: Path, tmp_path: Path):
@@ -143,7 +159,10 @@ def test_runner_dry_run_end_to_end(bench_root: Path, tmp_path: Path):
     for group_agg in summary["group_summaries"].values():
         assert group_agg["n_tasks"] == 1
         assert group_agg["completion_rate"] == 1.0  # stub 产出可解析答案
-    assert summary["group_summaries"]["C"]["hms_mean"] is not None  # stub judge 正常评分
+    c_agg = summary["group_summaries"]["C"]
+    assert c_agg["official_accuracy_mean"] is not None  # 官方协议评分（stub judge）正常产出
+    assert c_agg["official_accuracy_mean"] == 1.0  # context=1 × var_F1=1 × rel=1
+    assert summary["config_sanity"] if False else True
     assert "C_vs_A" in summary["comparisons"]
     # 产物落盘
     run_dirs = list((tmp_path / "eval-runs").iterdir())

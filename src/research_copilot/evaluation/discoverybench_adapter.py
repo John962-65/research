@@ -244,8 +244,34 @@ def select_dev_tasks(bench_root: str | Path, subset: str, n: int, split: str | N
     }
 
 
+def load_task_tables(task: DiscoveryTask) -> list[dict[str, Any]]:
+    """按表加载任务数据集，**保留表结构**（禁止盲目合并）。
+
+    返回 [{"name": 表名(csv stem), "path": str, "rows": [行字典]}]。
+    每行附 __dataset_file 标记来源（不合并不同 schema 的表）。
+    """
+    from ..integrations.material_importer import read_rows
+
+    if not task.dataset_dir:
+        return []
+    tables: list[dict[str, Any]] = []
+    dataset_dir = Path(task.dataset_dir)
+    for csv_path in sorted(dataset_dir.rglob("*.csv")):
+        try:
+            rows = read_rows(csv_path)
+        except (ValueError, OSError):
+            continue
+        for row in rows:
+            row["__dataset_file"] = csv_path.name
+        tables.append({"name": csv_path.stem, "path": str(csv_path), "rows": rows})
+    return tables
+
+
 def load_task_rows(task: DiscoveryTask) -> list[dict[str, Any]]:
-    """读取任务数据集（任务目录下全部 CSV 合并行，带来源文件名列）。"""
+    """读取任务数据集（全部 CSV 合并行，带来源文件名列）。
+
+    注意：多表任务使用本函数会丢失表结构——评测路径请用 load_task_tables。
+    """
     from ..integrations.material_importer import read_rows
 
     if not task.dataset_dir:

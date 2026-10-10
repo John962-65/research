@@ -94,7 +94,23 @@ def causal_claims_without_basis(answer: dict[str, Any]) -> list[str]:
 
 
 def unsupported_conclusion_rate(answer: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """无依据结论比例 = (失败/无依据数值断言 + 无因果依据表述) / (数值断言数 + 机制/关系表述数)。"""
+    """无依据结论比例 = (失败/无依据数值断言 + 无因果依据表述) / (数值断言数 + 机制/关系表述数)。
+
+    evaluable=False（无有效答案/无数据）时返回 None 并标注 not_evaluable，
+    绝不把无法检查的答案当作零风险。
+    """
+    if not isinstance(answer, dict) or not answer.get("hypothesis"):
+        return {
+            "evaluable": False,
+            "not_evaluable_reason": "no_valid_answer",
+            "unsupported_conclusion_rate": None,
+        }
+    if not rows:
+        return {
+            "evaluable": False,
+            "not_evaluable_reason": "no_dataset_rows",
+            "unsupported_conclusion_rate": None,
+        }
     checks = check_numeric_assertions(answer, rows)
     failed_numeric = [c for c in checks if c["status"] == "fail"]
     unverifiable = [c for c in checks if c["status"] == "unverifiable"]
@@ -102,6 +118,7 @@ def unsupported_conclusion_rate(answer: dict[str, Any], rows: list[dict[str, Any
     denominator = len(checks) + 1  # 机制/关系表述合并计 1
     unsupported = len(failed_numeric) + (1 if causal else 0)
     return {
+        "evaluable": True,
         "numeric_checks": checks,
         "n_numeric": len(checks),
         "n_numeric_fail": len(failed_numeric),
@@ -151,38 +168,82 @@ def ci95(values: list[float]) -> tuple[float, float] | None:
 
 
 def aggregate_group(records: list[dict[str, Any]]) -> dict[str, Any]:
-    """组级汇总：完成率、HMS 均值±95%CI（跨任务）、无依据结论比例、成本。"""
+    """组级汇总：完成率、官方协议 accuracy 均值±95%CI（跨任务）、无依据结论比例、成本。
+
+    - 无依据结论比例只在 **evaluable** 任务上取均值并单独报告 n_not_evaluable；
+      失败/无法解析的任务不会被当作零风险计入。
+    - official = 官方单子假设协议（context × var_F1 × rel，judge LLM）；hms_custom 为
+      自定义 0/1/2 辅助分。
+    """
     valid = [r for r in records if not r.get("error") and (r.get("answer") or {}).get("hypothesis")]
-    hms_values = [r["hms"] for r in records if r.get("hms") is not None]
-    unsupported = [r.get("unsupported", {}).get("unsupported_conclusion_rate", 0.0) for r in records]
-    interval = ci95([float(v) for v in hms_values])
+    hms_values = [r["hms_custom"] for r in records if r.get("hms_custom") is not None]
+    accuracy_values = [
+        float(r["official"]["accuracy"]) for r in records if (r.get("official") or {}).get("accuracy") is not None
+    ]
+    context_scores = [
+        r["official"]["context"]["score"] for r in records if (r.get("official") or {}).get("context", {}).get("score") is not None
+    ]
+    var_f1 = [
+        float(r["official"]["var"]["score"]["f1"])
+        for r in records
+        if (r.get("official") or {}).get("var", {}).get("score", {}).get("f1") is not None
+        and float(r["official"]["var"]["score"]["f1"]) >= 0
+    ]
+    rel_scores = [
+        float(r["official"]["rel"]["score"]) for r in records if (r.get("official") or {}).get("rel", {}).get("score") is not None
+    ]
+    unsupported_all = [r.get("unsupported") or {} for r in records]
+    evaluable_unsupported = [
+        item["unsupported_conclusion_rate"] for item in unsupported_all if item.get("evaluable")
+    ]
+    n_not_evaluable = sum(1 for item in unsupported_all if item.get("evaluable") is False)
+    interval = ci95(accuracy_values)
+
+    def _mean(values: list[float]) -> float | None:
+        return round(sum(values) / len(values), 4) if values else None
+
     return {
         "n_tasks": len(records),
         "completion_rate": round(len(valid) / len(records), 4) if records else 0.0,
-        "hms_mean": round(sum(hms_values) / len(hms_values), 4) if hms_values else None,
-        "hms_ci95": interval,
-        "hms_scored_tasks": len(hms_values),
-        "unsupported_rate_mean": round(sum(unsupported) / len(unsupported), 4) if unsupported else None,
+        "official_accuracy_mean": _mean(accuracy_values),
+        "official_accuracy_ci95": interval,
+        "n_official_scored": len(accuracy_values),
+        "context_match_rate": _mean([1.0 if s == 1.0 else 0.0 for s in context_scores]) if context_scores else None,
+        "var_f1_mean": _mean(var_f1),
+        "rel_score_mean": _mean(rel_scores),
+        "hms_custom_mean": _mean([float(v) for v in hms_values]),
+        "unsupported_rate_mean_evaluable": _mean([float(v) for v in evaluable_unsupported]),
+        "n_not_evaluable": n_not_evaluable,
         "total_llm_calls": sum(r.get("llm_calls", 0) for r in records),
         "total_tool_calls": sum(r.get("tool_calls", 0) for r in records),
         "total_prompt_tokens": sum(r.get("prompt_tokens", 0) for r in records),
         "total_completion_tokens": sum(r.get("completion_tokens", 0) for r in records),
+        "total_judge_calls": sum(r.get("judge_calls", 0) for r in records),
     }
 
 
-def paired_delta(records_x: list[dict[str, Any]], records_y: list[dict[str, Any]], key: str = "task_id") -> dict[str, Any]:
-    """按任务配对的组间差（x - y），CI 优先、无 p 值。"""
+def paired_delta(records_x: list[dict[str, Any]], records_y: list[dict[str, Any]], value_key: str = "official_accuracy", key: str = "task_id") -> dict[str, Any]:
+    """按任务配对的组间差（x - y），CI 优先、无 p 值。默认用官方协议 accuracy。"""
+
+    def _value(record: dict[str, Any]) -> float | None:
+        if value_key == "official_accuracy":
+            return (record.get("official") or {}).get("accuracy")
+        return record.get(value_key)
+
     y_by_task = {r[key]: r for r in records_y}
     deltas = []
     for record in records_x:
         other = y_by_task.get(record[key])
-        if other is None or record.get("hms") is None or other.get("hms") is None:
+        vx = _value(record)
+        vy = _value(other) if other else None
+        if other is None or vx is None or vy is None:
             continue
-        deltas.append(record["hms"] - other["hms"])
+        deltas.append(vx - vy)
     mean_delta = round(sum(deltas) / len(deltas), 4) if deltas else None
     return {
+        "value_key": value_key,
         "n_paired": len(deltas),
         "delta_mean": mean_delta,
         "delta_ci95": ci95([float(d) for d in deltas]),
-        "note": "HMS 为 0-2 分；delta>0 表示 x 组更优。跨任务 CI 仅描述本任务子集的不确定性。",
+        "note": "官方协议 accuracy ∈ [0,1]（context×var_F1×rel）；delta>0 表示 x 组更优。跨任务 CI 仅描述本任务子集的不确定性。",
     }

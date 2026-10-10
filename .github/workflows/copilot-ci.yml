@@ -1,0 +1,33 @@
+name: research-copilot-ci
+
+# 仅服务 research-copilot 项目（本分支）；不触碰旧流水线 main。
+on:
+  push:
+    branches: [research-copilot]
+  pull_request:
+    branches: [research-copilot]
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install pytest
+        run: python -m pip install --quiet pytest
+      - name: Run unit tests (offline, no LLM)
+        env:
+          PYTHONPATH: src
+        run: python -m pytest tests/ -q
+      - name: Guard — no legacy package dependency
+        run: |
+          if grep -rn "research_agent" src/ tests/ --include="*.py"; then
+            echo "::error 发现对旧包 research_agent 的依赖"; exit 1
+          fi
+      - name: Guard — no committed credentials
+        run: |
+          if git grep -I -nE "sk-[A-Za-z0-9_-]{20,}" -- .; then
+            echo "::error 检测到疑似 API Key"; exit 1
+          fi

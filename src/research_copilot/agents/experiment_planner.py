@@ -1,8 +1,14 @@
 """主动实验规划（P1-B）：把竞争假设转化为实验候选，六维透明评分排序。
 
-重要声明（写入每份报告）：本模块的优先级评分是**启发式规则**，每维依据落盘、
-总分可复算；它不是信息论意义的信息增益——后者需要对假设与实验结果建立概率
-模型，留待后续研究（见 docs/roadmap.md）。
+评分命名（如实声明）：本模块的分数是 **Experiment Readiness Score（实验准备度）**——
+它衡量"方案形式是否完备、可执行、可复算"，不衡量"该实验能带来多少信息"。
+- 它能证明方案写对了，不能证明 Agent 知道哪个实验最有科学价值；
+- 判断"不同假设对实验结果的预测是否真的不同"需要独立的 **Discrimination Score**
+  （对每个竞争假设分别预测实验结果分布，度量预测差异），属后续工作（docs/roadmap.md）；
+- 两者都不是信息论信息增益——后者需要对假设与实验结果建立概率模型。
+
+权重：hypothesis_discrimination=0.25, gap_relevance=0.20, measurability=0.15,
+control_completeness=0.15, cost_efficiency=0.15, reproducibility=0.10。
 
 P1 不执行任何实验：候选止步于 proposed / approved（人工批准标记）。
 """
@@ -13,6 +19,8 @@ from typing import Any
 
 from ..core.models import ExperimentCandidate, ScoreDimension
 from ..core.storage import ProjectStore, now_iso
+
+READINESS_SCORE_NAME = "experiment_readiness"  # 实验准备度评分（非信息增益，非区分度）
 
 PLANNER_SYSTEM_PROMPT = """你是主动实验规划助手。针对给定的研究问题与竞争假设，设计能够区分这些假设的实验方案。
 规则：
@@ -191,8 +199,10 @@ class ExperimentPlanner:
             "mode": mode,
             "llm_error": llm_error,
             "scoring_note": (
-                "优先级为六维启发式加权评分（权重见 SCORE_WEIGHTS），每维依据落盘可复算；"
-                "这不是信息论信息增益。权重：hypothesis_discrimination=0.25, gap_relevance=0.20, "
+                "优先级 = Experiment Readiness Score（实验准备度）：六维启发式加权评分，"
+                "每维依据落盘可复算；它衡量方案形式完备性，不衡量科学信息价值——"
+                "假设区分能力需要未来独立的 Discrimination Score，两者都不是信息论信息增益。"
+                "权重：hypothesis_discrimination=0.25, gap_relevance=0.20, "
                 "measurability=0.15, control_completeness=0.15, cost_efficiency=0.15, reproducibility=0.10"
             ),
             "note": "" if created else "离线草稿需要人工补齐后才能进入 proposed。",

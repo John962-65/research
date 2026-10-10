@@ -175,17 +175,35 @@ class ProjectStore:
         rows = self._read_json(self.require(project_id) / "observations.json", [])
         return [Observation.from_dict(r) for r in rows]
 
-    def save_observations(self, project_id: str, observations: list[Observation]) -> None:
+    def merge_observations(self, project_id: str, observations: list[Observation]) -> None:
+        """追加式合并（按 ID 去重）：历史观测永不覆盖，ID 全局唯一（DIAG-NNNN 前缀）。"""
+        existing = {o.id: o for o in self.load_observations(project_id)}
+        for observation in observations:
+            if observation.id in existing:
+                raise ValueError(f"观测 ID 重复，拒绝覆盖历史证据: {observation.id}")
+            existing[observation.id] = observation
         self._atomic_write_json(
-            self.require(project_id) / "observations.json", [o.to_dict() for o in observations]
+            self.require(project_id) / "observations.json", [o.to_dict() for o in existing.values()]
         )
+
+    def save_observations(self, project_id: str, observations: list[Observation]) -> None:
+        self.merge_observations(project_id, observations)
 
     def load_findings(self, project_id: str) -> list[Finding]:
         rows = self._read_json(self.require(project_id) / "findings.json", [])
         return [Finding.from_dict(r) for r in rows]
 
+    def merge_findings(self, project_id: str, findings: list[Finding]) -> None:
+        """追加式合并（按 ID 去重）：历史发现永不覆盖——研究问题对旧发现的引用保持有效。"""
+        existing = {f.id: f for f in self.load_findings(project_id)}
+        for finding in findings:
+            if finding.id in existing:
+                raise ValueError(f"发现 ID 重复，拒绝覆盖历史证据: {finding.id}")
+            existing[finding.id] = finding
+        self._atomic_write_json(self.require(project_id) / "findings.json", [f.to_dict() for f in existing.values()])
+
     def save_findings(self, project_id: str, findings: list[Finding]) -> None:
-        self._atomic_write_json(self.require(project_id) / "findings.json", [f.to_dict() for f in findings])
+        self.merge_findings(project_id, findings)
 
     def load_state(self, project_id: str) -> ResearchState:
         data = self._read_json(self.require(project_id) / "research-state.json", {})
@@ -240,15 +258,19 @@ class ProjectStore:
         return decision
 
     # ---------- 诊断报告 ----------
-    def save_diagnosis_report(self, project_id: str, report: dict[str, Any], markdown: str) -> tuple[Path, Path]:
+    def next_diagnosis_number(self, project_id: str) -> int:
         base = self.require(project_id) / "diagnosis"
         existing = [p.name for p in base.glob("diag-*.json")] if base.exists() else []
         numbers = [int(p[5:-5]) for p in existing if p[5:-5].isdigit()]
-        number = f"diag-{(max(numbers) + 1) if numbers else 1:03d}"
+        return (max(numbers) + 1) if numbers else 1
+
+    def save_diagnosis_report(self, project_id: str, report: dict[str, Any], markdown: str, diag_number: int | None = None) -> tuple[Path, Path]:
+        base = self.require(project_id) / "diagnosis"
+        number = diag_number or self.next_diagnosis_number(project_id)
+        json_path = base / f"diag-{number:03d}.json"
+        md_path = base / f"diag-{number:03d}.md"
         base.mkdir(parents=True, exist_ok=True)
-        json_path = base / f"{number}.json"
-        md_path = base / f"{number}.md"
         self._atomic_write_json(json_path, report)
         md_path.write_text(markdown, encoding="utf-8")
-        self.log_event(project_id, "diagnosis_written", target=number)
+        self.log_event(project_id, "diagnosis_written", target=f"DIAG-{number:04d}")
         return json_path, md_path
