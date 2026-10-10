@@ -1,0 +1,74 @@
+{
+  "eval_code_version": "eval/2.0",
+  "schema_version": "rc/1.0",
+  "bench_root": "benchmarks/discoverybench/discoverybench",
+  "subset": "main",
+  "selection": {
+    "rule": "train 优先、其余按 task_id 排序补足，取前 6（subset=main，确定性可复现）",
+    "subset": "main",
+    "task_ids": [
+      "discoverybench/real/train/evolution_freshwater_fish/metadata_0",
+      "discoverybench/real/train/evolution_freshwater_fish/metadata_1",
+      "discoverybench/real/train/evolution_freshwater_fish/metadata_2",
+      "discoverybench/real/train/evolution_freshwater_fish/metadata_3",
+      "discoverybench/real/train/immigration_offshoring_effect_on_employment/metadata_0",
+      "discoverybench/real/train/immigration_offshoring_effect_on_employment/metadata_1"
+    ],
+    "composition": {
+      "from_train": 6,
+      "from_test_or_dev": 0
+    },
+    "gold_source": [
+      "metadata"
+    ],
+    "note": "若包含 test 划分任务：其金标来自公开 answer key，已用于开发期评测，不得再作为留出集报告结论。main(real) 与 synth(gen) 同源样本不得重复计入。"
+  },
+  "task_ids": [
+    "discoverybench/real/train/evolution_freshwater_fish/metadata_0",
+    "discoverybench/real/train/evolution_freshwater_fish/metadata_1",
+    "discoverybench/real/train/evolution_freshwater_fish/metadata_2",
+    "discoverybench/real/train/evolution_freshwater_fish/metadata_3",
+    "discoverybench/real/train/immigration_offshoring_effect_on_employment/metadata_0",
+    "discoverybench/real/train/immigration_offshoring_effect_on_employment/metadata_1"
+  ],
+  "groups": [
+    "A",
+    "B",
+    "C"
+  ],
+  "model": "session-agent",
+  "judge_model": "session-agent",
+  "budget": {
+    "max_steps": 6,
+    "max_tool_calls": 8,
+    "timeout_s": 60.0
+  },
+  "fairness": "三组共用同一 ReAct 循环 / 同一工具沙箱配置 / 同一预算；差异仅在注入上下文（Copilot 模块输出）",
+  "sandbox_isolation": {
+    "env_whitelist": [
+      "PATH",
+      "LANG",
+      "LC_ALL",
+      "LC_CTYPE",
+      "TMPDIR",
+      "PYTHONHASHSEED"
+    ],
+    "rlimits": {
+      "cpu_seconds": 60,
+      "address_space_bytes": 2147483648,
+      "file_size_bytes": 16777216,
+      "max_processes": 64,
+      "open_files": 128
+    },
+    "network_isolated": true,
+    "honesty_note": "网络已通过 user+net namespace 隔离"
+  },
+  "scorer": {
+    "kind": "official-protocol/single-subhypothesis",
+    "official_eval_sha256": "83406ddbe6894429cc5012b17cb82a209d5397aa7863b0aba1bb51edf1dd6c65",
+    "judge_model": "session-agent"
+  },
+  "dry_run": false,
+  "note": "judge 模型仅用于评分并单独计量；dry_run 为 stub 管道冒烟，不构成评测结论。",
+  "started_at": "2026-10-10T19:41:39.675556+00:00"
+}

@@ -1,0 +1,164 @@
+{
+  "eval_code_version": "eval/2.0",
+  "schema_version": "rc/1.0",
+  "bench_root": "benchmarks/discoverybench/discoverybench",
+  "subset": "main",
+  "selection": {
+    "rule": "train 优先、其余按 task_id 排序补足，取前 6（subset=main，确定性可复现）",
+    "subset": "main",
+    "task_ids": [
+      "discoverybench/real/train/evolution_freshwater_fish/metadata_0",
+      "discoverybench/real/train/evolution_freshwater_fish/metadata_1",
+      "discoverybench/real/train/evolution_freshwater_fish/metadata_2",
+      "discoverybench/real/train/evolution_freshwater_fish/metadata_3",
+      "discoverybench/real/train/immigration_offshoring_effect_on_employment/metadata_0",
+      "discoverybench/real/train/immigration_offshoring_effect_on_employment/metadata_1"
+    ],
+    "composition": {
+      "from_train": 6,
+      "from_test_or_dev": 0
+    },
+    "gold_source": [
+      "metadata"
+    ],
+    "note": "若包含 test 划分任务：其金标来自公开 answer key，已用于开发期评测，不得再作为留出集报告结论。main(real) 与 synth(gen) 同源样本不得重复计入。"
+  },
+  "task_ids": [
+    "discoverybench/real/train/evolution_freshwater_fish/metadata_0",
+    "discoverybench/real/train/evolution_freshwater_fish/metadata_1",
+    "discoverybench/real/train/evolution_freshwater_fish/metadata_2",
+    "discoverybench/real/train/evolution_freshwater_fish/metadata_3",
+    "discoverybench/real/train/immigration_offshoring_effect_on_employment/metadata_0",
+    "discoverybench/real/train/immigration_offshoring_effect_on_employment/metadata_1"
+  ],
+  "groups": [
+    "A",
+    "B",
+    "C"
+  ],
+  "model": "session-agent",
+  "judge_model": "session-agent",
+  "budget": {
+    "max_steps": 6,
+    "max_tool_calls": 8,
+    "timeout_s": 60.0
+  },
+  "fairness": "三组共用同一 ReAct 循环 / 同一工具沙箱配置 / 同一预算；差异仅在注入上下文（Copilot 模块输出）",
+  "sandbox_isolation": {
+    "env_whitelist": [
+      "PATH",
+      "LANG",
+      "LC_ALL",
+      "LC_CTYPE",
+      "TMPDIR",
+      "PYTHONHASHSEED"
+    ],
+    "rlimits": {
+      "cpu_seconds": 60,
+      "address_space_bytes": 2147483648,
+      "file_size_bytes": 16777216,
+      "max_processes": 64,
+      "open_files": 128
+    },
+    "network_isolated": true,
+    "honesty_note": "网络已通过 user+net namespace 隔离"
+  },
+  "scorer": {
+    "kind": "official-protocol/single-subhypothesis",
+    "official_eval_sha256": "83406ddbe6894429cc5012b17cb82a209d5397aa7863b0aba1bb51edf1dd6c65",
+    "judge_model": "session-agent"
+  },
+  "dry_run": false,
+  "note": "judge 模型仅用于评分并单独计量；dry_run 为 stub 管道冒烟，不构成评测结论。",
+  "started_at": "2026-10-10T19:41:39.675556+00:00",
+  "finished_at": "2026-10-10T20:03:00.610689+00:00",
+  "group_summaries": {
+    "A": {
+      "n_tasks": 6,
+      "completion_rate": 1.0,
+      "official_accuracy_mean": 0.3476,
+      "official_accuracy_ci95": [
+        -0.0096,
+        0.7049
+      ],
+      "n_official_scored": 6,
+      "context_match_rate": 0.6667,
+      "var_f1_mean": 0.5286,
+      "rel_score_mean": 0.4167,
+      "hms_custom_mean": 0.8333,
+      "unsupported_rate_mean_evaluable": 0.0,
+      "n_not_evaluable": 2,
+      "total_llm_calls": 10,
+      "total_tool_calls": 4,
+      "total_prompt_tokens": 14062,
+      "total_completion_tokens": 2388,
+      "total_judge_calls": 18
+    },
+    "B": {
+      "n_tasks": 6,
+      "completion_rate": 1.0,
+      "official_accuracy_mean": 0.3476,
+      "official_accuracy_ci95": [
+        -0.0096,
+        0.7049
+      ],
+      "n_official_scored": 6,
+      "context_match_rate": 0.6667,
+      "var_f1_mean": 0.5286,
+      "rel_score_mean": 0.4167,
+      "hms_custom_mean": 0.8333,
+      "unsupported_rate_mean_evaluable": 0.0,
+      "n_not_evaluable": 2,
+      "total_llm_calls": 10,
+      "total_tool_calls": 4,
+      "total_prompt_tokens": 12714,
+      "total_completion_tokens": 2097,
+      "total_judge_calls": 18
+    },
+    "C": {
+      "n_tasks": 6,
+      "completion_rate": 1.0,
+      "official_accuracy_mean": 0.3476,
+      "official_accuracy_ci95": [
+        -0.0096,
+        0.7049
+      ],
+      "n_official_scored": 6,
+      "context_match_rate": 0.6667,
+      "var_f1_mean": 0.5286,
+      "rel_score_mean": 0.4167,
+      "hms_custom_mean": 0.8333,
+      "unsupported_rate_mean_evaluable": 0.0,
+      "n_not_evaluable": 2,
+      "total_llm_calls": 10,
+      "total_tool_calls": 4,
+      "total_prompt_tokens": 36782,
+      "total_completion_tokens": 2103,
+      "total_judge_calls": 18
+    }
+  },
+  "comparisons": {
+    "C_vs_A": {
+      "value_key": "official_accuracy",
+      "n_paired": 6,
+      "delta_mean": 0.0,
+      "delta_ci95": [
+        0.0,
+        0.0
+      ],
+      "note": "官方协议 accuracy ∈ [0,1]（context×var_F1×rel）；delta>0 表示 x 组更优。跨任务 CI 仅描述本任务子集的不确定性。"
+    },
+    "C_vs_B": {
+      "value_key": "official_accuracy",
+      "n_paired": 6,
+      "delta_mean": 0.0,
+      "delta_ci95": [
+        0.0,
+        0.0
+      ],
+      "note": "官方协议 accuracy ∈ [0,1]（context×var_F1×rel）；delta>0 表示 x 组更优。跨任务 CI 仅描述本任务子集的不确定性。"
+    }
+  },
+  "hms_error": "",
+  "honesty_note": "正式评测：结果只描述本任务子集；test 划分任务已用于开发期评测（见 selection 污染注记）；未观察到收益时按原样报告并归因。"
+}

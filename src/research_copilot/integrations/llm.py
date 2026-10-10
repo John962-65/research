@@ -32,7 +32,7 @@ class LLMCallRecord:
     model: str
     purpose: str
     prompt_chars: int
-    completion_chars: int
+    completion_chars: int = 0
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     duration_s: float = 0.0
