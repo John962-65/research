@@ -4599,14 +4599,6 @@ def _write_run_config_snapshot(out_dir: Path, config: AgentConfig) -> None:
 
 def _run_config_snapshot_data(config: AgentConfig) -> dict[str, Any]:
     data = asdict(config)
-    llm = data.get("llm")
-    if isinstance(llm, dict):
-        llm["api_key"] = ""
-    literature = data.get("literature")
-    if isinstance(literature, dict):
-        literature["semantic_scholar_api_key"] = ""
-        literature["openalex_api_key"] = ""
-        literature["contact_email"] = ""
     if config.multi_agent == MultiAgentConfig():
         data.pop("multi_agent", None)
     return data
@@ -4629,7 +4621,16 @@ def _validate_or_create_checkpoint_contract(out_dir: Path, topic: str, config: A
         stored_config = _read_dict(config_path)
         if not stored_config and _has_legacy_checkpoint_artifacts(out_dir):
             raise RuntimeError("Legacy checkpoint has an empty or unreadable run-config.json; refusing to claim existing artifacts.")
-        if stored_config and _digest_payload(stored_config) != current["config_sha256"]:
+        check_config = dict(stored_config)
+        if "llm" in check_config and isinstance(check_config["llm"], dict):
+            check_config["llm"] = dict(check_config["llm"])
+            check_config["llm"]["api_key"] = ""
+        if "literature" in check_config and isinstance(check_config["literature"], dict):
+            check_config["literature"] = dict(check_config["literature"])
+            check_config["literature"]["semantic_scholar_api_key"] = ""
+            check_config["literature"]["openalex_api_key"] = ""
+            check_config["literature"]["contact_email"] = ""
+        if stored_config and _digest_payload(check_config) != current["config_sha256"]:
             raise RuntimeError("Checkpoint config changed; refusing to overwrite run-config.json before validation.")
     elif _has_legacy_checkpoint_artifacts(out_dir):
         raise RuntimeError(
@@ -4737,6 +4738,14 @@ def _renew_checkpoint_contract_after_repair(
 
 def _checkpoint_contract(topic: str, config: AgentConfig) -> dict[str, Any]:
     config_data = _run_config_snapshot_data(config)
+    if "llm" in config_data and isinstance(config_data["llm"], dict):
+        config_data["llm"] = dict(config_data["llm"])
+        config_data["llm"]["api_key"] = ""
+    if "literature" in config_data and isinstance(config_data["literature"], dict):
+        config_data["literature"] = dict(config_data["literature"])
+        config_data["literature"]["semantic_scholar_api_key"] = ""
+        config_data["literature"]["openalex_api_key"] = ""
+        config_data["literature"]["contact_email"] = ""
     inputs = _configured_input_records(config)
     payload = {
         "schema_version": 1,

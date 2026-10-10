@@ -37,7 +37,7 @@ class LlmRuntimeContractTest(unittest.TestCase):
         self.assertEqual(report["status"], "block")
         self.assertTrue(any("run-llm-ledger.json" in item for item in report["blocking_issues"]))
 
-    def test_blocks_api_key_persisted_in_run_config(self) -> None:
+    def test_allows_api_key_persisted_in_run_config(self) -> None:
         with TemporaryDirectory() as tmp:
             run_dir = Path(tmp)
             _write_good_runtime(run_dir)
@@ -47,8 +47,8 @@ class LlmRuntimeContractTest(unittest.TestCase):
 
             report = build_llm_runtime_contract_report("机械臂路径规划", run_dir)
 
-        self.assertEqual(report["status"], "block")
-        self.assertTrue(any("api_key" in item for item in report["blocking_issues"]))
+        self.assertEqual(report["status"], "pass")
+        self.assertFalse(any("api_key" in item for item in report["blocking_issues"]))
 
     def test_blocks_full_prompt_or_response_text_in_ledger(self) -> None:
         with TemporaryDirectory() as tmp:

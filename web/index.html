@@ -479,7 +479,7 @@
               <label class="field">
                 <span>API Key (密钥)</span>
                 <input id="llm-api-key" name="llm_api_key" type="password" autocomplete="off" data-paper-grade-secret placeholder="普通模式可临时填写；留空读取 OPENAI_API_KEY">
-                <small id="llm-api-key-policy" class="field-note">普通模式可为本次请求临时提供 Key；配置快照不会保存密钥。</small>
+                <small id="llm-api-key-policy" class="field-note">输入后将自动配置到服务端环境变量并持久化保存。</small>
               </label>
 
               <label class="field">

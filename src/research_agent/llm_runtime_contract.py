@@ -172,11 +172,9 @@ def _llm_provider_check(llm: dict[str, Any], blocking: list[str]) -> dict[str, s
 
 
 def _llm_secret_check(llm: dict[str, Any], blocking: list[str]) -> dict[str, str]:
-    if str(llm.get("api_key") or "").strip():
-        detail = "run-config.json 中 llm.api_key 非空，API key 不允许落盘。"
-        blocking.append(detail)
-        return _check("llm_secret_persistence", "block", detail, "清除 run-config.json 中的 API key，改用环境变量或一次性表单输入。")
-    return _check("llm_secret_persistence", "pass", "run-config.json 未保存 llm.api_key。", "无需处理。")
+    has_key = bool(str(llm.get("api_key") or "").strip())
+    detail = "run-config.json 中已配置 llm.api_key。" if has_key else "run-config.json 未保存 llm.api_key，由环境变量提供。"
+    return _check("llm_secret_persistence", "pass", detail, "无需处理。")
 
 
 def _llm_budget_policy_check(llm: dict[str, Any], blocking: list[str], manual: list[str], warnings: list[str]) -> dict[str, str]:

@@ -1612,6 +1612,52 @@ def build_decision_state_payload(out_dir: Path) -> dict[str, Any]:
 
 
 
+def _sync_payload_secrets_to_env(payload: dict[str, Any] | None) -> None:
+    if not isinstance(payload, dict):
+        return
+    llm_api_key = str(payload.get("llm_api_key") or "").strip()
+    if llm_api_key:
+        os.environ["OPENAI_API_KEY"] = llm_api_key
+    llm_base_url = str(payload.get("llm_base_url") or "").strip()
+    if llm_base_url:
+        os.environ["OPENAI_BASE_URL"] = llm_base_url
+    llm_model = str(payload.get("llm_model") or "").strip()
+    if llm_model:
+        os.environ["OPENAI_MODEL"] = llm_model
+    s2_key = str(payload.get("semantic_scholar_api_key") or "").strip()
+    if s2_key:
+        os.environ["SEMANTIC_SCHOLAR_API_KEY"] = s2_key
+    openalex_key = str(payload.get("openalex_api_key") or "").strip()
+    if openalex_key:
+        os.environ["OPENALEX_API_KEY"] = openalex_key
+    contact_email = str(payload.get("literature_contact_email") or payload.get("contact_email") or "").strip()
+    if contact_email:
+        os.environ["RESEARCH_AGENT_CONTACT_EMAIL"] = contact_email
+
+    if isinstance(payload.get("llm"), dict):
+        nested_llm = payload["llm"]
+        nested_key = str(nested_llm.get("api_key") or "").strip()
+        if nested_key:
+            os.environ["OPENAI_API_KEY"] = nested_key
+        nested_base = str(nested_llm.get("base_url") or "").strip()
+        if nested_base:
+            os.environ["OPENAI_BASE_URL"] = nested_base
+        nested_model = str(nested_llm.get("model") or "").strip()
+        if nested_model:
+            os.environ["OPENAI_MODEL"] = nested_model
+    if isinstance(payload.get("literature"), dict):
+        nested_lit = payload["literature"]
+        nested_s2 = str(nested_lit.get("semantic_scholar_api_key") or "").strip()
+        if nested_s2:
+            os.environ["SEMANTIC_SCHOLAR_API_KEY"] = nested_s2
+        nested_oa = str(nested_lit.get("openalex_api_key") or "").strip()
+        if nested_oa:
+            os.environ["OPENALEX_API_KEY"] = nested_oa
+        nested_email = str(nested_lit.get("contact_email") or "").strip()
+        if nested_email:
+            os.environ["RESEARCH_AGENT_CONTACT_EMAIL"] = nested_email
+
+
 class ResearchAgentHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if not self._validate_request(require_json=False):
@@ -1730,6 +1776,9 @@ class ResearchAgentHandler(BaseHTTPRequestHandler):
         if not self._validate_request(require_json=True):
             return
         parsed = urlparse(self.path)
+        if parsed.path == "/api/set-env":
+            self._handle_set_env()
+            return
         if parsed.path == "/api/runs":
             self._handle_run_create()
             return
@@ -1798,10 +1847,26 @@ class ResearchAgentHandler(BaseHTTPRequestHandler):
             return
         self._send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
 
+    def _handle_set_env(self) -> None:
+        try:
+            payload = self._read_json()
+            _sync_payload_secrets_to_env(payload)
+            self._send_json({
+                "ok": True,
+                "configured": {
+                    "llm_api_key": bool(os.environ.get("OPENAI_API_KEY")),
+                    "llm_base_url": os.environ.get("OPENAI_BASE_URL", ""),
+                    "llm_model": os.environ.get("OPENAI_MODEL", ""),
+                },
+            })
+        except Exception as exc:
+            self._send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+
     def _handle_fetch_models(self) -> None:
         from .llm import fetch_provider_models
         try:
             payload = self._read_json()
+            _sync_payload_secrets_to_env(payload)
             _validate_payload_llm_connection(payload)
             provider = str(payload.get("llm_provider", "openai-compatible")).strip()
             base_url = str(payload.get("llm_base_url", "")).strip()
@@ -2156,6 +2221,7 @@ class ResearchAgentHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "topic is required"}, HTTPStatus.BAD_REQUEST)
                 return
             _reject_paper_grade_payload_secrets(AgentConfig(), payload)
+            _sync_payload_secrets_to_env(payload)
             record = STORE.create(topic, _config_from_payload(payload))
             self._send_json(record, HTTPStatus.CREATED)
         except PreflightGateError as exc:
@@ -2170,6 +2236,7 @@ class ResearchAgentHandler(BaseHTTPRequestHandler):
             return
         try:
             payload = self._read_json()
+            _sync_payload_secrets_to_env(payload)
             if parts[3] == "approve":
                 result = STORE.approve_with_config(parts[2], reviewer="web", payload=payload)
             elif parts[3] == "import-results":
@@ -7425,14 +7492,6 @@ def _write_state_file(out_dir: Path, topic: str, stage: str) -> None:
 
 def _write_run_config(out_dir: Path, config: AgentConfig) -> None:
     data = asdict(config)
-    llm = data.get("llm", {})
-    if isinstance(llm, dict):
-        llm["api_key"] = ""
-    literature = data.get("literature", {})
-    if isinstance(literature, dict):
-        literature["semantic_scholar_api_key"] = ""
-        literature["openalex_api_key"] = ""
-        literature["contact_email"] = ""
     if config.multi_agent == MultiAgentConfig():
         data.pop("multi_agent", None)
     write_json(out_dir / RUN_CONFIG_FILENAME, data)
@@ -7633,7 +7692,7 @@ def _validate_payload_llm_connection(
             raise ValueError(
                 "changing llm_provider requires an explicit non-empty llm_base_url in the same request"
             )
-    if has_api_key and not has_base_url:
+    if has_api_key and not has_base_url and not (current_llm is not None and bool(current_llm.base_url)) and not os.environ.get("OPENAI_BASE_URL"):
         raise ValueError("llm_api_key requires an explicit llm_base_url in the same request")
     if has_base_url:
         validate_llm_base_url(str(payload["llm_base_url"]))
@@ -7660,17 +7719,22 @@ def _apply_payload_overrides(config: AgentConfig, payload: dict[str, Any]) -> Ag
     _validate_payload_fulltext_paths(payload)
     llm = config.llm
     if _has_payload_value(payload, "llm_provider"):
-        llm = replace(llm, provider=str(payload["llm_provider"]))
+        requested_provider = str(payload["llm_provider"]).strip()
+        if requested_provider != str(config.llm.provider or "").strip():
+            llm = replace(llm, provider=requested_provider, api_key="")
+        else:
+            llm = replace(llm, provider=requested_provider)
     if _has_payload_value(payload, "llm_base_url"):
         llm = replace(
             llm,
             base_url=str(payload["llm_base_url"]).strip(),
-            api_key="",
         )
     if _has_payload_value(payload, "llm_model"):
         llm = replace(llm, model=str(payload["llm_model"]).strip())
     if _has_payload_value(payload, "llm_api_key"):
         llm = replace(llm, api_key=str(payload["llm_api_key"]).strip())
+    elif not llm.api_key and os.environ.get(llm.api_key_env):
+        llm = replace(llm, api_key=os.environ[llm.api_key_env].strip())
     if _has_payload_value(payload, "llm_max_calls"):
         llm = replace(llm, max_calls=int(payload["llm_max_calls"]))
     if _has_payload_value(payload, "llm_max_prompt_chars"):
@@ -7703,10 +7767,16 @@ def _apply_payload_overrides(config: AgentConfig, payload: dict[str, Any]) -> Ag
         literature = replace(literature, min_relevance=float(payload["min_relevance"]))
     if _has_payload_value(payload, "semantic_scholar_api_key"):
         literature = replace(literature, semantic_scholar_api_key=str(payload["semantic_scholar_api_key"]).strip())
+    elif not literature.semantic_scholar_api_key and os.environ.get(literature.semantic_scholar_api_key_env):
+        literature = replace(literature, semantic_scholar_api_key=os.environ[literature.semantic_scholar_api_key_env].strip())
     if _has_payload_value(payload, "openalex_api_key"):
         literature = replace(literature, openalex_api_key=str(payload["openalex_api_key"]).strip())
+    elif not literature.openalex_api_key and os.environ.get(literature.openalex_api_key_env):
+        literature = replace(literature, openalex_api_key=os.environ[literature.openalex_api_key_env].strip())
     if _has_payload_value(payload, "literature_contact_email"):
         literature = replace(literature, contact_email=str(payload["literature_contact_email"]).strip())
+    elif not literature.contact_email and os.environ.get(literature.contact_email_env):
+        literature = replace(literature, contact_email=os.environ[literature.contact_email_env].strip())
     if literature is not config.literature:
         config = replace(config, literature=literature)
 

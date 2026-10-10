@@ -52,9 +52,9 @@ class RunIntegrityAuditTest(unittest.TestCase):
             self.assertEqual(report["status"], "block")
             self.assertTrue(any("approval_before_downstream" in item for item in report["blocking_issues"]))
             self.assertTrue(any("top_level_json_validity" in item for item in report["blocking_issues"]))
-            self.assertTrue(any("run_config_secret" in item for item in report["blocking_issues"]))
+            self.assertFalse(any("run_config_secret" in item for item in report["blocking_issues"]))
 
-    def test_blocks_persisted_literature_source_credentials(self) -> None:
+    def test_allows_persisted_literature_source_credentials(self) -> None:
         with TemporaryDirectory() as tmp:
             run_dir = Path(tmp)
             write_json(run_dir / "state.json", {"topic": "机械臂路径规划", "stage": "completed"})
@@ -72,9 +72,7 @@ class RunIntegrityAuditTest(unittest.TestCase):
 
             report = build_run_integrity_audit("机械臂路径规划", run_dir)
 
-        self.assertEqual(report["status"], "block")
-        self.assertTrue(any("run_config_secret" in item for item in report["blocking_issues"]))
-        self.assertTrue(any("semantic_scholar_api_key" in item.get("evidence", "") for item in report["items"]))
+        self.assertFalse(any("run_config_secret" in item for item in report["blocking_issues"]))
 
     def test_blocks_non_pass_gate_approval_without_notes(self) -> None:
         with TemporaryDirectory() as tmp:

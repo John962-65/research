@@ -461,14 +461,47 @@ async function applyRollbackNow() {
   state.rollbackUI = { ...ui, busy: 'apply', reason, error: '' };
   updateActionButtons();
   try {
+    const payload = {
+      target: ui.target,
+      preview_id: ui.preview.preview_id,
+      preview_token: ui.preview.preview_token,
+      reason,
+    };
+    let savedKey = (typeof sessionStorage !== 'undefined' ? (sessionStorage.getItem('agy_llm_api_key') || '') : '')
+      || String(els.form?.elements.namedItem('llm_api_key')?.value || apiKeyInput?.value || '').trim();
+    if (!savedKey) {
+      const promptModel = state.currentRun?.config?.llm?.model || els.form?.elements.namedItem('llm_model')?.value || '大模型';
+      const key = window.prompt(
+        '【大模型 API Key 认证】\n回退后恢复运行需要调用大模型（' + promptModel + '）。\n请输入 LLM API Key（若服务已在环境变量配置可直接留空点确定）：',
+        ''
+      );
+      if (key === null) {
+        state.rollbackUI = { ...ui, busy: null };
+        renderStages(run.stage, run.workflow);
+        updateActionButtons();
+        return;
+      }
+      if (key.trim()) {
+        savedKey = key.trim();
+        setFieldValue('llm_api_key', savedKey);
+        try { sessionStorage.setItem('agy_llm_api_key', savedKey); } catch (_) {}
+        syncEnvToBackend({ llm_api_key: savedKey });
+      }
+    }
+    if (savedKey) {
+      payload.llm_api_key = savedKey;
+    }
+    const baseUrl = state.currentRun?.config?.llm?.base_url || els.form?.elements.namedItem('llm_base_url')?.value || baseUrlInput?.value;
+    if (baseUrl) {
+      payload.llm_base_url = String(baseUrl).trim();
+    }
+    const model = state.currentRun?.config?.llm?.model || els.form?.elements.namedItem('llm_model')?.value || modelInput?.value;
+    if (model) {
+      payload.llm_model = String(model).trim();
+    }
     const result = await api(`/api/runs/${encodeURIComponent(run.id)}/rollback-apply`, {
       method: 'POST',
-      body: JSON.stringify({
-        target: ui.target,
-        preview_id: ui.preview.preview_id,
-        preview_token: ui.preview.preview_token,
-        reason,
-      }),
+      body: JSON.stringify(payload),
     });
     state.rollbackUI = null;
     if (result.run) setCurrentRun(result.run);
@@ -4123,14 +4156,60 @@ els.applyLiteratureFeedback.addEventListener('click', applyLiteratureFeedbackToF
 els.cancel.addEventListener('click', cancelCurrentRun);
 els.rollbackRun.addEventListener('click', openRollbackChooser);
 
+async function syncEnvToBackend(data) {
+  try {
+    await api('/api/set-env', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  } catch (_) {}
+}
+
 const keyField = els.form?.elements.namedItem('llm_api_key');
 if (keyField) {
-  keyField.addEventListener('input', () => {
+  try {
+    const saved = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('agy_llm_api_key') : null;
+    if (saved && !keyField.value) {
+      keyField.value = saved;
+      syncEnvToBackend({ llm_api_key: saved });
+    }
+  } catch (_) {}
+  const onKeyUpdate = () => {
     try {
-      if (keyField.value) sessionStorage.setItem('agy_llm_api_key', keyField.value.trim());
+      const val = keyField.value.trim();
+      if (typeof sessionStorage !== 'undefined') sessionStorage.setItem('agy_llm_api_key', val);
+      syncEnvToBackend({ llm_api_key: val });
     } catch (_) {}
+  };
+  keyField.addEventListener('input', onKeyUpdate);
+  keyField.addEventListener('change', onKeyUpdate);
+}
+
+const baseUrlField = els.form?.elements.namedItem('llm_base_url');
+if (baseUrlField) {
+  baseUrlField.addEventListener('change', () => {
+    const val = baseUrlField.value.trim();
+    if (val) syncEnvToBackend({ llm_base_url: val });
   });
 }
+
+const modelField = els.form?.elements.namedItem('llm_model');
+if (modelField) {
+  modelField.addEventListener('change', () => {
+    const val = modelField.value.trim();
+    if (val) syncEnvToBackend({ llm_model: val });
+  });
+}
+
+['semantic_scholar_api_key', 'openalex_api_key', 'literature_contact_email'].forEach((fieldName) => {
+  const field = els.form?.elements.namedItem(fieldName);
+  if (field) {
+    field.addEventListener('change', () => {
+      const val = field.value.trim();
+      if (val) syncEnvToBackend({ [fieldName]: val });
+    });
+  }
+});
 
 if (window.MutationObserver && els.artifactTitle) {
   new MutationObserver(clearGoldLaunchCommandsWhenArtifactChanges)
@@ -4482,7 +4561,16 @@ if (providerSelect && baseUrlInput) {
 }
 
 if (baseUrlInput) baseUrlInput.addEventListener('input', () => invalidateLlmConnectionStatus({clearModels: true}));
-if (apiKeyInput) apiKeyInput.addEventListener('input', () => invalidateLlmConnectionStatus({clearModels: true}));
+if (apiKeyInput) {
+  apiKeyInput.addEventListener('input', () => {
+    invalidateLlmConnectionStatus({clearModels: true});
+    try {
+      const val = apiKeyInput.value.trim();
+      if (typeof sessionStorage !== 'undefined') sessionStorage.setItem('agy_llm_api_key', val);
+      syncEnvToBackend({ llm_api_key: val });
+    } catch (_) {}
+  });
+}
 if (modelInput) modelInput.addEventListener('input', () => invalidateLlmConnectionStatus());
 
 function renderModelOptions(models, source) {
