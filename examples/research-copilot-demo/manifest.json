@@ -1,0 +1,1 @@
+{"benchmark": "demo", "metric_schema": {"planning_time_s": {"direction": "lower_is_better"},"success_rate": {"direction": "higher_is_better"}}}

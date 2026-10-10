@@ -1,0 +1,188 @@
+"""评测指标：任务完成率、无依据结论比例、HMS（官方协议）、成本与统计不确定性。
+
+- 无依据结论比例 = (数值断言复核失败数 + 无因果依据的机制表述数) / 总检查数；
+  全部由确定性代码重算，不用 LLM 判断数值。
+- HMS 按官方两步协议（结构化抽取 → 0/1/2 匹配分）由 judge LLM 评分；
+  judge 模型单独记录，与被测模型无关；judge 不可用时 HMS=None，绝不伪造。
+"""
+from __future__ import annotations
+
+import json
+import math
+import re
+from typing import Any
+
+from ..analysis.statistics import compare_metric, describe, numeric, split_by_status
+from ..analysis.evidence_validator import CAUSAL_MARKERS
+
+_HMS_SYSTEM = """你是科学假设评分器。给定参考假设与被评假设，按官方 DiscoveryBench 协议输出匹配分：
+0 = 无匹配（未捕捉参考假设的核心关系）；1 = 部分匹配（方向或主要变量对，但关系/条件不完整）；2 = 完全匹配。
+只考虑数据可支持的内容；被评假设引入数据外机制不加分。
+只输出 JSON：{"score": 0|1|2, "reason": "一句话"}"""
+
+
+def check_numeric_assertions(answer: dict[str, Any], rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """对答案的 numeric_assertions 逐条确定性重算。"""
+    results: list[dict[str, Any]] = []
+    for assertion in answer.get("numeric_assertions") or []:
+        if not isinstance(assertion, dict):
+            continue
+        metric = str(assertion.get("metric") or "")
+        claimed = assertion.get("value")
+        check = str(assertion.get("check") or "mean")
+        try:
+            claimed_value = float(claimed)
+        except (TypeError, ValueError):
+            results.append({"metric": metric, "check": check, "status": "unverifiable", "note": "值不可解析"})
+            continue
+        group_field = "comparison_group"
+        if check == "percent_change_from_baseline":
+            candidate_group = str(assertion.get("candidate_group") or "")
+            baseline_group = str(assertion.get("baseline_group") or "")
+            if not candidate_group or not baseline_group:
+                results.append({**{"metric": metric, "check": check}, "status": "unverifiable", "note": "缺组名"})
+                continue
+            comparison = compare_metric(rows, metric, candidate_group, baseline_group)
+            expected = None
+            cand_mean = (comparison.get("candidate") or {}).get("mean")
+            base_mean = (comparison.get("baseline") or {}).get("mean")
+            if cand_mean is not None and base_mean:
+                if comparison.get("lower_is_better") is True:
+                    expected = (base_mean - cand_mean) / abs(base_mean) * 100
+                else:
+                    expected = (cand_mean - base_mean) / abs(base_mean) * 100
+        else:
+            group_name = str(assertion.get("group") or "")
+            subset = [r for r in rows if not group_name or str(r.get(group_field) or "") == group_name]
+            success_rows, _ = split_by_status(subset)
+            values = numeric(success_rows, metric)
+            if not values:
+                values = numeric(subset, metric)
+            if not values:
+                results.append({"metric": metric, "check": check, "status": "unverifiable", "note": "数据中无该列/组"})
+                continue
+            stats = describe(values, metric)
+            if check in ("mean", "median"):
+                expected = stats.get(check)
+            elif check == "percentile_p95":
+                expected = (stats.get("percentiles") or {}).get("p95")
+            else:
+                expected = None
+        if expected is None:
+            results.append({"metric": metric, "check": check, "status": "unverifiable", "note": "无法重算（样本不足或字段缺失）"})
+            continue
+        ok = abs(claimed_value - expected) <= max(abs(expected) * 0.05, 0.1)
+        results.append(
+            {
+                "metric": metric,
+                "check": check,
+                "claimed": claimed_value,
+                "expected": expected,
+                "status": "pass" if ok else "fail",
+            }
+        )
+    return results
+
+
+def causal_claims_without_basis(answer: dict[str, Any]) -> list[str]:
+    """含因果标记的表述；P1 无受控实验元数据 → 一律计为无因果依据（如实计数）。"""
+    claims: list[str] = []
+    for text in [str(answer.get("mechanism") or "")] + [str(r) for r in answer.get("relationships") or []]:
+        if text and CAUSAL_MARKERS.search(text):
+            claims.append(text)
+    return claims
+
+
+def unsupported_conclusion_rate(answer: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """无依据结论比例 = (失败/无依据数值断言 + 无因果依据表述) / (数值断言数 + 机制/关系表述数)。"""
+    checks = check_numeric_assertions(answer, rows)
+    failed_numeric = [c for c in checks if c["status"] == "fail"]
+    unverifiable = [c for c in checks if c["status"] == "unverifiable"]
+    causal = causal_claims_without_basis(answer)
+    denominator = len(checks) + 1  # 机制/关系表述合并计 1
+    unsupported = len(failed_numeric) + (1 if causal else 0)
+    return {
+        "numeric_checks": checks,
+        "n_numeric": len(checks),
+        "n_numeric_fail": len(failed_numeric),
+        "n_numeric_unverifiable": len(unverifiable),
+        "causal_without_basis": causal,
+        "unsupported_conclusion_rate": round(unsupported / denominator, 4) if denominator else 0.0,
+    }
+
+
+def hms_score(answer: dict[str, Any], gold_hypothesis: str, judge_llm: Any) -> dict[str, Any]:
+    """官方两步协议：结构化抽取（本答案已结构化）→ judge 打 0/1/2。"""
+    if not answer.get("hypothesis"):
+        return {"hms": None, "reason": "无有效答案", "judge_model": getattr(judge_llm, "config", None) and judge_llm.config.model}
+    payload = {
+        "gold_hypothesis": gold_hypothesis,
+        "candidate": {
+            "hypothesis": answer.get("hypothesis"),
+            "variables": answer.get("variables") or [],
+            "relationships": answer.get("relationships") or [],
+            "mechanism": answer.get("mechanism") or "",
+        },
+    }
+    response = judge_llm.complete(_HMS_SYSTEM, json.dumps(payload, ensure_ascii=False), purpose="hms_judge")
+    match = re.search(r"\{.*\}", response, re.DOTALL)
+    try:
+        parsed = json.loads(match.group(0)) if match else {}
+    except json.JSONDecodeError:
+        parsed = {}
+    score = parsed.get("score")
+    if score not in (0, 1, 2, "0", "1", "2"):
+        return {"hms": None, "reason": f"judge 输出无法解析: {response[:120]}", "judge_model": _judge_model(judge_llm)}
+    return {"hms": int(score), "reason": str(parsed.get("reason") or ""), "judge_model": _judge_model(judge_llm)}
+
+
+def _judge_model(judge_llm: Any) -> str:
+    config = getattr(judge_llm, "config", None)
+    return getattr(config, "model", "unknown") if config else "unknown"
+
+
+def ci95(values: list[float]) -> tuple[float, float] | None:
+    if len(values) < 2:
+        return None
+    m = sum(values) / len(values)
+    variance = sum((v - m) ** 2 for v in values) / (len(values) - 1)
+    half = 1.96 * math.sqrt(variance / len(values))
+    return (round(m - half, 4), round(m + half, 4))
+
+
+def aggregate_group(records: list[dict[str, Any]]) -> dict[str, Any]:
+    """组级汇总：完成率、HMS 均值±95%CI（跨任务）、无依据结论比例、成本。"""
+    valid = [r for r in records if not r.get("error") and (r.get("answer") or {}).get("hypothesis")]
+    hms_values = [r["hms"] for r in records if r.get("hms") is not None]
+    unsupported = [r.get("unsupported", {}).get("unsupported_conclusion_rate", 0.0) for r in records]
+    interval = ci95([float(v) for v in hms_values])
+    return {
+        "n_tasks": len(records),
+        "completion_rate": round(len(valid) / len(records), 4) if records else 0.0,
+        "hms_mean": round(sum(hms_values) / len(hms_values), 4) if hms_values else None,
+        "hms_ci95": interval,
+        "hms_scored_tasks": len(hms_values),
+        "unsupported_rate_mean": round(sum(unsupported) / len(unsupported), 4) if unsupported else None,
+        "total_llm_calls": sum(r.get("llm_calls", 0) for r in records),
+        "total_tool_calls": sum(r.get("tool_calls", 0) for r in records),
+        "total_prompt_tokens": sum(r.get("prompt_tokens", 0) for r in records),
+        "total_completion_tokens": sum(r.get("completion_tokens", 0) for r in records),
+    }
+
+
+def paired_delta(records_x: list[dict[str, Any]], records_y: list[dict[str, Any]], key: str = "task_id") -> dict[str, Any]:
+    """按任务配对的组间差（x - y），CI 优先、无 p 值。"""
+    y_by_task = {r[key]: r for r in records_y}
+    deltas = []
+    for record in records_x:
+        other = y_by_task.get(record[key])
+        if other is None or record.get("hms") is None or other.get("hms") is None:
+            continue
+        deltas.append(record["hms"] - other["hms"])
+    mean_delta = round(sum(deltas) / len(deltas), 4) if deltas else None
+    return {
+        "n_paired": len(deltas),
+        "delta_mean": mean_delta,
+        "delta_ci95": ci95([float(d) for d in deltas]),
+        "note": "HMS 为 0-2 分；delta>0 表示 x 组更优。跨任务 CI 仅描述本任务子集的不确定性。",
+    }

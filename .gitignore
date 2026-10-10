@@ -1,0 +1,19 @@
+# 本地科研数据与评测产物永不入库
+data/
+eval-runs/
+benchmarks/discoverybench/discoverybench/
+benchmarks/discoverybench/*.zip
+benchmarks/discoverybench/*.tar.gz
+
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.venv/
+build/
+dist/
+
+# 任何凭据文件都不允许入库
+credentials*.json
+*.secret
+.env
