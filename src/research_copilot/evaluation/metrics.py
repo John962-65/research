@@ -384,9 +384,14 @@ def aggregate_group(records: list[dict[str, Any]]) -> dict[str, Any]:
         float((r.get("official") or {}).get("accuracy") or 0.0) for r in records
     ]
     full_task_score_mean = round(sum(full_task_scores) / len(full_task_scores), 4) if full_task_scores else None
-    full_task_interval = _bootstrap_cluster_ci(
-        {str(i): [v] for i, v in enumerate(full_task_scores)}  # 任务级 bootstrap（全分母口径）
-    ) if full_task_scores else None
+    # 全任务 bootstrap 必须按真实数据集 ID 分组（失败记 0 保留在组内）——
+    # 修复审查 P1：任务级抽样丢失同数据集相关性
+    by_dataset_full: dict[str, list[float]] = {}
+    for record in records:
+        by_dataset_full.setdefault(_dataset_of(record["task_id"]), []).append(
+            float((record.get("official") or {}).get("accuracy") or 0.0)
+        )
+    full_task_interval = _bootstrap_cluster_ci(by_dataset_full) if by_dataset_full else None
     failure_breakdown: dict[str, int] = {}
     for record in records:
         fc = record.get("failure_class") or ("" if (record.get("answer") or {}).get("hypothesis") else "unknown")
@@ -425,27 +430,35 @@ def aggregate_group(records: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def paired_delta(records_x: list[dict[str, Any]], records_y: list[dict[str, Any]], value_key: str = "official_accuracy", key: str = "task_id") -> dict[str, Any]:
-    """按任务配对的组间差（x - y），CI 优先、无 p 值。默认用官方协议 accuracy。"""
+    """全任务口径的组间配对差（审查 P1-2）：未完成任务记 0 分参与配对，
+    差值按数据集分层 bootstrap 重采样（与主指标同一统计假设）。"""
 
-    def _value(record: dict[str, Any]) -> float | None:
+    def _value(record: dict[str, Any] | None) -> float:
+        if record is None:
+            return 0.0
         if value_key == "official_accuracy":
-            return (record.get("official") or {}).get("accuracy")
-        return record.get(value_key)
+            return float((record.get("official") or {}).get("accuracy") or 0.0)
+        return float(record.get(value_key) or 0.0)
 
     y_by_task = {r[key]: r for r in records_y}
-    deltas = []
-    for record in records_x:
-        other = y_by_task.get(record[key])
-        vx = _value(record)
-        vy = _value(other) if other else None
-        if other is None or vx is None or vy is None:
-            continue
-        deltas.append(vx - vy)
+    x_by_task = {r[key]: r for r in records_x}
+    all_task_ids = sorted(set(x_by_task) | set(y_by_task))
+    deltas: list[float] = []
+    deltas_by_dataset: dict[str, list[float]] = {}
+    for task_id in all_task_ids:
+        delta = _value(x_by_task.get(task_id)) - _value(y_by_task.get(task_id))
+        deltas.append(delta)
+        deltas_by_dataset.setdefault(_dataset_of(task_id), []).append(delta)
     mean_delta = round(sum(deltas) / len(deltas), 4) if deltas else None
+    cluster_ci = _bootstrap_cluster_ci(deltas_by_dataset) if deltas_by_dataset else None
+    # 钳位到合法差值范围（accuracy ∈ [0,1] → delta ∈ [-1,1]）
+    if cluster_ci is not None:
+        cluster_ci = (max(-1.0, cluster_ci[0]), min(1.0, cluster_ci[1]))
     return {
         "value_key": value_key,
-        "n_paired": len(deltas),
+        "denominator": "all_tasks (unfinished=0)",
+        "n_tasks": len(all_task_ids),
         "delta_mean": mean_delta,
-        "delta_ci95": ci95([float(d) for d in deltas]),
-        "note": "官方协议 accuracy ∈ [0,1]（context×var_F1×rel）；delta>0 表示 x 组更优。跨任务 CI 仅描述本任务子集的不确定性。",
+        "delta_ci95": cluster_ci,
+        "note": "全任务分母：未完成记 0；CI=按数据集分层 bootstrap（钳位 [-1,1]）；delta>0 表示 x 组更优。",
     }

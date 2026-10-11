@@ -142,7 +142,8 @@ def test_aggregate_and_paired_delta():
     assert agg["unsupported_rate_mean_evaluable"] == 0.0
     delta = paired_delta(records_c, records_a)
     assert delta["value_key"] == "official_accuracy"
-    assert delta["n_paired"] == 2 and delta["delta_mean"] == 0.25
+    assert delta["denominator"] == "all_tasks (unfinished=0)"
+    assert delta["n_tasks"] == 3 and delta["delta_mean"] == 0.1667  # (0.5+0+0)/3：未完成记 0
 
 
 def test_runner_dry_run_end_to_end(bench_root: Path, tmp_path: Path):

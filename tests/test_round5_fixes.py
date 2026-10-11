@@ -108,24 +108,28 @@ def test_aggregate_full_task_score_and_failures():
     assert agg["failure_breakdown"] == {"tool_loop_exhausted": 1}
 
 
+@pytest.mark.skipif(not __import__("shutil").which("bwrap"), reason="bwrap 不可用：安全集成测试跳过（CI 明确报告，不冒充通过）")
 def test_sandbox_snapshot_protects_original(tmp_path: Path):
-    """审查 P0-3：agent 代码只能改快照，原数据完整性保持。"""
+    """审查 P0-3 v3：数据只读绑定——写同名被内核拒绝，原数据完整性保持；
+    快照保留相对结构与哈希清单。"""
     data = tmp_path / "data"
     data.mkdir()
     write_csv(data / "data.csv", latency_rows("g", n_queries=10))
     original = (data / "data.csv").read_text(encoding="utf-8")
     sandbox = ToolSandbox(data, timeout_s=60)
     outcome = sandbox.run_python("open('data.csv','w').write('TAMPERED')")
-    assert outcome["ok"]
-    assert (data / "data.csv").read_text(encoding="utf-8") == original, "原始数据必须不可被 agent 修改"
+    assert not outcome["ok"], "写数据文件必须被只读绑定拒绝"
+    assert "Read-only" in outcome["stderr"] or "readonly" in outcome["stderr"].lower()
+    assert (data / "data.csv").read_text(encoding="utf-8") == original
+    assert list(sandbox.snapshot_manifest) == ["data.csv"], "哈希清单必须记录快照文件"
     sandbox.close()
 
 
 def test_sandbox_fail_closed_without_bwrap(monkeypatch):
-    """审查 P0-3：隔离不可用时默认拒绝执行（fail-closed）。"""
+    """审查 P0-3：隔离不可用时默认拒绝执行（fail-closed，按实际 which 判定）。"""
     import research_copilot.evaluation.sandbox as sb
 
-    monkeypatch.setattr(sb, "build_bwrap_command", lambda *a, **k: None)
+    monkeypatch.setattr(sb.shutil, "which", lambda name: None)
     sandbox = sb.ToolSandbox(None, network_isolation=False)  # 默认 allow_unsafe_fallback=False
     outcome = sandbox.run_python("print(1)")
     assert outcome["ok"] is False and outcome.get("fail_closed") is True

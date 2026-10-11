@@ -153,10 +153,15 @@ def run_evaluation(
             try:
                 result = runner(llm, task, budget=budget, sandbox=sandbox)
             except Exception as exc:  # 单任务失败不拖垮整场评测
+                sandbox.close()
+                # 审查 P1：按异常来源分类，不再统一 transport_failure
+                failure_class = (
+                    "transport_failure" if isinstance(exc, (ConnectionError, TimeoutError, OSError)) else "executor_error"
+                )
                 error_record = {
                     "group": group,
                     "task_id": task.task_id,
-                    "failure_class": "transport_failure",
+                    "failure_class": failure_class,
                     "error": f"{type(exc).__name__}: {exc}",
                     "answer": {},
                     "unsupported": {"evaluable": False, "not_evaluable_reason": "task_error"},
@@ -167,6 +172,8 @@ def run_evaluation(
                 records_by_group[group].append(error_record)
                 _write_json(run_dir / group / task.task_id / "error.json", error_record)
                 continue
+            finally:
+                sandbox.close()
             usage = _usage_delta(usage_before, llm.usage_summary())
             all_rows = _task_rows(task)
             unsupported = unsupported_conclusion_rate(result.answer, all_rows)
@@ -304,7 +311,7 @@ def render_summary_markdown(summary: dict[str, Any]) -> str:
     lines.append("")
     for name, delta in summary.get("comparisons", {}).items():
         lines.append(
-            f"- **{name}**：配对 n={delta['n_paired']}，delta={delta['delta_mean']}，CI {delta['delta_ci95']}"
+            f"- **{name}**：全任务 n={delta['n_tasks']}（未完成记 0），delta={delta['delta_mean']}，CI {delta['delta_ci95']}"
         )
     if summary.get("hms_error"):
         lines.append(f"- 评分异常: {summary['hms_error']}")

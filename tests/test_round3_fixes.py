@@ -51,24 +51,27 @@ def test_bwrap_blocks_host_file_read(tmp_path: Path):
     assert "TOP-SECRET" not in outcome["stdout"]
 
 
-def test_bwrap_data_dir_writable_and_isolation_record(tmp_path: Path):
+def test_bwrap_data_readonly_output_writable(tmp_path: Path):
+    """v3 语义：数据只读（写同名被拒）+ 输出可写 + 隔离记录。"""
     if not shutil.which("bwrap"):
         pytest.skip("bwrap 不可用")
     (tmp_path / "data").mkdir()
+    write_csv(tmp_path / "data" / "d.csv", [{"x": 1}])
     sandbox = ToolSandbox(tmp_path / "data", timeout_s=60)
-    outcome = sandbox.run_python("open('out.txt','w').write('x'); print('written')")
-    assert outcome["ok"] and "written" in outcome["stdout"]
+    ro = sandbox.run_python("open('d.csv','w').write('x')")
+    assert not ro["ok"], "写数据文件必须被只读绑定拒绝"
+    rw = sandbox.run_python("open('out_result.txt','w').write('x'); print('written')")
+    assert rw["ok"] and "written" in rw["stdout"]
     record = sandbox.isolation_record
-    assert record["fs_isolated"] is True
+    assert record["fs_isolated"] is True and record["data_readonly"] is True
     assert record["network_isolated"] is True
-    assert "无法读取绑定集之外" in record["honesty_note"]
 
 
-def test_build_bwrap_command_needs_absolute_paths(tmp_path: Path):
+def test_build_bwrap_command_data_files_readonly(tmp_path: Path):
     if not shutil.which("bwrap"):
         pytest.skip("bwrap 不可用")
     (tmp_path / "data").mkdir()
-    command = build_bwrap_command(tmp_path / "s.py", tmp_path / "data", tmp_path)
+    (tmp_path / "data" / "d.csv").write_text("x\n", encoding="utf-8")
+    command = build_bwrap_command(tmp_path / "s.py", [(tmp_path / "data" / "d.csv", "d.csv")], tmp_path)
     assert command is not None
-    binds = [command[i + 1] for i, c in enumerate(command) if c == "--bind"]
-    assert all(Path(b).is_absolute() for b in binds), "bwrap 绑定必须为绝对路径"
+    assert "--ro-bind" in command and "d.csv" in " ".join(command), "数据文件必须以 ro-bind 进入 cwd"
