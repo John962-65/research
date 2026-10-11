@@ -78,6 +78,13 @@ class OpenAICompatibleLLM:
     """最小 OpenAI /chat/completions 客户端（stdlib urllib，零依赖）。"""
 
     def __init__(self, config: LLMConfig | None = None) -> None:
+        if config is not None and not isinstance(config, LLMConfig):
+            config = LLMConfig(
+                base_url=getattr(config, "base_url", ""),
+                model=getattr(config, "model", ""),
+                api_key=getattr(config, "api_key", ""),
+                timeout_s=getattr(config, "timeout_s", 120.0),
+            )
         self.config = config or LLMConfig.from_env()
         self.calls: list[LLMCallRecord] = []
         if not self.config.is_configured():

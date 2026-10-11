@@ -79,17 +79,45 @@ class GroupResult:
     trace: list[dict[str, Any]] = field(default_factory=list)
 
 
+_DSML_INVOKE_RE = re.compile(r'invoke name="([\w.-]+)"')
+_DSML_PARAM_RE = re.compile(r'<\uFF5C?\uFF5C?DSML.*?parameter name="(\w+)"[^>]*>(.*?)</\uFF5C?\uFF5C?DSML.*?parameter>', re.DOTALL)
+_DSML_MARK_RE = re.compile(r"<\uFF5C?\uFF5C?DSML[^>]*>")
+
+
+def _parse_dsml_tool_call(text: str) -> dict[str, Any] | None:
+    """DeepSeek DSML 工具调用格式提取（invoke name="python" + parameter code）。"""
+    invoke = _DSML_INVOKE_RE.search(text)
+    if not invoke:
+        return None
+    tool = invoke.group(1)
+    params: dict[str, str] = {}
+    for name, body in _DSML_PARAM_RE.findall(text):
+        params[name] = body
+    if tool == "python" and params.get("code"):
+        return {"tool": "python", "code": params["code"]}
+    if tool == "diagnose":
+        return {"tool": "diagnose"}
+    return None
+
+
 def _parse_answer(text: str) -> dict[str, Any]:
     text = text.strip()
+    # DeepSeek DSML 工具调用优先（第三方模型 agent 格式兼容）
+    dsml_tool = _parse_dsml_tool_call(text)
+    if dsml_tool:
+        return dsml_tool
     fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
     if fenced:
         text = fenced.group(1).strip()
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(0))
-        except json.JSONDecodeError:
-            pass
+    # 剥除 DSML/专有标记行后再提取 JSON（最终答案可能被包裹）
+    stripped = _DSML_MARK_RE.sub("", text).strip()
+    for candidate in (stripped, text):
+        match = re.search(r"\{.*\}", candidate, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(0))
+            except json.JSONDecodeError:
+                continue
     return {}
 
 

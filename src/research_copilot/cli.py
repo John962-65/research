@@ -263,7 +263,20 @@ def cmd_evaluate(args: Any) -> int:
     groups = [g.strip().upper() for g in (args.groups or "A,B,C1,C2").split(",") if g.strip()]
     task_ids = args.task_ids if args.task_ids else None
     from .evaluation.baselines import GroupBudget
+    from .integrations.llm import OpenAICompatibleLLM
 
+    judge_llm = None
+    if getattr(args, "judge_model", None):
+        judge_llm = OpenAICompatibleLLM(
+            type("JCfg", (), {
+                "base_url": args.judge_base_url.rstrip("/"),
+                "model": args.judge_model,
+                "api_key": args.judge_api_key or "",
+                "timeout_s": 1800.0,
+                "temperature": 0.2,
+                "max_tokens": None,
+            })()
+        )
     summary = run_evaluation(
         bench_root=args.bench_root,
         out_dir=args.out_dir,
@@ -272,6 +285,7 @@ def cmd_evaluate(args: Any) -> int:
         limit=args.limit,
         task_ids=task_ids,
         budget=GroupBudget(max_steps=args.max_steps),
+        judge_llm=judge_llm,
         dry_run=args.dry_run,
     )
     print(f"评测完成 → {summary['task_ids'][:3]}…（n={len(summary['task_ids'])}, dry_run={summary['dry_run']}）")
@@ -415,6 +429,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval.add_argument("--limit", type=int, default=20)
     p_eval.add_argument("--task-ids", action="append", help="显式任务 ID（可多次，覆盖 --limit 选择）")
     p_eval.add_argument("--max-steps", type=int, default=6)
+    p_eval.add_argument("--judge-model", default=None, help="独立评审模型（与被测分离；缺省=被测同模型并如实标注）")
+    p_eval.add_argument("--judge-base-url", default=None)
+    p_eval.add_argument("--judge-api-key", default=None)
     p_eval.add_argument("--dry-run", action="store_true", help="stub LLM 管道冒烟（不构成评测结论）")
     p_eval.set_defaults(func=cmd_evaluate)
 
