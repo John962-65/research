@@ -1,0 +1,94 @@
+{
+  "eval_code_version": "eval/2.0",
+  "schema_version": "rc/1.0",
+  "bench_root": "/home/johb/下载/research-copilot/benchmarks/discoverybench/discoverybench",
+  "subset": "main",
+  "selection": {
+    "rule": "显式 task_ids",
+    "task_ids": [
+      "discoverybench/real/test/archaeology/metadata_18",
+      "discoverybench/real/test/introduction_pathways_non-native_plants/metadata_4",
+      "discoverybench/real/test/meta_regression/metadata_10",
+      "discoverybench/real/test/meta_regression_raw/metadata_10"
+    ],
+    "note": ""
+  },
+  "task_ids": [
+    "discoverybench/real/test/archaeology/metadata_18",
+    "discoverybench/real/test/introduction_pathways_non-native_plants/metadata_4",
+    "discoverybench/real/test/meta_regression/metadata_10",
+    "discoverybench/real/test/meta_regression_raw/metadata_10"
+  ],
+  "groups": [
+    "A",
+    "B",
+    "C1",
+    "C2"
+  ],
+  "model": "deepseek-flash",
+  "judge_model": "session-agent",
+  "budget": {
+    "max_steps": 6,
+    "max_tool_calls": 8,
+    "timeout_s": 60.0
+  },
+  "fairness": "三组共用同一 ReAct 循环 / 同一工具沙箱配置 / 同一预算；差异仅在注入上下文（Copilot 模块输出）",
+  "sandbox_isolation": {
+    "env_whitelist": [
+      "PATH",
+      "LANG",
+      "LC_ALL",
+      "LC_CTYPE",
+      "TMPDIR",
+      "PYTHONHASHSEED"
+    ],
+    "rlimits": {
+      "cpu_seconds": 60,
+      "address_space_bytes": 2147483648,
+      "file_size_bytes": 16777216,
+      "max_processes": 64,
+      "open_files": 128
+    },
+    "network_isolated": true,
+    "container_runtime": true,
+    "fs_isolated": true,
+    "data_readonly": true,
+    "snapshot_manifest": {},
+    "honesty_note": "容器级隔离（bwrap v3）：网络+挂载空间全隔离；数据快照文件级只读绑定（agent 写数据文件被内核拒绝）；仅工作目录可写；site-packages 精确挂载"
+  },
+  "scorer": {
+    "kind": "official-protocol/single-subhypothesis",
+    "official_eval_sha256": "83406ddbe6894429cc5012b17cb82a209d5397aa7863b0aba1bb51edf1dd6c65",
+    "judge_model": "session-agent"
+  },
+  "dry_run": false,
+  "note": "judge 模型仅用于评分并单独计量；dry_run 为 stub 管道冒烟，不构成评测结论。",
+  "started_at": "2026-10-11T15:54:47.274753+00:00",
+  "divergence_checks": {
+    "discoverybench/real/test/archaeology/metadata_18": {
+      "divergence": false,
+      "reason": "关系图仅时间列，PCA 相位主张无法据此核对",
+      "raw": "{\"divergence\": false, \"reason\": \"关系图仅时间列，PCA 相位主张无法据此核对\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/introduction_pathways_non-native_plants/metadata_4": {
+      "divergence": false,
+      "reason": "关系图为空，交互主张无矛盾证据",
+      "raw": "{\"divergence\": false, \"reason\": \"关系图为空，交互主张无矛盾证据\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/meta_regression/metadata_10": {
+      "divergence": false,
+      "reason": "top 关系对为功效列内部相关，职称比例主张无矛盾证据",
+      "raw": "{\"divergence\": false, \"reason\": \"top 关系对为功效列内部相关，职称比例主张无矛盾证据\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/meta_regression_raw/metadata_10": {
+      "divergence": false,
+      "reason": "同上",
+      "raw": "{\"divergence\": false, \"reason\": \"同上\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    }
+  },
+  "divergence_note": "divergence=true 的任务：金标与数据实测方向矛盾，其官方分数应解读为分歧而非模型错误（诊断性标注，不参与评分）"
+}

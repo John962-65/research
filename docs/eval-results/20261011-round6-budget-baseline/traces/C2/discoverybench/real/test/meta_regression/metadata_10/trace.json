@@ -1,0 +1,52 @@
+[
+  {
+    "step": 0,
+    "kind": "tool",
+    "code": "import pandas as pd\nimport json\n# attempt to locate dataset\nimport os\nfor root, dirs, files in os.walk('.'):\n    for f in files:\n        if f.endswith(('.csv','.tsv','.json','.parquet','.xlsx')):\n            print(os.path.join(root,f))\n",
+    "outcome": {
+      "ok": true,
+      "stdout": "./meta-regression_joined_data_heterogeneity_in_replication_projects.csv\n",
+      "stderr": "x and 2.x\nversions of NumPy, modules must be compiled with NumPy 2.0.\nSome module may need to rebuild instead e.g. with 'pybind11>=2.12'.\n\nIf you are a user of the module, the easiest solution will be to\ndowngrade to 'numpy<2' or try to upgrade the affected module.\nWe expect that some modules will need time to support NumPy 2.\n\nTraceback (most recent call last):  File \"/tmp/tmp_1wbz7bv/snippet.py\", line 1, in <module>\n    import pandas as pd\n  File \"/home/johb/.local/lib/python3.10/site-packages/pandas/__init__.py\", line 49, in <module>\n    from pandas.core.api import (\n  File \"/home/johb/.local/lib/python3.10/site-packages/pandas/core/api.py\", line 28, in <module>\n    from pandas.core.arrays import Categorical\n  File \"/home/johb/.local/lib/python3.10/site-packages/pandas/core/arrays/__init__.py\", line 1, in <module>\n    from pandas.core.arrays.arrow import ArrowExtensionArray\n  File \"/home/johb/.local/lib/python3.10/site-packages/pandas/core/arrays/arrow/__init__.py\", line 5, in <module>\n    from pandas.core.arrays.arrow.array import ArrowExtensionArray\n  File \"/home/johb/.local/lib/python3.10/site-packages/pandas/core/arrays/arrow/array.py\", line 67, in <module>\n    from pandas.core.arrays.masked import BaseMaskedArray\n  File \"/home/johb/.local/lib/python3.10/site-packages/pandas/core/arrays/masked.py\", line 61, in <module>\n    from pandas.core import (\n  File \"/home/johb/.local/lib/python3.10/site-packages/pandas/core/nanops.py\", line 52, in <module>\n    bn = import_optional_dependency(\"bottleneck\", errors=\"warn\")\n  File \"/home/johb/.local/lib/python3.10/site-packages/pandas/compat/_optional.py\", line 135, in import_optional_dependency\n    module = importlib.import_module(name)\n  File \"/usr/lib/python3.10/importlib/__init__.py\", line 126, in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n  File \"/usr/lib/python3/dist-packages/bottleneck/__init__.py\", line 2, in <module>\n    from .reduce import (\nAttributeError: _ARRAY_API not found\n"
+    }
+  },
+  {
+    "step": 1,
+    "kind": "tool",
+    "code": "import csv\nrows=[]\nwith open('./meta-regression_joined_data_heterogeneity_in_replication_projects.csv') as f:\n    r=csv.DictReader(f)\n    for x in r: rows.append(x)\nprint('n',len(rows))\ndef stats(col):\n    vals=[float(x[col]) for x in rows if x[col] not in ('','NA','NaN',None)]\n    return len(vals), sum(vals)/len(vals), sorted(vals)[len(vals)//2], max(vals), min(vals)\nfor c in ['junior.o','junior.r','senior.o','senior.r']:\n    print(c, stats(c))\n# proportions of junior in replicated studies: junior.r should be share of junior authors in replication study?\n# Check type field\ntypes={}\nfor x in rows:\n    types.setdefault(x.get('type'),0)\n    types[x.get('type')]+=1\nprint('type counts', types)\nfields={}\nfor x in rows:\n    fields.setdefault(x.get('field'),0)\n    fields[x.get('field')]+=1\nprint('field counts', fields)\n# replicated flag\nrep=[x for x in rows if x['replicated']=='1']\nprint('replicated n', len(rep))\n# junior.r mean among replicated\ndef mean(col, subset):\n    vals=[float(x[col]) for x in subset if x[col] not in ('','NA','NaN',None)]\n    return len(vals), sum(vals)/len(vals)\nprint('junior.r mean all', mean('junior.r', rows))\nprint('junior.r mean replicated', mean('junior.r', rep))\nprint('senior.o mean all', mean('senior.o', rows))\nprint('junior.o mean all', mean('junior.o', rows))\nprint('senior.r mean all', mean('senior.r', rows))\n</parameter>\n</invoke>\n",
+    "outcome": {
+      "ok": false,
+      "stdout": "",
+      "stderr": "  File \"/tmp/tmphi0iyxrc/snippet.py\", line 36\n    </parameter>\n    ^\nSyntaxError: invalid syntax\n"
+    }
+  },
+  {
+    "step": 2,
+    "kind": "tool",
+    "code": "import csv, sys\nfn='meta-regression_joined_data_heterogeneity_in_replication_projects.csv'\nrdr=csv.reader(open(fn, newline=''))\nhdr=next(rdr)\nrows=list(rdr)\nprint('nrow',len(rows))\nprint('ncol',len(hdr))\nprint(hdr)\nimport re\nfor h in hdr:\n    if re.search(r'jun|sen|prof|rank|disc|field|psych|stud|pos|title|career|grad|phd|student', h, re.I):\n        print('MATCH', h)\n# print first row values\nprint(dict(zip(hdr, rows[0])))\n",
+    "outcome": {
+      "ok": true,
+      "stdout": "nrow 86\nncol 60\n['study', 'project.x', 'ro', 'rr', 'fiso', 'fisr', 'se_fiso', 'se_fisr', 'po', 'pr', 'po1', 'pr1', 'pm_belief', 'nr', 'no', 'authors.o', 'pub_year', 'journal', 'discipline', 'length', 'citations', 'n.r', 'power.o', 'power.r', 'power_planned.r', 'experiment_country.o', 'experiment_country.r', 'experiment_language.o', 'experiment_language.r', 'online.o', 'online.r', 'compensation.o', 'compensation.r', 'subjects.o', 'subjects.r', 'endprice', 'transactions', 'trading_volume', 'replicated', 'project.y', 'relative_es', 'n_authors.o', 'n_authors.r', 'author_citations_avg.o', 'author_citations_max.o', 'authors_male.o', 'seniority.o', 'author_citations_avg.r', 'author_citations_max.r', 'authors_male.r', 'seniority.r', 'aggregated', 'lab_id', 'es_80power', 'same_country', 'same_language', 'same_online', 'same_subjects', 'us_lab.o', 'us_lab.r']\nMATCH study\nMATCH discipline\nMATCH seniority.o\nMATCH seniority.r\n{'study': 'A Roelofs', 'project.x': 'Psychology', 'ro': '0.594605285', 'rr': '0.148340453', 'fiso': '0.684760158473966', 'fisr': '0.149443120256283', 'se_fiso': '0.288675134594813', 'se_fisr': '0.192450089729875', 'po': '0.0176883192346041', 'pr': '0.437436568193535', 'po1': '0.00884415961730206', 'pr1': '0.218718284096767', 'pm_belief': 'NA', 'nr': '30', 'no': '15', 'authors.o': 'Ardi Roelofs', 'pub_year': '2008', 'journal': 'JEPLMC', 'discipline': 'Cognitive', 'length': '16', 'citations': '46', 'n.r': '28', 'power.o': '0.608309222353551', 'power.r': '0.117559205357017', 'power_planned.r': '0.925885903067168', 'experiment_country.o': 'Netherlands', 'experiment_country.r': 'Netherlands', 'experiment_language.o': 'Dutch', 'experiment_language.r': 'Dutch', 'online.o': '0', 'online.r': '0', 'compensation.o': 'cash', 'compensation.r': 'credit', 'subjects.o': 'community', 'subjects.r': 'students', 'endprice': 'NA', 'transactions': 'NA', 'trading_volume': 'NA', 'replicated': '0', 'project.y': 'rpp', 'relative_es': '0.249477185524848', 'n_authors.o': '1', 'n_authors.r': '2', 'author_citations_avg.o': '5062', 'author_citations_max.o': '5062', 'authors_male.o': '1', 'seniority.o': 'Professor', 'author_citations_avg.r': '568.5', 'author_citations_max.r': '713', 'authors_male.r': '0.5', 'seniority.r': 'Associate Professor', 'aggregated': 'NA', 'lab_id': '', 'es_80power': '0.510256214851446', 'same_country': '1', 'same_language': '1', 'same_online': '1', 'same_subjects': '0', 'us_lab.o': '0', 'us_lab.r': '0'}\n",
+      "stderr": ""
+    }
+  },
+  {
+    "step": 3,
+    "kind": "tool",
+    "code": "import csv, collections\nrows=list(csv.DictReader(open('meta-regression_joined_data_heterogeneity_in_replication_projects.csv')))\nprint(len(rows))\nprint('seniority.o', collections.Counter(r['seniority.o'] for r in rows))\nprint('seniority.r', collections.Counter(r['seniority.r'] for r in rows))\nrep=[r for r in rows if r['replicated']=='1']\nprint('n replicated=1', len(rep))\nprint('seniority.r among replicated=1', collections.Counter(r['seniority.r'] for r in rep))\nprint('seniority.o among replicated=1', collections.Counter(r['seniority.o'] for r in rep))\nprint('discipline', collections.Counter(r['discipline'] for r in rows))\nprint('project.x', collections.Counter(r['project.x'] for r in rows))",
+    "outcome": {
+      "ok": true,
+      "stdout": "86\nseniority.o Counter({'Professor': 72, 'Associate Professor': 9, 'Researcher': 3, 'Assistant Professor': 2})\nseniority.r Counter({'Professor': 31, 'Assistant Professor': 26, 'Associate Professor': 18, 'Researcher': 11})\nn replicated=1 34\nseniority.r among replicated=1 Counter({'Professor': 16, 'Assistant Professor': 11, 'Associate Professor': 5, 'Researcher': 2})\nseniority.o among replicated=1 Counter({'Professor': 29, 'Associate Professor': 4, 'Researcher': 1})\ndiscipline Counter({'Cognitive': 34, 'Social': 34, 'Economics': 18})\nproject.x Counter({'Psychology': 68, 'Experimental Economics': 18})\n",
+      "stderr": ""
+    }
+  },
+  {
+    "step": 4,
+    "kind": "unparseable",
+    "raw": "{\"tool\": \"python\", \"code\": \"import csv\\nrows=list(csv.DictReader(open('meta-regression_joined_data_heterogeneity_in_replication_projects.csv')))\\nprint(len(rows))\\npsy=[r for r in rows if r['project.x']=='Psychology']\\nprint('psy',len(psy))\\nfrom collections import Counter\\nprint('seniority.r all psy', Counter(r['seniority.r'] for r in psy))\\npsyrep=[r for r in psy if r['replicated']=='1']\\nprint("
+  },
+  {
+    "step": 5,
+    "kind": "unparseable",
+    "raw": "{\"tool\": \"python\", \"code\": \"import csv\\npath='meta-regression_joined_data_heterogeneity_in_replication_projects.csv'\\nrows=list(csv.DictReader(open(path)))\\nprint('n',len(rows))\\n# Psychology filter\\npsy=[r for r in rows if r['project.x']=='Psychology']\\nprint('psy n',len(psy))\\n# replicated==1\\nrep=[r for r in rows if r['replicated']=='1']\\nprint('rep n',len(rep))\\npsyrep=[r for r in psy if r['re"
+  }
+]

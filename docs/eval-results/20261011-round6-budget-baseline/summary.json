@@ -1,0 +1,295 @@
+{
+  "eval_code_version": "eval/2.0",
+  "schema_version": "rc/1.0",
+  "bench_root": "/home/johb/下载/research-copilot/benchmarks/discoverybench/discoverybench",
+  "subset": "main",
+  "selection": {
+    "rule": "显式 task_ids",
+    "task_ids": [
+      "discoverybench/real/test/archaeology/metadata_18",
+      "discoverybench/real/test/introduction_pathways_non-native_plants/metadata_4",
+      "discoverybench/real/test/meta_regression/metadata_10",
+      "discoverybench/real/test/meta_regression_raw/metadata_10"
+    ],
+    "note": ""
+  },
+  "task_ids": [
+    "discoverybench/real/test/archaeology/metadata_18",
+    "discoverybench/real/test/introduction_pathways_non-native_plants/metadata_4",
+    "discoverybench/real/test/meta_regression/metadata_10",
+    "discoverybench/real/test/meta_regression_raw/metadata_10"
+  ],
+  "groups": [
+    "A",
+    "B",
+    "C1",
+    "C2"
+  ],
+  "model": "deepseek-flash",
+  "judge_model": "session-agent",
+  "budget": {
+    "max_steps": 6,
+    "max_tool_calls": 8,
+    "timeout_s": 60.0
+  },
+  "fairness": "三组共用同一 ReAct 循环 / 同一工具沙箱配置 / 同一预算；差异仅在注入上下文（Copilot 模块输出）",
+  "sandbox_isolation": {
+    "env_whitelist": [
+      "PATH",
+      "LANG",
+      "LC_ALL",
+      "LC_CTYPE",
+      "TMPDIR",
+      "PYTHONHASHSEED"
+    ],
+    "rlimits": {
+      "cpu_seconds": 60,
+      "address_space_bytes": 2147483648,
+      "file_size_bytes": 16777216,
+      "max_processes": 64,
+      "open_files": 128
+    },
+    "network_isolated": true,
+    "container_runtime": true,
+    "fs_isolated": true,
+    "data_readonly": true,
+    "snapshot_manifest": {},
+    "honesty_note": "容器级隔离（bwrap v3）：网络+挂载空间全隔离；数据快照文件级只读绑定（agent 写数据文件被内核拒绝）；仅工作目录可写；site-packages 精确挂载"
+  },
+  "scorer": {
+    "kind": "official-protocol/single-subhypothesis",
+    "official_eval_sha256": "83406ddbe6894429cc5012b17cb82a209d5397aa7863b0aba1bb51edf1dd6c65",
+    "judge_model": "session-agent"
+  },
+  "dry_run": false,
+  "note": "judge 模型仅用于评分并单独计量；dry_run 为 stub 管道冒烟，不构成评测结论。",
+  "started_at": "2026-10-11T15:54:47.274753+00:00",
+  "divergence_checks": {
+    "discoverybench/real/test/archaeology/metadata_18": {
+      "divergence": false,
+      "reason": "关系图仅时间列，PCA 相位主张无法据此核对",
+      "raw": "{\"divergence\": false, \"reason\": \"关系图仅时间列，PCA 相位主张无法据此核对\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/introduction_pathways_non-native_plants/metadata_4": {
+      "divergence": false,
+      "reason": "关系图为空，交互主张无矛盾证据",
+      "raw": "{\"divergence\": false, \"reason\": \"关系图为空，交互主张无矛盾证据\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/meta_regression/metadata_10": {
+      "divergence": false,
+      "reason": "top 关系对为功效列内部相关，职称比例主张无矛盾证据",
+      "raw": "{\"divergence\": false, \"reason\": \"top 关系对为功效列内部相关，职称比例主张无矛盾证据\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/meta_regression_raw/metadata_10": {
+      "divergence": false,
+      "reason": "同上",
+      "raw": "{\"divergence\": false, \"reason\": \"同上\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    }
+  },
+  "divergence_note": "divergence=true 的任务：金标与数据实测方向矛盾，其官方分数应解读为分歧而非模型错误（诊断性标注，不参与评分）",
+  "finished_at": "2026-10-11T16:14:32.618324+00:00",
+  "group_summaries": {
+    "A": {
+      "n_tasks": 4,
+      "completion_rate": 0.25,
+      "official_accuracy_mean": 1.0,
+      "official_accuracy_ci95": null,
+      "official_accuracy_cluster_ci95": null,
+      "cluster_ci_method": "dataset-stratified bootstrap (1000, seed=0), clamped [0,1]",
+      "n_datasets": 1,
+      "full_task_score_mean": 0.25,
+      "full_task_score_ci95": [
+        0.0,
+        0.75
+      ],
+      "full_task_note": "全任务分母：未完成任务记 0 分（与成功任务平均分开报告，审查 P1-2）",
+      "failure_breakdown": {
+        "tool_loop_exhausted": 3
+      },
+      "n_official_scored": 1,
+      "context_match_rate": 1.0,
+      "var_f1_mean": 1.0,
+      "rel_score_mean": 1.0,
+      "hms_custom_mean": null,
+      "unsupported_rate_mean_evaluable": 0.0,
+      "n_not_evaluable": 3,
+      "evidence": {
+        "n_assertions": 3,
+        "verified_rate": 0.0,
+        "contradicted_rate": 0.0,
+        "unverifiable_rate": 1.0,
+        "note": "unverifiable 高说明断言未被验证（不是无风险）；应通过更完整的验证器（如 ols_beta）降低"
+      },
+      "total_llm_calls": 23,
+      "total_tool_calls": 16,
+      "total_prompt_tokens": 133210,
+      "total_completion_tokens": 32330,
+      "total_judge_calls": 3
+    },
+    "B": {
+      "n_tasks": 4,
+      "completion_rate": 0.5,
+      "official_accuracy_mean": 0.0,
+      "official_accuracy_ci95": [
+        0.0,
+        0.0
+      ],
+      "official_accuracy_cluster_ci95": [
+        0.0,
+        0.0
+      ],
+      "cluster_ci_method": "dataset-stratified bootstrap (1000, seed=0), clamped [0,1]",
+      "n_datasets": 2,
+      "full_task_score_mean": 0.0,
+      "full_task_score_ci95": [
+        0.0,
+        0.0
+      ],
+      "full_task_note": "全任务分母：未完成任务记 0 分（与成功任务平均分开报告，审查 P1-2）",
+      "failure_breakdown": {
+        "tool_loop_exhausted": 2
+      },
+      "n_official_scored": 2,
+      "context_match_rate": 1.0,
+      "var_f1_mean": 0.0,
+      "rel_score_mean": 0.0,
+      "hms_custom_mean": null,
+      "unsupported_rate_mean_evaluable": 0.0,
+      "n_not_evaluable": 2,
+      "evidence": {
+        "n_assertions": 0,
+        "verified_rate": null,
+        "contradicted_rate": null,
+        "unverifiable_rate": null,
+        "note": "unverifiable 高说明断言未被验证（不是无风险）；应通过更完整的验证器（如 ols_beta）降低"
+      },
+      "total_llm_calls": 14,
+      "total_tool_calls": 5,
+      "total_prompt_tokens": 33894,
+      "total_completion_tokens": 69949,
+      "total_judge_calls": 6
+    },
+    "C1": {
+      "n_tasks": 4,
+      "completion_rate": 0.75,
+      "official_accuracy_mean": 0.1111,
+      "official_accuracy_ci95": [
+        -0.1067,
+        0.3289
+      ],
+      "official_accuracy_cluster_ci95": [
+        0.0,
+        0.3333
+      ],
+      "cluster_ci_method": "dataset-stratified bootstrap (1000, seed=0), clamped [0,1]",
+      "n_datasets": 3,
+      "full_task_score_mean": 0.0833,
+      "full_task_score_ci95": [
+        0.0,
+        0.25
+      ],
+      "full_task_note": "全任务分母：未完成任务记 0 分（与成功任务平均分开报告，审查 P1-2）",
+      "failure_breakdown": {
+        "tool_loop_exhausted": 1
+      },
+      "n_official_scored": 3,
+      "context_match_rate": 1.0,
+      "var_f1_mean": 0.2222,
+      "rel_score_mean": 0.1667,
+      "hms_custom_mean": null,
+      "unsupported_rate_mean_evaluable": 0.0,
+      "n_not_evaluable": 1,
+      "evidence": {
+        "n_assertions": 19,
+        "verified_rate": 0.0,
+        "contradicted_rate": 0.0,
+        "unverifiable_rate": 1.0,
+        "note": "unverifiable 高说明断言未被验证（不是无风险）；应通过更完整的验证器（如 ols_beta）降低"
+      },
+      "total_llm_calls": 12,
+      "total_tool_calls": 7,
+      "total_prompt_tokens": 77497,
+      "total_completion_tokens": 24581,
+      "total_judge_calls": 9
+    },
+    "C2": {
+      "n_tasks": 4,
+      "completion_rate": 0.25,
+      "official_accuracy_mean": 0.0,
+      "official_accuracy_ci95": null,
+      "official_accuracy_cluster_ci95": null,
+      "cluster_ci_method": "dataset-stratified bootstrap (1000, seed=0), clamped [0,1]",
+      "n_datasets": 1,
+      "full_task_score_mean": 0.0,
+      "full_task_score_ci95": [
+        0.0,
+        0.0
+      ],
+      "full_task_note": "全任务分母：未完成任务记 0 分（与成功任务平均分开报告，审查 P1-2）",
+      "failure_breakdown": {
+        "tool_loop_exhausted": 3
+      },
+      "n_official_scored": 1,
+      "context_match_rate": 1.0,
+      "var_f1_mean": 0.0,
+      "rel_score_mean": 0.0,
+      "hms_custom_mean": null,
+      "unsupported_rate_mean_evaluable": 0.0,
+      "n_not_evaluable": 3,
+      "evidence": {
+        "n_assertions": 5,
+        "verified_rate": 0.0,
+        "contradicted_rate": 0.0,
+        "unverifiable_rate": 1.0,
+        "note": "unverifiable 高说明断言未被验证（不是无风险）；应通过更完整的验证器（如 ols_beta）降低"
+      },
+      "total_llm_calls": 19,
+      "total_tool_calls": 9,
+      "total_prompt_tokens": 51174,
+      "total_completion_tokens": 82106,
+      "total_judge_calls": 3
+    }
+  },
+  "comparisons": {
+    "C1_vs_A": {
+      "value_key": "official_accuracy",
+      "denominator": "all_tasks (unfinished=0)",
+      "n_tasks": 4,
+      "delta_mean": -0.1667,
+      "delta_ci95": [
+        0.0,
+        0.1667
+      ],
+      "note": "全任务分母：未完成记 0；CI=按数据集分层 bootstrap（钳位 [-1,1]）；delta>0 表示 x 组更优。"
+    },
+    "C1_vs_B": {
+      "value_key": "official_accuracy",
+      "denominator": "all_tasks (unfinished=0)",
+      "n_tasks": 4,
+      "delta_mean": 0.0833,
+      "delta_ci95": [
+        0.0,
+        0.25
+      ],
+      "note": "全任务分母：未完成记 0；CI=按数据集分层 bootstrap（钳位 [-1,1]）；delta>0 表示 x 组更优。"
+    },
+    "C2_vs_C1": {
+      "value_key": "official_accuracy",
+      "denominator": "all_tasks (unfinished=0)",
+      "n_tasks": 4,
+      "delta_mean": -0.0833,
+      "delta_ci95": [
+        0.0,
+        0.0
+      ],
+      "note": "全任务分母：未完成记 0；CI=按数据集分层 bootstrap（钳位 [-1,1]）；delta>0 表示 x 组更优。"
+    }
+  },
+  "hms_error": "",
+  "divergent_tasks": [],
+  "honesty_note": "正式评测：结果只描述本任务子集；test 划分任务已用于开发期评测（见 selection 污染注记）；未观察到收益时按原样报告并归因。"
+}
