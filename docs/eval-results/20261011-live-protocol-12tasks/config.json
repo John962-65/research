@@ -1,0 +1,155 @@
+{
+  "eval_code_version": "eval/2.0",
+  "schema_version": "rc/1.0",
+  "bench_root": "benchmarks/discoverybench/discoverybench",
+  "subset": "main",
+  "selection": {
+    "rule": "显式 task_ids",
+    "task_ids": [
+      "discoverybench/real/test/archaeology/metadata_14",
+      "discoverybench/real/test/introduction_pathways_non-native_plants/metadata_0",
+      "discoverybench/real/test/meta_regression/metadata_0",
+      "discoverybench/real/test/meta_regression_raw/metadata_0",
+      "discoverybench/real/test/nls_incarceration/metadata_0",
+      "discoverybench/real/test/nls_raw/metadata_2",
+      "discoverybench/real/test/nls_ses/metadata_0",
+      "discoverybench/real/test/requirements_engineering_for_ML_enabled_systems/metadata_0",
+      "discoverybench/real/test/worldbank_education_gdp/metadata_0",
+      "discoverybench/real/test/worldbank_education_gdp_indicators/metadata_0",
+      "discoverybench/real/test/archaeology/metadata_15",
+      "discoverybench/real/test/introduction_pathways_non-native_plants/metadata_1"
+    ],
+    "note": ""
+  },
+  "task_ids": [
+    "discoverybench/real/test/archaeology/metadata_14",
+    "discoverybench/real/test/archaeology/metadata_15",
+    "discoverybench/real/test/introduction_pathways_non-native_plants/metadata_0",
+    "discoverybench/real/test/introduction_pathways_non-native_plants/metadata_1",
+    "discoverybench/real/test/meta_regression/metadata_0",
+    "discoverybench/real/test/meta_regression_raw/metadata_0",
+    "discoverybench/real/test/nls_incarceration/metadata_0",
+    "discoverybench/real/test/nls_raw/metadata_2",
+    "discoverybench/real/test/nls_ses/metadata_0",
+    "discoverybench/real/test/requirements_engineering_for_ML_enabled_systems/metadata_0",
+    "discoverybench/real/test/worldbank_education_gdp/metadata_0",
+    "discoverybench/real/test/worldbank_education_gdp_indicators/metadata_0"
+  ],
+  "groups": [
+    "A",
+    "B",
+    "C1",
+    "C2"
+  ],
+  "model": "session-agent",
+  "judge_model": "session-agent",
+  "budget": {
+    "max_steps": 6,
+    "max_tool_calls": 8,
+    "timeout_s": 60.0
+  },
+  "fairness": "三组共用同一 ReAct 循环 / 同一工具沙箱配置 / 同一预算；差异仅在注入上下文（Copilot 模块输出）",
+  "sandbox_isolation": {
+    "env_whitelist": [
+      "PATH",
+      "LANG",
+      "LC_ALL",
+      "LC_CTYPE",
+      "TMPDIR",
+      "PYTHONHASHSEED"
+    ],
+    "rlimits": {
+      "cpu_seconds": 60,
+      "address_space_bytes": 2147483648,
+      "file_size_bytes": 16777216,
+      "max_processes": 64,
+      "open_files": 128
+    },
+    "network_isolated": true,
+    "container_runtime": true,
+    "honesty_note": "网络已通过 user+net namespace 隔离；文件系统未隔离（用户权限内可读）；容器运行时可用但尚未接入"
+  },
+  "scorer": {
+    "kind": "official-protocol/single-subhypothesis",
+    "official_eval_sha256": "83406ddbe6894429cc5012b17cb82a209d5397aa7863b0aba1bb51edf1dd6c65",
+    "judge_model": "session-agent"
+  },
+  "dry_run": false,
+  "note": "judge 模型仅用于评分并单独计量；dry_run 为 stub 管道冒烟，不构成评测结论。",
+  "started_at": "2026-10-11T06:47:47.459692+00:00",
+  "divergence_checks": {
+    "discoverybench/real/test/archaeology/metadata_14": {
+      "divergence": false,
+      "reason": "关系图仅含时间列，增长阶段主张无法据此核对",
+      "raw": "{\"divergence\": false, \"reason\": \"关系图仅含时间列，增长阶段主张无法据此核对\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/archaeology/metadata_15": {
+      "divergence": false,
+      "reason": "关系图仅含时间列（calBP/CE），PCA 主张无法据此核对，无矛盾证据",
+      "raw": "{\"divergence\": false, \"reason\": \"关系图仅含时间列（calBP/CE），PCA 主张无法据此核对，无矛盾证据\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/introduction_pathways_non-native_plants/metadata_0": {
+      "divergence": false,
+      "reason": "关系图为空（该任务以时间期段为主），无数据矛盾证据",
+      "raw": "{\"divergence\": false, \"reason\": \"关系图为空（该任务以时间期段为主），无数据矛盾证据\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/introduction_pathways_non-native_plants/metadata_1": {
+      "divergence": false,
+      "reason": "关系图为空，无法核对系数 0.22 的方向主张",
+      "raw": "{\"divergence\": false, \"reason\": \"关系图为空，无法核对系数 0.22 的方向主张\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/meta_regression/metadata_0": {
+      "divergence": false,
+      "reason": "同上，无直接矛盾证据",
+      "raw": "{\"divergence\": false, \"reason\": \"同上，无直接矛盾证据\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/meta_regression_raw/metadata_0": {
+      "divergence": false,
+      "reason": "top 关系对为功效/效应量内部相关，original vs replication 对比无法据此核对",
+      "raw": "{\"divergence\": false, \"reason\": \"top 关系对为功效/效应量内部相关，original vs replication 对比无法据此核对\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/nls_incarceration/metadata_0": {
+      "divergence": false,
+      "reason": "top 关系对为财富年份间相关，性别差异主张无矛盾证据",
+      "raw": "{\"divergence\": false, \"reason\": \"top 关系对为财富年份间相关，性别差异主张无矛盾证据\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/nls_raw/metadata_2": {
+      "divergence": false,
+      "reason": "top 关系对未含种族/BA 完成变量对，无矛盾证据",
+      "raw": "{\"divergence\": false, \"reason\": \"top 关系对未含种族/BA 完成变量对，无矛盾证据\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/nls_ses/metadata_0": {
+      "divergence": false,
+      "reason": "SES 与能力分正相关（r=0.46），与 gold 的 SES 正向主张方向相容，无矛盾",
+      "raw": "{\"divergence\": false, \"reason\": \"SES 与能力分正相关（r=0.46），与 gold 的 SES 正向主张方向相容，无矛盾\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/requirements_engineering_for_ML_enabled_systems/metadata_0": {
+      "divergence": false,
+      "reason": "top 关系对为项目经验变量相关，角色比例主张无法据此核对",
+      "raw": "{\"divergence\": false, \"reason\": \"top 关系对为项目经验变量相关，角色比例主张无法据此核对\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/worldbank_education_gdp/metadata_0": {
+      "divergence": false,
+      "reason": "top 关系对为年份列间相关（n=8 面板），教育支出-GDP 主张无矛盾证据",
+      "raw": "{\"divergence\": false, \"reason\": \"top 关系对为年份列间相关（n=8 面板），教育支出-GDP 主张无矛盾证据\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/worldbank_education_gdp_indicators/metadata_0": {
+      "divergence": false,
+      "reason": "同 4924d0，年份列相关，无矛盾证据",
+      "raw": "{\"divergence\": false, \"reason\": \"同 4924d0，年份列相关，无矛盾证据\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    }
+  },
+  "divergence_note": "divergence=true 的任务：金标与数据实测方向矛盾，其官方分数应解读为分歧而非模型错误（诊断性标注，不参与评分）"
+}
