@@ -260,7 +260,7 @@ def cmd_decision_list(args: Any) -> int:
 def cmd_evaluate(args: Any) -> int:
     from .evaluation.runner import run_evaluation
 
-    groups = [g.strip().upper() for g in (args.groups or "A,B,C").split(",") if g.strip()]
+    groups = [g.strip().upper() for g in (args.groups or "A,B,C1,C2").split(",") if g.strip()]
     task_ids = args.task_ids if args.task_ids else None
     from .evaluation.baselines import GroupBudget
 
@@ -410,7 +410,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval = sub.add_parser("evaluate", help="DiscoveryBench A/B/C 对照评测")
     p_eval.add_argument("--bench-root", required=True, help="DiscoveryBench 数据根目录（fetch.sh 克隆产物）")
     p_eval.add_argument("--out-dir", default="eval-runs")
-    p_eval.add_argument("--groups", default="A,B,C")
+    p_eval.add_argument("--groups", default="A,B,C1,C2")
     p_eval.add_argument("--subset", default="main", choices=["main", "synthetic"])
     p_eval.add_argument("--limit", type=int, default=20)
     p_eval.add_argument("--task-ids", action="append", help="显式任务 ID（可多次，覆盖 --limit 选择）")

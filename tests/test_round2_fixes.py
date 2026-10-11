@@ -108,7 +108,7 @@ def run_evaluation_with_stub(bench_root: Path, tmp_path: Path):
     from research_copilot.evaluation.runner import run_evaluation
 
     answer = json.dumps({"hypothesis": "h（stub）", "numeric_assertions": []}, ensure_ascii=False)
-    llm = StubLLM(responses={f"react_{g}_step_0": answer for g in "abc"})
+    llm = StubLLM(responses={f"react_{g}_step_0": answer for g in ("a", "b", "c1", "c2")})
     llm.responses.update(
         {
             "official_judge_context": "A) same",
@@ -118,6 +118,6 @@ def run_evaluation_with_stub(bench_root: Path, tmp_path: Path):
         }
     )
     return run_evaluation(
-        bench_root=bench_root, out_dir=tmp_path / "eval-runs", groups=["A", "B", "C"], limit=1,
+        bench_root=bench_root, out_dir=tmp_path / "eval-runs", groups=["A", "B", "C1", "C2"], limit=1,
         llm=llm, judge_llm=llm,
     )

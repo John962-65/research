@@ -12,7 +12,7 @@ import math
 import re
 from typing import Any
 
-from ..analysis.statistics import compare_metric, describe, numeric, split_by_status
+from ..analysis.statistics import compare_metric, describe, numeric, regress, split_by_status
 from ..analysis.evidence_validator import CAUSAL_MARKERS
 
 _HMS_SYSTEM = """你是科学假设评分器。给定参考假设与被评假设，按官方 DiscoveryBench 协议输出匹配分：
@@ -36,6 +36,35 @@ def check_numeric_assertions(answer: dict[str, Any], rows: list[dict[str, Any]])
             results.append({"metric": metric, "check": check, "status": "unverifiable", "note": "值不可解析"})
             continue
         group_field = "comparison_group"
+        if check == "ols_beta":
+            # 回归断言验证：按断言给出的模型设定重算（修复审查 #3：回归系数不可验证）
+            spec = assertion.get("regression") or {}
+            y_col = str(spec.get("y") or "")
+            x_cols = [str(x) for x in spec.get("x") or []]
+            controls = [str(c) for c in spec.get("controls") or []]
+            filters = {str(k): str(v) for k, v in (spec.get("filter") or {}).items()}
+            target_var = str(spec.get("report") or (x_cols[0] if x_cols else ""))
+            if not y_col or not x_cols:
+                results.append({"metric": metric, "check": check, "status": "unverifiable", "note": "缺少回归设定 y/x"})
+                continue
+            result = regress(rows, y_col, x_cols + controls, filters)
+            if result is None or target_var not in result["betas"]:
+                results.append({"metric": metric, "check": check, "status": "unverifiable", "note": "回归不可解（样本不足/奇异/过滤后为空）"})
+                continue
+            expected = result["betas"][target_var]
+            ok = abs(claimed_value - expected) <= max(abs(expected) * 0.05, abs(expected) > 0 and 0.05 * abs(expected) or 0.05)
+            results.append(
+                {
+                    "metric": metric,
+                    "check": check,
+                    "claimed": claimed_value,
+                    "expected": expected,
+                    "n": result["n"],
+                    "spec": {"y": y_col, "x": x_cols, "controls": controls, "filter": filters},
+                    "status": "pass" if ok else "fail",
+                }
+            )
+            continue
         if check == "percent_change_from_baseline":
             candidate_group = str(assertion.get("candidate_group") or "")
             baseline_group = str(assertion.get("baseline_group") or "")
@@ -167,6 +196,61 @@ def ci95(values: list[float]) -> tuple[float, float] | None:
     return (round(m - half, 4), round(m + half, 4))
 
 
+def var_precision_heuristic(answer: dict[str, Any], gold_text: str) -> float | None:
+    """确定性变量精确率交叉核对（不经 LLM）：答案 variables 的归一化 token 是否出现在金标文本。
+
+    只算精确率（金标变量集合未知，召回率无法确定）；与 judge var_F1 互相校验。
+    """
+    import re as _re
+
+    variables = answer.get("variables") or []
+    if not variables or not gold_text:
+        return None
+    gold_norm = _re.sub(r"[^a-z0-9\u4e00-\u9fff]+", " ", gold_text.lower())
+    matched = 0
+    for variable in variables:
+        tokens = [t for t in _re.split(r"[^a-z0-9\u4e00-\u9fff]+", str(variable).lower()) if len(t) > 2]
+        if not tokens:
+            matched += 1  # 无法分词的短名视为匹配（保守）
+            continue
+        if any(token in gold_norm for token in tokens):
+            matched += 1
+    return round(matched / len(variables), 4)
+
+
+def evidence_rates(records: list[dict[str, Any]]) -> dict[str, Any]:
+    """证据三指标（修复审查 #3：unverifiable 不再被 0% 无依据比例掩盖）。
+
+    - verified_rate: 程序复算且与声称一致的断言比例；
+    - contradicted_rate: 复算与声称矛盾的比例；
+    - unverifiable_rate: 缺少验证方法/数据无法重算的比例。
+    """
+    verified = contradicted = unverifiable = 0
+    for record in records:
+        for check in (record.get("unsupported") or {}).get("numeric_checks") or []:
+            status = check.get("status")
+            if status == "pass":
+                verified += 1
+            elif status == "fail":
+                contradicted += 1
+            else:
+                unverifiable += 1
+    total = verified + contradicted + unverifiable
+    return {
+        "n_assertions": total,
+        "verified_rate": round(verified / total, 4) if total else None,
+        "contradicted_rate": round(contradicted / total, 4) if total else None,
+        "unverifiable_rate": round(unverifiable / total, 4) if total else None,
+        "note": "unverifiable 高说明断言未被验证（不是无风险）；应通过更完整的验证器（如 ols_beta）降低",
+    }
+
+
+def _dataset_of(task_id: str) -> str:
+    # real/test/<dataset>/metadata_N → <dataset>（同数据集多题相关，CI 须按簇计）
+    parts = task_id.split("/")
+    return parts[-2] if len(parts) >= 2 else task_id
+
+
 def aggregate_group(records: list[dict[str, Any]]) -> dict[str, Any]:
     """组级汇总：完成率、官方协议 accuracy 均值±95%CI（跨任务）、无依据结论比例、成本。
 
@@ -197,7 +281,17 @@ def aggregate_group(records: list[dict[str, Any]]) -> dict[str, Any]:
         item["unsupported_conclusion_rate"] for item in unsupported_all if item.get("evaluable")
     ]
     n_not_evaluable = sum(1 for item in unsupported_all if item.get("evaluable") is False)
+    evidence = evidence_rates(records)
     interval = ci95(accuracy_values)
+
+    # 数据集聚类 CI：同一数据集的多题相关，不能当独立样本（修复审查 #4 统计问题）
+    by_dataset: dict[str, list[float]] = {}
+    for record in records:
+        value = (record.get("official") or {}).get("accuracy")
+        if value is not None:
+            by_dataset.setdefault(_dataset_of(record["task_id"]), []).append(float(value))
+    dataset_means = [sum(vs) / len(vs) for vs in by_dataset.values()]
+    cluster_interval = ci95(dataset_means)
 
     def _mean(values: list[float]) -> float | None:
         return round(sum(values) / len(values), 4) if values else None
@@ -207,6 +301,8 @@ def aggregate_group(records: list[dict[str, Any]]) -> dict[str, Any]:
         "completion_rate": round(len(valid) / len(records), 4) if records else 0.0,
         "official_accuracy_mean": _mean(accuracy_values),
         "official_accuracy_ci95": interval,
+        "official_accuracy_cluster_ci95": cluster_interval,
+        "n_datasets": len(by_dataset),
         "n_official_scored": len(accuracy_values),
         "context_match_rate": _mean([1.0 if s == 1.0 else 0.0 for s in context_scores]) if context_scores else None,
         "var_f1_mean": _mean(var_f1),
@@ -214,6 +310,7 @@ def aggregate_group(records: list[dict[str, Any]]) -> dict[str, Any]:
         "hms_custom_mean": _mean([float(v) for v in hms_values]),
         "unsupported_rate_mean_evaluable": _mean([float(v) for v in evaluable_unsupported]),
         "n_not_evaluable": n_not_evaluable,
+        "evidence": evidence,
         "total_llm_calls": sum(r.get("llm_calls", 0) for r in records),
         "total_tool_calls": sum(r.get("tool_calls", 0) for r in records),
         "total_prompt_tokens": sum(r.get("prompt_tokens", 0) for r in records),

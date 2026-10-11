@@ -62,8 +62,8 @@ def test_abc_share_same_loop_and_budget(bench_root: Path):
             return super().complete(system, user, purpose)
 
     answer = json.dumps({"hypothesis": "paco 更快", "variables": ["t"], "relationships": [], "mechanism": "数据不足以支持机制解释", "numeric_assertions": []}, ensure_ascii=False)
-    llm = RecordingStub(responses={f"react_{g}_step_0": answer for g in "ABC"})
-    for group in "ABC":
+    llm = RecordingStub(responses={f"react_{g}_step_0": answer for g in ("a", "b", "c1", "c2")})
+    for group in ("A", "B", "C1"):
         captured.clear()
         GROUP_RUNNERS[group](llm, task, budget=budget, sandbox=ToolSandbox(task.dataset_dir, timeout_s=30))
         purpose, user = captured[0]
@@ -78,7 +78,7 @@ def test_abc_share_same_loop_and_budget(bench_root: Path):
     b_context = captured[0][1]
     assert "column_stats" in b_context and "诊断观测" not in b_context
     captured.clear()
-    GROUP_RUNNERS["C"](llm, task, budget=budget, sandbox=ToolSandbox(task.dataset_dir, timeout_s=30))
+    GROUP_RUNNERS["C1"](llm, task, budget=budget, sandbox=ToolSandbox(task.dataset_dir, timeout_s=30))
     c_context = captured[0][1]
     assert "column_stats" in c_context and "诊断观测" in c_context
 
@@ -99,8 +99,8 @@ def test_group_c_self_check_corrective_round(bench_root: Path):
          "numeric_assertions": [{"metric": "planning_time_s", "value": 20.0, "check": "percent_change_from_baseline", "candidate_group": "paco", "baseline_group": "baseline"}]},
         ensure_ascii=False,
     )
-    llm = StubLLM(responses={"react_c_step_0": bad_answer, "react_c_selfcheck": good_answer})
-    result = GROUP_RUNNERS["C"](llm, task, budget=budget, sandbox=ToolSandbox(task.dataset_dir, timeout_s=30))
+    llm = StubLLM(responses={"react_c1_step_0": bad_answer, "react_c1_selfcheck": good_answer})
+    result = GROUP_RUNNERS["C1"](llm, task, budget=budget, sandbox=ToolSandbox(task.dataset_dir, timeout_s=30))
     assert result.ok
     assert result.self_check["corrective_round"] is True
     assert result.self_check["n_fail"] == 0, "修正后自检应通过"
@@ -127,7 +127,7 @@ def test_cost_delta_per_task_not_cumulative(bench_root: Path, tmp_path: Path):
     task = load_tasks(bench_root, "main")[0]
     budget = GroupBudget(max_steps=3)
     llm = CountingLLM()
-    llm.responses.update({f"react_{g.lower()}_step_0": json.dumps({"hypothesis": "h", "numeric_assertions": []}, ensure_ascii=False) for g in "ABC"})
+    llm.responses.update({f"react_{g.lower()}_step_0": json.dumps({"hypothesis": "h", "numeric_assertions": []}, ensure_ascii=False) for g in ("a", "b", "c1", "c2")})
     llm.responses.update(
         {
             "official_judge_context": "A) same",
@@ -136,7 +136,7 @@ def test_cost_delta_per_task_not_cumulative(bench_root: Path, tmp_path: Path):
         }
     )
     summary = run_evaluation(
-        bench_root=bench_root, out_dir=tmp_path / "eval-runs", groups=["A", "B", "C"], limit=1,
+        bench_root=bench_root, out_dir=tmp_path / "eval-runs", groups=["A", "B", "C1", "C2"], limit=1,
         llm=llm, judge_llm=llm, budget=budget,
     )
     for group, agg in summary["group_summaries"].items():

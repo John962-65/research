@@ -149,21 +149,21 @@ def test_runner_dry_run_end_to_end(bench_root: Path, tmp_path: Path):
     summary = run_evaluation(
         bench_root=bench_root,
         out_dir=tmp_path / "eval-runs",
-        groups=["A", "B", "C"],
+        groups=["A", "B", "C1", "C2"],
         subset="main",
         limit=1,
         dry_run=True,
     )
     assert summary["dry_run"] is True
-    assert set(summary["group_summaries"]) == {"A", "B", "C"}
+    assert set(summary["group_summaries"]) == {"A", "B", "C1", "C2"}
     for group_agg in summary["group_summaries"].values():
         assert group_agg["n_tasks"] == 1
         assert group_agg["completion_rate"] == 1.0  # stub 产出可解析答案
-    c_agg = summary["group_summaries"]["C"]
+    c_agg = summary["group_summaries"]["C1"]
     assert c_agg["official_accuracy_mean"] is not None  # 官方协议评分（stub judge）正常产出
     assert c_agg["official_accuracy_mean"] == 1.0  # context=1 × var_F1=1 × rel=1
     assert summary["config_sanity"] if False else True
-    assert "C_vs_A" in summary["comparisons"]
+    assert "C1_vs_A" in summary["comparisons"] and "C2_vs_C1" in summary["comparisons"]
     # 产物落盘
     run_dirs = list((tmp_path / "eval-runs").iterdir())
     assert run_dirs and (run_dirs[0] / "summary.md").exists()

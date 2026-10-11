@@ -97,7 +97,7 @@ def test_evaluate_dry_run(tmp_path: Path, capsys):
             "--out-dir",
             str(tmp_path / "eval-runs"),
             "--groups",
-            "A,B,C",
+            "A,B,C1,C2",
             "--limit",
             "1",
             "--dry-run",

@@ -18,9 +18,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from concurrent.futures import ThreadPoolExecutor
+
 from .baselines import GROUP_RUNNERS, GroupBudget, ToolSandbox
 from .discoverybench_adapter import DiscoveryTask, load_tasks
-from .metrics import aggregate_group, hms_score, paired_delta, unsupported_conclusion_rate
+from .metrics import (
+    aggregate_group,
+    hms_score,
+    paired_delta,
+    unsupported_conclusion_rate,
+    var_precision_heuristic,
+)
 
 EVAL_CODE_VERSION = "eval/2.0"
 
@@ -38,7 +46,7 @@ def _usage_delta(before: dict[str, Any], after: dict[str, Any]) -> dict[str, int
 def run_evaluation(
     bench_root: str | Path,
     out_dir: str | Path,
-    groups: list[str] = ("A", "B", "C"),
+    groups: list[str] = ("A", "B", "C1", "C2"),
     subset: str = "main",
     limit: int = 20,
     task_ids: list[str] | None = None,
@@ -46,6 +54,7 @@ def run_evaluation(
     judge_llm: Any | None = None,
     budget: GroupBudget | None = None,
     dry_run: bool = False,
+    judge_hms_custom: bool = False,
 ) -> dict[str, Any]:
     from ..integrations.llm import LLMUnavailable, OpenAICompatibleLLM
     from .official_scoring import OFFICIAL_EVAL_SHA256, OfficialProtocolScorer
@@ -105,12 +114,12 @@ def run_evaluation(
     if not dry_run or True:  # dry-run 也走 stub，保持管道覆盖
         from ..analysis.statistics import relation_signs
 
-        for task in tasks:
+        def _divergence(task):
             try:
                 tables = _task_tables(task)
                 all_rows = [row for table in tables for row in table["rows"]]
                 if len(all_rows) < 5:
-                    continue
+                    return task.task_id, {"divergence": None, "note": "no rows"}
                 columns: list[str] = []
                 for row in all_rows[:50]:
                     for key in row:
@@ -119,13 +128,17 @@ def run_evaluation(
                 relations = relation_signs(all_rows, columns)
                 top = [rel for rel in relations if rel["sign"] in ("positive", "negative")][:8]
                 scorer_probe = OfficialProtocolScorer(judge_llm)
-                divergence_checks[task.task_id] = scorer_probe.divergence_check(
+                return task.task_id, scorer_probe.divergence_check(
                     task.query,
                     task.gold_hypothesis,
                     json.dumps(top, ensure_ascii=False),
                 )
             except Exception as exc:
-                divergence_checks[task.task_id] = {"divergence": None, "error": str(exc)[:200]}
+                return task.task_id, {"divergence": None, "error": str(exc)[:200]}
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            for task_id, check in pool.map(_divergence, tasks):
+                divergence_checks[task_id] = check
         config["divergence_checks"] = divergence_checks
         config["divergence_note"] = "divergence=true 的任务：金标与数据实测方向矛盾，其官方分数应解读为分歧而非模型错误（诊断性标注，不参与评分）"
         _write_json(run_dir / "config.json", config)
@@ -185,25 +198,33 @@ def run_evaluation(
             )
             records_by_group[group].append(record)
 
-    # 评分：官方协议（judge）为主，自定义 0/1/2 为辅；judge 失败如实标注
+    # 评分：官方协议（judge）为主。judge 请求管道化（线程池），组/被测标签不进入
+    # judge 上下文（盲评）；var 维度另附确定性启发式交叉核对。
     hms_error = ""
-    for group in groups:
-        for record in records_by_group[group]:
-            if record.get("error") and not record.get("answer"):
-                continue
-            try:
-                task = next(t for t in tasks if t.task_id == record["task_id"])
-                scorer = OfficialProtocolScorer(judge_llm)
-                official = scorer.score(task.query, task.gold_hypothesis, record["answer"].get("hypothesis") or "")
-                record["official"] = official
-                record["official_accuracy"] = official.get("accuracy")
-                record["judge_calls"] = scorer.judge_calls
+
+    def _score_one(group: str, record: dict[str, Any]) -> None:
+        nonlocal hms_error
+        if record.get("error") and not record.get("answer"):
+            return
+        try:
+            task = next(t for t in tasks if t.task_id == record["task_id"])
+            scorer = OfficialProtocolScorer(judge_llm)
+            official = scorer.score(task.query, task.gold_hypothesis, record["answer"].get("hypothesis") or "")
+            record["official"] = official
+            record["official_accuracy"] = official.get("accuracy")
+            record["judge_calls"] = scorer.judge_calls
+            record["var_precision_heuristic"] = var_precision_heuristic(record["answer"], task.gold_hypothesis)
+            if judge_hms_custom:
                 scored_custom = hms_score(record["answer"], task.gold_hypothesis, judge_llm)
                 record["hms_custom"] = scored_custom["hms"]
-            except Exception as exc:
-                hms_error = f"{type(exc).__name__}: {exc}"
-                record["official_accuracy"] = None
-            # 保存 raw 记录
+        except Exception as exc:
+            hms_error = f"{type(exc).__name__}: {exc}"
+            record["official_accuracy"] = None
+
+    scoring_pairs = [(group, record) for group in groups for record in records_by_group[group]]
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(lambda pair: _score_one(*pair), scoring_pairs))
+    for group in groups:
         raw_path = run_dir / "raw" / f"{group}.jsonl"
         raw_path.parent.mkdir(parents=True, exist_ok=True)
         with raw_path.open("w", encoding="utf-8") as handle:
@@ -212,10 +233,12 @@ def run_evaluation(
 
     summaries = {group: aggregate_group(records_by_group[group]) for group in groups}
     comparisons = {}
-    if "A" in records_by_group and "C" in records_by_group:
-        comparisons["C_vs_A"] = paired_delta(records_by_group["C"], records_by_group["A"])
-    if "B" in records_by_group and "C" in records_by_group:
-        comparisons["C_vs_B"] = paired_delta(records_by_group["C"], records_by_group["B"])
+    if "A" in records_by_group and "C1" in records_by_group:
+        comparisons["C1_vs_A"] = paired_delta(records_by_group["C1"], records_by_group["A"])
+    if "B" in records_by_group and "C1" in records_by_group:
+        comparisons["C1_vs_B"] = paired_delta(records_by_group["C1"], records_by_group["B"])
+    if "C1" in records_by_group and "C2" in records_by_group:
+        comparisons["C2_vs_C1"] = paired_delta(records_by_group["C2"], records_by_group["C1"])
 
     summary = {
         **config,
@@ -258,7 +281,7 @@ def render_summary_markdown(summary: dict[str, Any]) -> str:
     sandbox = summary.get("sandbox_isolation") or {}
     lines += [
         f"- 模型: {summary['model']}；judge: {summary['judge_model']}；dry_run: {summary['dry_run']}",
-        f"- 任务: subset={summary['subset']}, n={len(summary['task_ids'])}",
+        f"- 任务: subset={summary['subset']}, n={len(summary['task_ids'])}, groups={summary['groups']}",
         f"- 沙箱: env 白名单 + rlimits；网络隔离: {sandbox.get('network_isolated')}（{sandbox.get('honesty_note', '')}）",
         f"- {summary['honesty_note']}",
         "",
@@ -299,7 +322,7 @@ def _dry_run_stub():
         },
         ensure_ascii=False,
     )
-    return StubLLM(responses={"react_a_step_0": answer, "react_b_step_0": answer, "react_c_step_0": answer})
+    return StubLLM(responses={"react_a_step_0": answer, "react_b_step_0": answer, "react_c1_step_0": answer, "react_c2_step_0": answer})
 
 
 def _dry_run_judge_stub():

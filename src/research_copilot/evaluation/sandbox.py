@@ -48,6 +48,14 @@ def _apply_rlimits(limits: dict[str, int]) -> None:  # pragma: no cover - 在子
     resource.setrlimit(resource.RLIMIT_NOFILE, (limits["open_files"], limits["open_files"]))
 
 
+def container_runtime_available() -> bool:
+    """探测容器级隔离运行时（bwrap/firejail/docker）。当前仅探测+如实标注，未接入执行。"""
+    for name in ("bwrap", "firejail", "docker"):
+        if shutil.which(name):
+            return True
+    return False
+
+
 def check_network_isolation_available() -> bool:
     """探测非特权 user+net namespace 是否可用（结果缓存调用方决定）。"""
     unshare = shutil.which("unshare")
@@ -89,8 +97,10 @@ class ToolSandbox:
             "env_whitelist": list(ENV_WHITELIST),
             "rlimits": dict(self.limits),
             "network_isolated": bool(self.network_isolation),
+            "container_runtime": container_runtime_available(),
             "honesty_note": (
-                "网络已通过 user+net namespace 隔离"
+                "网络已通过 user+net namespace 隔离；文件系统未隔离（用户权限内可读）"
+                + ("；容器运行时可用但尚未接入" if container_runtime_available() else "；无容器运行时")
                 if self.network_isolation
                 else "网络未隔离（系统不支持非特权 namespace）：生成代码可访问网络与用户文件，残余风险如实记录"
             ),

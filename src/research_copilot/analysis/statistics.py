@@ -449,6 +449,47 @@ def _is_num(value: Any) -> bool:
     return not (math.isnan(parsed) or math.isinf(parsed))
 
 
+def regress(
+    rows: list[dict[str, Any]], y: str, xs: list[str], filters: dict[str, str] | None = None
+) -> dict[str, Any] | None:
+    """多元 OLS（正规方程 + 高斯消元，零依赖）。用于回归断言的程序化验证。
+
+    filters: {列: 字符串值}——行按 str(row[col]) == str(value) 过滤（子样本回归）。
+    返回 {"betas": {列名: 系数}, "n": 样本数}；样本不足或奇异矩阵返回 None。
+    """
+    if filters:
+        rows = [
+            row for row in rows
+            if all(str(row.get(col)) == str(val) for col, val in filters.items())
+        ]
+    columns = ["_intercept"] + list(xs)
+    data = []
+    for row in rows:
+        try:
+            data.append([1.0] + [float(row.get(x)) for x in xs] + [float(row.get(y))])
+        except (TypeError, ValueError):
+            continue
+    n = len(data)
+    k = len(columns)
+    if n <= k:
+        return None
+    XtX = [[sum(row[i] * row[j] for row in data) for j in range(k)] for i in range(k)]
+    Xty = [sum(row[i] * row[k] for row in data) for i in range(k)]
+    A = [row[:] + [Xty[i]] for i, row in enumerate(XtX)]
+    for col in range(k):
+        pivot = max(range(col, k), key=lambda r: abs(A[r][col]))
+        if abs(A[pivot][col]) < 1e-12:
+            return None
+        A[col], A[pivot] = A[pivot], A[col]
+        for r in range(k):
+            if r != col and A[r][col] != 0:
+                factor = A[r][col] / A[col][col]
+                for cc in range(col, k + 1):
+                    A[r][cc] -= factor * A[col][cc]
+    betas = {columns[i]: A[i][k] / A[i][i] for i in range(k)}
+    return {"betas": betas, "n": n}
+
+
 def group_profile(
     rows: list[dict[str, Any]], covariate_fields: list[str], group_field: str = "comparison_group"
 ) -> dict[str, Any]:
