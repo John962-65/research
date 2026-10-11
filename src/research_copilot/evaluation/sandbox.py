@@ -122,6 +122,7 @@ class ToolSandbox:
         timeout_s: float = 60.0,
         limits: dict[str, int] | None = None,
         network_isolation: bool | None = None,  # None = 自动探测
+        allow_unsafe_fallback: bool = False,  # 默认 fail-closed：隔离不满足则拒绝执行
     ) -> None:
         self.dataset_dir = Path(dataset_dir) if dataset_dir else None
         self.timeout_s = timeout_s
@@ -130,7 +131,32 @@ class ToolSandbox:
             self.network_isolation = check_network_isolation_available()
         else:
             self.network_isolation = network_isolation
+        self.allow_unsafe_fallback = allow_unsafe_fallback
         self.executions: list[dict[str, Any]] = []
+        self._snapshot_dir: Path | None = None
+        self._snapshot_tmp: tempfile.TemporaryDirectory | None = None
+
+    def _ensure_data_snapshot(self) -> Path | None:
+        """把数据文件（仅 csv/dta——绝不复制金标元数据）快照到可写工作区。
+
+        修复审查 P0-3：原始 Benchmark 数据不再以可写方式挂载——agent 代码只能
+        修改快照副本，保证原始数据完整性与后续实验可复现性。
+        """
+        if self._snapshot_dir is not None or self.dataset_dir is None:
+            return self._snapshot_dir
+        self._snapshot_tmp = tempfile.TemporaryDirectory(prefix="rc-data-snapshot-")
+        self._snapshot_dir = Path(self._snapshot_tmp.name)
+        if self.dataset_dir.exists():
+            for pattern in ("*.csv", "*.dta"):
+                for source in self.dataset_dir.rglob(pattern):
+                    shutil.copy2(source, self._snapshot_dir / source.name)
+        return self._snapshot_dir
+
+    def close(self) -> None:
+        if self._snapshot_tmp is not None:
+            self._snapshot_tmp.cleanup()
+            self._snapshot_tmp = None
+            self._snapshot_dir = None
 
     @property
     def isolation_record(self) -> dict[str, Any]:
@@ -154,37 +180,47 @@ class ToolSandbox:
         }
 
     def run_python(self, code: str) -> dict[str, Any]:
-        # bwrap 优先：容器级隔离（网络+挂载空间隔离、文件系统白名单）；
-        # 不可用时回退 unshare -Urn（仅网络/pid 隔离）；脚本目录 bind 进沙箱。
-        bwrap_prefix = build_bwrap_command(Path("snippet.py"), self.dataset_dir, Path("/tmp/rc-bwrap-work"))
-        use_bwrap = bwrap_prefix is not None
+        # fail-closed（审查 P0-3）：无容器级隔离时默认拒绝执行不可信代码，
+        # 仅显式 allow_unsafe_fallback=True 的开发模式允许降级。
+        probe = build_bwrap_command(Path("snippet.py"), self.dataset_dir, Path("/tmp/rc-probe"))
+        if probe is None and not self.allow_unsafe_fallback:
+            return {
+                "ok": False,
+                "stdout": "",
+                "stderr": "fail-closed: 容器级隔离（bwrap）不可用，拒绝执行模型生成的代码",
+                "fail_closed": True,
+            }
+        # 数据快照（只读语义）：cwd/绑定都指向快照副本，原数据永不修改
+        data_for_binding = self._ensure_data_snapshot() or self.dataset_dir
         with tempfile.TemporaryDirectory() as tmp:
             workdir = Path(tmp)
             script = workdir / "snippet.py"
             script.write_text(code, encoding="utf-8")
             command: list[str] = []
-            if use_bwrap:
-                command = build_bwrap_command(script, self.dataset_dir, workdir)
+            use_bwrap = False
+            bwrap_command = build_bwrap_command(script, data_for_binding, workdir)
+            if bwrap_command is not None:
+                command = bwrap_command
                 command += [sys.executable, str(script)]
+                use_bwrap = True
             else:
                 if self.network_isolation:
                     unshare = shutil.which("unshare")
                     command += [unshare, "-Urn"]
-                # 不用 -I：env 已白名单清洗（PYTHONPATH 不会传入），保留默认 site-packages
-                # 使可选分析依赖（pandas 等）在沙箱内同样可用——与宿主一致的公平工具面
+                # 不用 -I：env 已白名单清洗，保留默认 site-packages（pandas 等与宿主公平一致）
                 command += [sys.executable, str(script)]
-            # bwrap 模式排除 RLIMIT_NPROC（与 namespace 创建冲突，EAGAIN）；其余限额保留
-            bwrap_limits = {k: v for k, v in self.limits.items() if k != "max_processes"} if use_bwrap else self.limits
+            # bwrap 模式排除 RLIMIT_NPROC（与 namespace 创建冲突）；其余限额保留
+            effective_limits = {k: v for k, v in self.limits.items() if k != "max_processes"} if use_bwrap else self.limits
             try:
                 completed = subprocess.run(
                     command,
-                    cwd=str(self.dataset_dir) if (self.dataset_dir and not use_bwrap) else str(workdir),
+                    cwd=str(data_for_binding) if data_for_binding else str(workdir),
                     env=build_clean_env(),
                     capture_output=True,
                     text=True,
                     timeout=self.timeout_s,
                     start_new_session=True,
-                    preexec_fn=lambda: _apply_rlimits(bwrap_limits),
+                    preexec_fn=lambda: _apply_rlimits(effective_limits),
                 )
                 result = {
                     "ok": completed.returncode == 0,

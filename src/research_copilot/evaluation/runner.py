@@ -156,6 +156,7 @@ def run_evaluation(
                 error_record = {
                     "group": group,
                     "task_id": task.task_id,
+                    "failure_class": "transport_failure",
                     "error": f"{type(exc).__name__}: {exc}",
                     "answer": {},
                     "unsupported": {"evaluable": False, "not_evaluable_reason": "task_error"},
@@ -172,6 +173,7 @@ def run_evaluation(
             record = {
                 "group": result.group,
                 "task_id": result.task_id,
+                "failure_class": result.failure_class,
                 "answer": result.answer,
                 "raw_answer": result.raw_answer[:2000],
                 "llm_calls": result.llm_calls,
@@ -285,13 +287,14 @@ def render_summary_markdown(summary: dict[str, Any]) -> str:
         f"- 沙箱: env 白名单 + rlimits；网络隔离: {sandbox.get('network_isolated')}（{sandbox.get('honesty_note', '')}）",
         f"- {summary['honesty_note']}",
         "",
-        "| 组 | 完成率 | 官方accuracy | 95% CI | context匹配 | var_F1 | rel | 无依据比例(可评) | 不可评任务 | LLM调用 |",
-        "|---|---|---|---|---|---|---|---|---|---|",
+        "| 组 | 完成率 | 成功任务acc | **全任务得分** | 95% CI | context | var_F1 | rel | 无依据(可评) | 不可评 | LLM调用 |",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for group, agg in summary["group_summaries"].items():
         ci = agg.get("official_accuracy_ci95")
         lines.append(
             f"| {group} | {agg['completion_rate']:.0%} | {agg['official_accuracy_mean'] if agg['official_accuracy_mean'] is not None else '-'} "
+        f"| {agg['full_task_score_mean'] if agg.get('full_task_score_mean') is not None else '-'} "
             f"| {f'[{ci[0]}, {ci[1]}]' if ci else '-'} | {agg.get('context_match_rate') if agg.get('context_match_rate') is not None else '-'} "
             f"| {agg.get('var_f1_mean') if agg.get('var_f1_mean') is not None else '-'} "
             f"| {agg.get('rel_score_mean') if agg.get('rel_score_mean') is not None else '-'} "

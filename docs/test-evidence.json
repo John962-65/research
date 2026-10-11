@@ -1,84 +1,29 @@
 {
-  "generated_at": "2026-10-11T14:35:52Z",
-  "commit": "2ff7b3098db0efd3a17dde626c7006b37cc6d868",
-  "python": "Python 3.10.12",
-  "runner": "pytest (offline, no LLM calls; sandbox/bwrap tests auto-skip if unavailable)",
+  "generated_at": "2026-10-11T14:56:52Z",
+  "commit": "2abc2cd597d6c363c4d2e63bef40529837277072",
+  "python": "Python 3.10",
+  "runner": "pytest (offline, stub LLM)",
   "totals": {
-    "tests": 118,
-    "passed": 118,
+    "tests": 127,
+    "passed": 127,
     "failed": 0,
     "errors": 0,
     "skipped": 0
   },
-  "by_file": {
-    "test_adversarial_scenarios": {
-      "passed": 8,
-      "failed": 0
-    },
-    "test_anomaly": {
-      "passed": 5,
-      "failed": 0
-    },
-    "test_cli": {
-      "passed": 3,
-      "failed": 0
-    },
-    "test_core": {
-      "passed": 10,
-      "failed": 0
-    },
-    "test_diagnosis_agent": {
-      "passed": 6,
-      "failed": 0
-    },
-    "test_discoverybench": {
-      "passed": 9,
-      "failed": 0
-    },
-    "test_evidence_validator": {
-      "passed": 10,
-      "failed": 0
-    },
-    "test_hypothesis_planner": {
-      "passed": 10,
-      "failed": 0
-    },
-    "test_importer": {
-      "passed": 8,
-      "failed": 0
-    },
-    "test_official_scoring": {
-      "passed": 7,
-      "failed": 0
-    },
-    "test_p0_fixes": {
-      "passed": 6,
-      "failed": 0
-    },
-    "test_p1_fixes": {
-      "passed": 6,
-      "failed": 0
-    },
-    "test_round2_fixes": {
-      "passed": 6,
-      "failed": 0
-    },
-    "test_round3_fixes": {
-      "passed": 5,
-      "failed": 0
-    },
-    "test_sandbox": {
-      "passed": 7,
-      "failed": 0
-    },
-    "test_statistics": {
-      "passed": 12,
-      "failed": 0
+  "history": [
+    {
+      "commit": "2ff7b3098db0efd3a17dde626c7006b37cc6d868",
+      "totals": {
+        "tests": 118,
+        "passed": 118,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "at": "2026-10-11T14:35:52Z"
     }
-  },
+  ],
   "notes": [
-    "全部测试离线运行：单元/对抗场景/协议测试使用 stub LLM，不消耗任何模型 token",
-    "test_round3_fixes 的 bwrap 用例在本机实跑（容器隔离可用）；CI 环境无 bwrap 时自动跳过",
-    "eval-results/ 下的四轮评测记录由 docs/eval-results/*/FINDINGS.md 与 raw/*.jsonl 承载，可复算"
+    "第五轮：+9 测试（C1 标签/失败五分类/结构化分析声明/bootstrap CI/快照只读/fail-closed）"
   ]
 }

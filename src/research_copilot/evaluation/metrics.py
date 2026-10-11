@@ -12,13 +12,70 @@ import math
 import re
 from typing import Any
 
-from ..analysis.statistics import compare_metric, describe, numeric, regress, split_by_status
+import math
+
+from ..analysis.statistics import compare_metric, describe, mean, numeric, regress, split_by_status
 from ..analysis.evidence_validator import CAUSAL_MARKERS
 
 _HMS_SYSTEM = """你是科学假设评分器。给定参考假设与被评假设，按官方 DiscoveryBench 协议输出匹配分：
 0 = 无匹配（未捕捉参考假设的核心关系）；1 = 部分匹配（方向或主要变量对，但关系/条件不完整）；2 = 完全匹配。
 只考虑数据可支持的内容；被评假设引入数据外机制不加分。
 只输出 JSON：{"score": 0|1|2, "reason": "一句话"}"""
+
+
+def _verify_analysis(rows: list[dict[str, Any]], analysis: dict[str, Any]) -> dict[str, Any]:
+    """结构化分析声明重算（审查 P0-2）。
+
+    边界（如实声明）：重算一致只证明**所声明的分析过程可复现**，
+    不自动证明分析方法在科学上合理（如用相关性回答因果问题）。
+    """
+    a_type = str(analysis.get("analysis_type") or "")
+    if a_type == "regression":
+        y_col = str(analysis.get("dependent_variable") or "")
+        x_cols = [str(x) for x in analysis.get("independent_variables") or []]
+        controls = [str(c) for c in analysis.get("controls") or []]
+        filters = {str(k): str(v) for k, v in (analysis.get("filters") or {}).items()}
+        result = regress(rows, y_col, x_cols + controls, filters)
+        target = str(analysis.get("reported_variable") or (x_cols[0] if x_cols else ""))
+        if result is None or target not in result["betas"]:
+            return {"status": "unverifiable", "note": "回归不可解（样本不足/奇异/过滤后为空）"}
+        return {"status": "ok", "expected": result["betas"][target], "n": result["n"], "spec": {"y": y_col, "x": x_cols, "controls": controls, "filter": filters}}
+    if a_type == "group_mean":
+        column, gfield, group = str(analysis.get("column")), str(analysis.get("group_field")), str(analysis.get("group"))
+        values = numeric([r for r in rows if str(r.get(gfield)) == group], column)
+        if not values:
+            return {"status": "unverifiable", "note": "组内无数值"}
+        return {"status": "ok", "expected": describe(values, column)["mean"], "n": len(values)}
+    if a_type == "group_diff":
+        column, gfield = str(analysis.get("column")), str(analysis.get("group_field"))
+        cand = [r for r in rows if str(r.get(gfield)) == str(analysis.get("candidate_group"))]
+        base = [r for r in rows if str(r.get(gfield)) == str(analysis.get("baseline_group"))]
+        cv, bv = numeric(cand, column), numeric(base, column)
+        if not cv or not bv:
+            return {"status": "unverifiable", "note": "组内无数值"}
+        return {"status": "ok", "expected": mean(cv) - mean(bv), "n": len(cv) + len(bv)}
+    if a_type == "correlation":
+        x_col, y_col = str(analysis.get("x")), str(analysis.get("y"))
+        pairs = [(float(r.get(x_col)), float(r.get(y_col))) for r in rows
+                 if _is_number(r.get(x_col)) and _is_number(r.get(y_col))]
+        if len(pairs) < 3:
+            return {"status": "unverifiable", "note": "有效样本 <3"}
+        xs = [p[0] for p in pairs]; ys = [p[1] for p in pairs]
+        mx, my = mean(xs), mean(ys)
+        sxy = sum((a - mx) * (b - my) for a, b in zip(xs, ys))
+        denom = math.sqrt(sum((a - mx) ** 2 for a in xs) * sum((b - my) ** 2 for b in ys))
+        if denom <= 0:
+            return {"status": "unverifiable", "note": "零方差"}
+        return {"status": "ok", "expected": sxy / denom, "n": len(pairs)}
+    return {"status": "unverifiable", "note": f"analysis_type {a_type} 暂不支持（如 pca_score，列入验证器路线）"}
+
+
+def _is_number(value: Any) -> bool:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(parsed)
 
 
 def check_numeric_assertions(answer: dict[str, Any], rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -34,6 +91,18 @@ def check_numeric_assertions(answer: dict[str, Any], rows: list[dict[str, Any]])
             claimed_value = float(claimed)
         except (TypeError, ValueError):
             results.append({"metric": metric, "check": check, "status": "unverifiable", "note": "值不可解析"})
+            continue
+        # 结构化分析声明优先（P0-2）：验证器按声明重算全过程
+        analysis = assertion.get("analysis")
+        if isinstance(analysis, dict) and analysis.get("analysis_type"):
+            verdict = _verify_analysis(rows, analysis)
+            if verdict.get("status") == "unverifiable":
+                results.append({"metric": metric, "check": f"analysis:{analysis.get('analysis_type')}", "status": "unverifiable", "note": verdict.get("note")})
+            else:
+                ok = abs(claimed_value - verdict["expected"]) <= max(abs(verdict["expected"]) * 0.05, 0.05)
+                results.append({"metric": metric, "check": f"analysis:{analysis.get('analysis_type')}", "claimed": claimed_value,
+                                "expected": verdict["expected"], "n": verdict.get("n"), "spec": verdict.get("spec"),
+                                "status": "pass" if ok else "fail"})
             continue
         group_field = "comparison_group"
         if check == "ols_beta":
@@ -187,6 +256,23 @@ def _judge_model(judge_llm: Any) -> str:
     return getattr(config, "model", "unknown") if config else "unknown"
 
 
+def _bootstrap_cluster_ci(by_dataset: dict[str, list[float]], n_boot: int = 1000, seed: int = 0) -> tuple[float, float] | None:
+    """按数据集分层 bootstrap 百分位 CI，钳位 [0,1]（确定性 seed=0）。"""
+    keys = sorted(by_dataset)
+    if len(keys) < 2:
+        return None
+    means = []
+    for b in range(n_boot):
+        rng = __import__("random").Random(seed + b)
+        sample = [by_dataset[keys[rng.randrange(len(keys))]] for _ in range(len(keys))]
+        flat = [v for group in sample for v in group]
+        means.append(sum(flat) / len(flat))
+    means.sort()
+    lo = max(0.0, means[int(0.025 * n_boot)])
+    hi = min(1.0, means[min(n_boot - 1, int(0.975 * n_boot))])
+    return (round(lo, 4), round(hi, 4))
+
+
 def ci95(values: list[float]) -> tuple[float, float] | None:
     if len(values) < 2:
         return None
@@ -284,14 +370,28 @@ def aggregate_group(records: list[dict[str, Any]]) -> dict[str, Any]:
     evidence = evidence_rates(records)
     interval = ci95(accuracy_values)
 
-    # 数据集聚类 CI：同一数据集的多题相关，不能当独立样本（修复审查 #4 统计问题）
+    # 数据集聚类 CI（审查 P1-2）：按数据集分层 bootstrap 重采样（确定性 seed），
+    # 百分位区间钳位到 [0,1]（正态近似在小样本会越界，如 [0.111, 1.032]）。
     by_dataset: dict[str, list[float]] = {}
     for record in records:
         value = (record.get("official") or {}).get("accuracy")
         if value is not None:
             by_dataset.setdefault(_dataset_of(record["task_id"]), []).append(float(value))
     dataset_means = [sum(vs) / len(vs) for vs in by_dataset.values()]
-    cluster_interval = ci95(dataset_means)
+    cluster_interval = _bootstrap_cluster_ci(by_dataset)
+    # 全任务得分（审查 P1-2）：未完成任务统一记 0，与"成功任务平均"分开报告
+    full_task_scores = [
+        float((r.get("official") or {}).get("accuracy") or 0.0) for r in records
+    ]
+    full_task_score_mean = round(sum(full_task_scores) / len(full_task_scores), 4) if full_task_scores else None
+    full_task_interval = _bootstrap_cluster_ci(
+        {str(i): [v] for i, v in enumerate(full_task_scores)}  # 任务级 bootstrap（全分母口径）
+    ) if full_task_scores else None
+    failure_breakdown: dict[str, int] = {}
+    for record in records:
+        fc = record.get("failure_class") or ("" if (record.get("answer") or {}).get("hypothesis") else "unknown")
+        if fc:
+            failure_breakdown[fc] = failure_breakdown.get(fc, 0) + 1
 
     def _mean(values: list[float]) -> float | None:
         return round(sum(values) / len(values), 4) if values else None
@@ -302,7 +402,12 @@ def aggregate_group(records: list[dict[str, Any]]) -> dict[str, Any]:
         "official_accuracy_mean": _mean(accuracy_values),
         "official_accuracy_ci95": interval,
         "official_accuracy_cluster_ci95": cluster_interval,
+        "cluster_ci_method": "dataset-stratified bootstrap (1000, seed=0), clamped [0,1]",
         "n_datasets": len(by_dataset),
+        "full_task_score_mean": full_task_score_mean,
+        "full_task_score_ci95": full_task_interval,
+        "full_task_note": "全任务分母：未完成任务记 0 分（与成功任务平均分开报告，审查 P1-2）",
+        "failure_breakdown": failure_breakdown,
         "n_official_scored": len(accuracy_values),
         "context_match_rate": _mean([1.0 if s == 1.0 else 0.0 for s in context_scores]) if context_scores else None,
         "var_f1_mean": _mean(var_f1),

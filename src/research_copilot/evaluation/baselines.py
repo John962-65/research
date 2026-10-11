@@ -75,6 +75,7 @@ class GroupResult:
     tool_calls: int
     ok: bool
     error: str = ""
+    failure_class: str = ""  # tool_loop_exhausted / output_parse_failure / tool_execution_failure / transport_failure / invalid_final_answer
     self_check: dict[str, Any] = field(default_factory=dict)
     trace: list[dict[str, Any]] = field(default_factory=list)
 
@@ -319,6 +320,7 @@ def run_group_a(llm: Any, task, budget: GroupBudget | None = None, sandbox: Tool
     context = f"研究问题：{task.query}\n\n数据集概要：{_dataset_brief(tables)}\n\n{TOOL_INSTRUCTION}"
     answer, raw, llm_calls, tool_calls, trace = _react_loop(llm, context, sandbox, budget, "A", task.task_id, "react_a")
     return GroupResult("A", task.task_id, answer, raw, llm_calls, tool_calls, bool(answer.get("hypothesis")),
+                       failure_class=classify_failure("", answer, trace, llm_calls, budget.max_steps),
                        error="" if answer.get("hypothesis") else "未在步数预算内产出有效答案", trace=trace)
 
 
@@ -332,6 +334,7 @@ def run_group_b(llm: Any, task, budget: GroupBudget | None = None, sandbox: Tool
     context = f"研究问题：{task.query}\n\n数据画像（无诊断/证据模块）：{_data_profile(tables)}\n\n{TOOL_INSTRUCTION}"
     answer, raw, llm_calls, tool_calls, trace = _react_loop(llm, context, sandbox, budget, "B", task.task_id, "react_b")
     return GroupResult("B", task.task_id, answer, raw, llm_calls, tool_calls, bool(answer.get("hypothesis")),
+                       failure_class=classify_failure("", answer, trace, llm_calls, budget.max_steps),
                        error="" if answer.get("hypothesis") else "未在步数预算内产出有效答案", trace=trace)
 
 
@@ -383,7 +386,8 @@ def run_group_c1(llm: Any, task, budget: GroupBudget | None = None, sandbox: Too
             self_check["n_fail"] = len([c for c in rechecks if c.get("status") == "fail"])
             self_check["causal_without_basis"] = causal_claims_without_basis(answer)
             self_check["corrective_round"] = True
-    return GroupResult("C", task.task_id, answer, raw, llm_calls, tool_calls, bool(answer.get("hypothesis")),
+    return GroupResult("C1", task.task_id, answer, raw, llm_calls, tool_calls, bool(answer.get("hypothesis")),
+                       failure_class=classify_failure("", answer, trace, llm_calls, budget.max_steps),
                        error="" if answer.get("hypothesis") else "未在步数预算内产出有效答案",
                        self_check=self_check, trace=trace)
 
@@ -438,8 +442,30 @@ def run_group_c2(llm: Any, task, budget: GroupBudget | None = None, sandbox: Too
             self_check["causal_without_basis"] = causal_claims_without_basis(answer)
             self_check["corrective_round"] = True
     return GroupResult("C2", task.task_id, answer, raw, llm_calls, tool_calls, bool(answer.get("hypothesis")),
+                       failure_class=classify_failure("", answer, trace, llm_calls, budget.max_steps),
                        error="" if answer.get("hypothesis") else "未在步数预算内产出有效答案",
                        self_check=self_check, trace=trace)
+
+
+def classify_failure(
+    error: str, answer: dict[str, Any], trace: list[dict[str, Any]], llm_calls: int, max_steps: int
+) -> str:
+    """Agent 交互失败五分类（审查 P0-1）：定位完成率损失的机制。"""
+    if answer and not answer.get("hypothesis"):
+        return "invalid_final_answer"
+    if error and any(marker in error for marker in ("LLM 调用失败", "timed out", "HTTP", "SSL", "Connection", "launch failed")):
+        return "transport_failure"
+    if not answer:
+        has_tool = any(t.get("kind") in ("tool", "diagnose") for t in trace)
+        unparseable = any(t.get("kind") == "unparseable" for t in trace)
+        if has_tool and llm_calls >= max_steps:
+            return "tool_loop_exhausted"
+        if unparseable:
+            return "output_parse_failure"
+        if has_tool:
+            return "tool_loop_exhausted"
+        return "output_parse_failure"
+    return ""
 
 
 GROUP_RUNNERS = {"A": run_group_a, "B": run_group_b, "C1": run_group_c1, "C2": run_group_c2}
