@@ -238,9 +238,13 @@ def run_evaluation(
 
 
 def _task_rows(task: DiscoveryTask) -> list[dict[str, Any]]:
-    from .discoverybench_adapter import load_task_rows
+    # 用 load_task_tables（csv+dta）合并行——仅用于数值断言重算；表结构信息由 __dataset_file 保留
+    from .discoverybench_adapter import load_task_tables
 
-    return load_task_rows(task)
+    rows: list[dict[str, Any]] = []
+    for table in load_task_tables(task):
+        rows.extend(table["rows"])
+    return rows
 
 
 def _task_tables(task: DiscoveryTask) -> list[dict[str, Any]]:

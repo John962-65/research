@@ -125,8 +125,8 @@ def _extract_gold_hypothesis(entry: dict[str, Any]) -> str:
 
 
 def _extract_dataset_dir(entry: dict[str, Any], source: Path, bench_root: Path) -> str:
-    # 官方布局：CSV 与 metadata 同目录
-    if any(source.parent.glob("*.csv")):
+    # 官方布局：数据文件（csv/dta）与 metadata 同目录
+    if any(source.parent.glob("*.csv")) or any(source.parent.glob("*.dta")):
         return str(source.parent)
     candidates = []
     for key in ("dataset_dir", "datasets_dir", "data_dir"):
