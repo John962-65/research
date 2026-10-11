@@ -54,12 +54,20 @@ def test_sandbox_can_read_dataset_dir(tmp_path: Path):
 
 
 def test_isolation_record_is_honest():
+    sandbox2 = ToolSandbox(None, network_isolation=True)
+    assert sandbox2.isolation_record["network_isolated"] is True
+
+
+def test_isolation_record_degraded_without_runtimes(monkeypatch):
+    """无 bwrap 且无 unshare 时：fs/network 均不隔离，残余风险如实标注。"""
+    import research_copilot.evaluation.sandbox as sb
+
+    monkeypatch.setattr(sb.shutil, "which", lambda name: None)
     sandbox = ToolSandbox(None, network_isolation=False)
     record = sandbox.isolation_record
     assert record["network_isolated"] is False
+    assert record["fs_isolated"] is False
     assert "残余风险" in record["honesty_note"]
-    sandbox2 = ToolSandbox(None, network_isolation=True)
-    assert sandbox2.isolation_record["network_isolated"] is True
 
 
 def test_network_probe_returns_bool():

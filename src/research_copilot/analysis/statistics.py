@@ -449,6 +449,31 @@ def _is_num(value: Any) -> bool:
     return not (math.isnan(parsed) or math.isinf(parsed))
 
 
+_TRUTHY = {"true", "yes", "y", "1", "1.0", "t"}
+_FALSY = {"false", "no", "n", "0", "0.0", "f"}
+
+
+def _to_float(value: Any) -> float | None:
+    """宽容数值解析：布尔字符串（True/False/yes/no 等）→ 1.0/0.0，其余 float 或 None。"""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return 1.0 if value else 0.0
+    text = str(value).strip()
+    lowered = text.lower()
+    if lowered in _TRUTHY:
+        return 1.0
+    if lowered in _FALSY:
+        return 0.0
+    try:
+        parsed = float(text)
+    except ValueError:
+        return None
+    if math.isnan(parsed) or math.isinf(parsed):
+        return None
+    return parsed
+
+
 def regress(
     rows: list[dict[str, Any]], y: str, xs: list[str], filters: dict[str, str] | None = None
 ) -> dict[str, Any] | None:
@@ -465,10 +490,11 @@ def regress(
     columns = ["_intercept"] + list(xs)
     data = []
     for row in rows:
-        try:
-            data.append([1.0] + [float(row.get(x)) for x in xs] + [float(row.get(y))])
-        except (TypeError, ValueError):
+        y_value = _to_float(row.get(y))
+        x_values = [_to_float(row.get(x)) for x in xs]
+        if y_value is None or any(v is None for v in x_values):
             continue
+        data.append([1.0] + x_values + [y_value])
     n = len(data)
     k = len(columns)
     if n <= k:
