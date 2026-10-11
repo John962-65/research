@@ -159,6 +159,41 @@ def detect_anomalies(
     return findings
 
 
+def compact_direction_noise(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """把逐指标的 metric_direction_unresolved 噪声合并为一条摘要观测。
+
+    修复 2026-10 评测发现：宽表任务中方向未声明提示逐条出现，把关系图/组间比较
+    挤出上下文截断窗口。合并后噪声只占一条，且排在最后。
+    """
+    unresolved = [f for f in findings if f.get("kind") == "metric_direction_unresolved"]
+    rest = [f for f in findings if f.get("kind") != "metric_direction_unresolved"]
+    if len(unresolved) <= 1:
+        return findings
+    metrics = [str(f.get("value", {}).get("metric")) for f in unresolved]
+    merged = {
+        "kind": "metric_direction_unresolved",
+        "statement": f"{len(metrics)} 个指标的优劣方向未声明且无法由名称推断：{', '.join(metrics[:12])}"
+        + ("…" if len(metrics) > 12 else "")
+        + "；解释这些指标前请先声明方向",
+        "value": {"metrics": metrics},
+        "computed_by": "anomaly_detection.compact_direction_noise",
+    }
+    return rest + [merged]
+
+
+def detect_anomalies_compact(
+    rows: list[dict[str, Any]],
+    metric: str,
+    metric_directions: dict[str, str] | None = None,
+    query_field: str = "query_id",
+    status_field: str = "status",
+) -> list[dict[str, Any]]:
+    """detect_anomalies 的紧凑变体：方向未声明噪声合并为单条。"""
+    return compact_direction_noise(
+        detect_anomalies(rows, metric, metric_directions, query_field, status_field)
+    )
+
+
 def _success_values(rows: list[dict[str, Any]], metric: str, query_field: str) -> list[float]:
     success_rows, _ = split_by_status(rows)
     values, _, _, _ = aggregate_per_query(success_rows, metric, query_field)

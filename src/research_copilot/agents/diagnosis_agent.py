@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ..analysis.anomaly_detection import detect_anomalies, tail_report
+from ..analysis.anomaly_detection import compact_direction_noise, detect_anomalies, detect_anomalies_compact, tail_report
 from ..analysis.evidence_validator import apply_validation, validate_finding
 from ..analysis.statistics import compare_metric, group_profile, resolve_direction
 from ..core.models import EvidenceRef, Finding, Material, NumericAssertion, Observation, RelationClaim
@@ -120,7 +120,7 @@ def profile_material(
         segments = [("", rows)]
     for segment_label, segment_rows in segments:
         for metric in metric_columns:
-            for candidate in detect_anomalies(segment_rows, metric, metric_directions, query_field):
+            for candidate in detect_anomalies_compact(segment_rows, metric, metric_directions, query_field):
                 statement = candidate["statement"] + (f"（{segment_label}）" if segment_label else "")
                 observation = Observation(
                     id="",
@@ -132,18 +132,19 @@ def profile_material(
                 )
                 observations.append(observation)
 
-    # 数值列两两相关方向（结构化关系主张的程序化核对依据），按组分段计算
+    # 数值列两两相关方向（结构化关系主张的程序化核对依据），按组分段计算；
+    # 陈述只列 top-|r| 对（relation_signs 已按 |r| 排序）
     from ..analysis.statistics import relation_signs
 
     for segment_label, segment_rows in segments:
         if len(segment_rows) < 5:
             continue
         relations = relation_signs(segment_rows, metric_columns)
-        significant = [rel for rel in relations if rel["sign"] in ("positive", "negative")]
+        top = [rel for rel in relations if rel["sign"] in ("positive", "negative")][:5]
         statement = (
-            f"数值列相关方向（|r|>{'%.2f' % 0.05} 视为有方向）："
-            + "；".join(f"{rel['a']}~{rel['b']}={rel['sign']}(r={rel['pearson_r']:.2f})" for rel in significant[:5])
-            if significant
+            "数值列相关方向（按 |r| 降序）："
+            + "；".join(f"{rel['a']}~{rel['b']}={rel['sign']}(r={rel['pearson_r']})" for rel in top)
+            if top
             else "数值列两两相关均无明确方向"
         )
         observations.append(

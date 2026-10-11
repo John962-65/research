@@ -143,9 +143,34 @@ def _data_profile(tables: list[dict[str, Any]]) -> str:
     return json.dumps(out, ensure_ascii=False, default=str)
 
 
+# 观测优先级（修复 2026-10 评测发现：噪声观测挤占有用观测）。
+# C 组上下文按此排序并在超预算时从尾部丢弃——高信息量观测（组间比较/关系图）优先保留。
+OBSERVATION_PRIORITY = {"group_comparison": 0, "relation_map": 1, "tail_latency": 2, "mixed_status": 3}
+DEFAULT_OBSERVATION_PRIORITY = 5
+C_CONTEXT_BUDGET_CHARS = 9000
+
+
+def pack_observations(observations: list[dict[str, Any]], budget_chars: int = C_CONTEXT_BUDGET_CHARS) -> str:
+    """按信息量优先级排序观测并序列化；超预算从尾部丢弃并注明。"""
+    ordered = sorted(
+        observations,
+        key=lambda o: OBSERVATION_PRIORITY.get(str(o.get("kind")), DEFAULT_OBSERVATION_PRIORITY),
+    )
+    note = ""
+    while True:
+        payload = json.dumps(ordered, ensure_ascii=False, default=str)
+        if len(payload) <= budget_chars or not ordered:
+            break
+        ordered = ordered[:-1]
+        note = "（观测已按信息量优先级截断：低优先级观测被省略）"
+    if note:
+        payload = json.dumps(ordered, ensure_ascii=False, default=str) + note
+    return payload
+
+
 def compute_task_observations(tables: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """C 组的诊断观测（确定性）：异常/长尾/混杂/组间比较/关系方向，按表分别计算。"""
-    from ..analysis.anomaly_detection import detect_anomalies
+    from ..analysis.anomaly_detection import compact_direction_noise, detect_anomalies
     from ..analysis.statistics import compare_metric, relation_signs
     from ..integrations.material_importer import summarize_rows
 
@@ -160,7 +185,9 @@ def compute_task_observations(tables: list[dict[str, Any]]) -> list[dict[str, An
         query_field = summary.get("query_field") or "query_id"
         group_field = summary.get("group_field") or "comparison_group"
         for metric in metric_columns:
-            for candidate in detect_anomalies(rows, metric, directions, query_field):
+            for candidate in compact_direction_noise(
+                detect_anomalies(rows, metric, directions, query_field)
+            ):
                 observations.append(
                     {"table": table["name"], "kind": candidate["kind"], "statement": candidate["statement"], "value": candidate["value"]}
                 )
@@ -186,11 +213,18 @@ def compute_task_observations(tables: list[dict[str, Any]]) -> list[dict[str, An
                 )
         if metric_columns and len(rows) >= 5:
             relations = relation_signs(rows, metric_columns)
+            top = [rel for rel in relations if rel["sign"] in ("positive", "negative")][:5]
+            statement = (
+                "数值列相关方向（按 |r| 降序）："
+                + "；".join(f"{rel['a']}~{rel['b']}={rel['sign']}(r={rel['pearson_r']})" for rel in top)
+                if top
+                else "数值列两两相关均无明确方向"
+            )
             observations.append(
                 {
                     "table": table["name"],
                     "kind": "relation_map",
-                    "statement": "数值列两两相关方向（供关系主张核对）",
+                    "statement": statement,
                     "value": {"relations": relations},
                 }
             )
@@ -274,8 +308,8 @@ def run_group_c(llm: Any, task, budget: GroupBudget | None = None, sandbox: Tool
     observations = compute_task_observations(tables)
     context = (
         f"研究问题：{task.query}\n\n数据画像：{_data_profile(tables)}\n\n"
-        f"诊断观测（确定性分析，含异常/长尾/混杂/关系方向）：\n"
-        f"{json.dumps(observations, ensure_ascii=False, default=str)[:9000]}\n\n{TOOL_INSTRUCTION}"
+        f"诊断观测（确定性分析，含异常/长尾/混杂/关系方向，按信息量优先级排序）：\n"
+        f"{pack_observations(observations)}\n\n{TOOL_INSTRUCTION}"
     )
     answer, raw, llm_calls, tool_calls, trace = _react_loop(llm, context, sandbox, budget, "C", task.task_id, "react_c")
 

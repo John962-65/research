@@ -412,9 +412,13 @@ def relation_sign(r: float | None) -> str:
 
 
 def relation_signs(
-    rows: list[dict[str, Any]], columns: list[str] | None = None, max_columns: int = 8
+    rows: list[dict[str, Any]], columns: list[str] | None = None, max_columns: int = 16, max_pairs: int = 40
 ) -> list[dict[str, Any]]:
-    """数值列两两 Pearson 方向（供关系主张的程序化核对）。"""
+    """数值列两两 Pearson 方向（供关系主张的程序化核对）。
+
+    返回按 |r| 降序的 pair 列表（仅保留 |r|>0.05 有方向或 |r| 最大的前 max_pairs 对），
+    保证关系图观测在上下文预算内携带信息量最大的对。
+    """
     if columns is None:
         seen: list[str] = []
         for row in rows[:50]:
@@ -422,7 +426,7 @@ def relation_signs(
                 if key not in seen:
                     seen.append(key)
         columns = seen
-    numeric_cols = [c for c in columns if numeric(rows, c)] [:max_columns]
+    numeric_cols = [c for c in columns if numeric(rows, c)][:max_columns]
     out: list[dict[str, Any]] = []
     for i in range(len(numeric_cols)):
         for j in range(i + 1, len(numeric_cols)):
@@ -430,8 +434,11 @@ def relation_signs(
             xs = [float(r.get(a)) for r in rows if _is_num(r.get(a)) and _is_num(r.get(b))]
             ys = [float(r.get(b)) for r in rows if _is_num(r.get(a)) and _is_num(r.get(b))]
             r = pearson(xs, ys)
-            out.append({"a": a, "b": b, "pearson_r": r, "sign": relation_sign(r), "n": len(xs)})
-    return out
+            if r is None:
+                continue
+            out.append({"a": a, "b": b, "pearson_r": round(r, 4), "sign": relation_sign(r), "n": len(xs)})
+    out.sort(key=lambda item: -abs(item["pearson_r"]))
+    return out[:max_pairs]
 
 
 def _is_num(value: Any) -> bool:

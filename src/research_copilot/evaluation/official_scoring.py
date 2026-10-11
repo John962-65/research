@@ -138,7 +138,7 @@ def build_judge_prompt(
 
 
 class OfficialProtocolScorer:
-    """官方单子假设路径评分器：accuracy = context × var_F1 × rel。"""
+    """官方单子假设路径评分器：accuracy = context × var_F1 × rel；另含金标-数据分歧诊断。"""
 
     def __init__(self, judge_llm: Any, gold_workflow: str = "", gen_workflow: str = "") -> None:
         self.judge = judge_llm
@@ -191,3 +191,34 @@ class OfficialProtocolScorer:
         else:
             result["accuracy"] = context * float(var["f1"]) * rel
         return result
+
+    def divergence_check(self, query: str, gold_hypo: str, relations_summary: str) -> dict[str, Any]:
+        """金标-数据分歧诊断（修复 2026-10 评测发现：任务 3 金标与数据实测相反）。
+
+        只做诊断、**不参与评分**：当金标假设与数据导出的相关方向矛盾时，
+        该任务的官方分数应被解读为"金标与数据分歧"，而非"被测模型错误"。
+        relations_summary：来自确定性 relation_signs 的 JSON 文本。
+        """
+        prompt = (
+            "You are given a GOLD hypothesis and data-derived pairwise correlation directions "
+            "(Pearson r with sign) computed directly from the task dataset. "
+            "Determine whether the GOLD hypothesis CONTRADICTS the data-derived relations "
+            "(e.g., gold claims no association or the opposite sign for a relation the data shows clearly).\n\n"
+            f"QUERY: {query}\n\nGOLD HYPOTHESIS: {gold_hypo}\n\n"
+            f"DATA-DERIVED RELATIONS (top by |r|):\n{relations_summary}\n\n"
+            'Output JSON only: {"divergence": true|false, "reason": "one sentence"}'
+        )
+        self.judge_calls += 1
+        response = self.judge.complete(JUDGE_SYSTEM, prompt, purpose="divergence_check", temperature=0.0)
+        match = re.search(r"\{.*\}", response, re.DOTALL)
+        try:
+            parsed = json.loads(match.group(0)) if match else {}
+        except json.JSONDecodeError:
+            parsed = {}
+        divergence = parsed.get("divergence")
+        return {
+            "divergence": bool(divergence) if divergence is not None else None,
+            "reason": str(parsed.get("reason") or "")[:300],
+            "raw": response[:200],
+            "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度",
+        }

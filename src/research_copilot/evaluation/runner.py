@@ -100,6 +100,36 @@ def run_evaluation(
     }
     _write_json(run_dir / "config.json", config)
 
+    # 金标-数据分歧诊断（每任务一次，诊断性、不影响评分）
+    divergence_checks: dict[str, Any] = {}
+    if not dry_run or True:  # dry-run 也走 stub，保持管道覆盖
+        from ..analysis.statistics import relation_signs
+
+        for task in tasks:
+            try:
+                tables = _task_tables(task)
+                all_rows = [row for table in tables for row in table["rows"]]
+                if len(all_rows) < 5:
+                    continue
+                columns: list[str] = []
+                for row in all_rows[:50]:
+                    for key in row:
+                        if key not in columns and key != "__dataset_file":
+                            columns.append(key)
+                relations = relation_signs(all_rows, columns)
+                top = [rel for rel in relations if rel["sign"] in ("positive", "negative")][:8]
+                scorer_probe = OfficialProtocolScorer(judge_llm)
+                divergence_checks[task.task_id] = scorer_probe.divergence_check(
+                    task.query,
+                    task.gold_hypothesis,
+                    json.dumps(top, ensure_ascii=False),
+                )
+            except Exception as exc:
+                divergence_checks[task.task_id] = {"divergence": None, "error": str(exc)[:200]}
+        config["divergence_checks"] = divergence_checks
+        config["divergence_note"] = "divergence=true 的任务：金标与数据实测方向矛盾，其官方分数应解读为分歧而非模型错误（诊断性标注，不参与评分）"
+        _write_json(run_dir / "config.json", config)
+
     records_by_group: dict[str, list[dict[str, Any]]] = {group: [] for group in groups}
     for task in tasks:
         for group in groups:
@@ -193,6 +223,9 @@ def run_evaluation(
         "group_summaries": summaries,
         "comparisons": comparisons,
         "hms_error": hms_error,
+        "divergent_tasks": sorted(
+            [task_id for task_id, check in (config.get("divergence_checks") or {}).items() if check.get("divergence")]
+        ),
         "honesty_note": (
             "dry_run 模式：stub LLM，仅验证管道连通性，不构成评测结论。"
             if dry_run
@@ -208,6 +241,12 @@ def _task_rows(task: DiscoveryTask) -> list[dict[str, Any]]:
     from .discoverybench_adapter import load_task_rows
 
     return load_task_rows(task)
+
+
+def _task_tables(task: DiscoveryTask) -> list[dict[str, Any]]:
+    from .discoverybench_adapter import load_task_tables
+
+    return load_task_tables(task)
 
 
 def render_summary_markdown(summary: dict[str, Any]) -> str:
@@ -267,6 +306,7 @@ def _dry_run_judge_stub():
             "official_judge_context": "A) same",
             "official_judge_var": json.dumps({"sizeA": 2, "sizeB": 2, "intersection": 2, "explanation": "stub"}),
             "official_judge_rel": json.dumps({"answer": "A) very similar", "explanation": "stub"}),
+            "divergence_check": json.dumps({"divergence": False, "reason": "stub"}, ensure_ascii=False),
         },
         default=json.dumps({"score": 1, "reason": "stub judge（dry-run）"}, ensure_ascii=False),
     )

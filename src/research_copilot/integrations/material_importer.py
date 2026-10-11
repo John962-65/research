@@ -24,8 +24,46 @@ _METRIC_FIELDS_TO_EXCLUDE = set(_QUERY_FIELD_CANDIDATES) | set(_GROUP_FIELD_CAND
 }
 
 
+def _sanitize_value(value: Any) -> Any:
+    """numpy 标量 → Python 原生类型（JSON 安全）。"""
+    module = type(value).__module__
+    if module.startswith("numpy"):
+        if value != value:  # NaN
+            return None
+        try:
+            return value.item()
+        except AttributeError:
+            return str(value)
+    return value
+
+
+def _read_dta(path: Path) -> list[dict[str, Any]]:
+    """Stata .dta（pandas 可选依赖；缺失时给出明确指引）。"""
+    try:
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            import pandas as pd
+
+            frame = pd.read_stata(str(path))
+    except ImportError as exc:
+        raise ValueError(
+            f"读取 .dta 需要 pandas（pip install 'research-copilot[eval]' 或 pip install pandas）：{exc}"
+        ) from exc
+    rows = []
+    for record in frame.to_dict("records"):
+        rows.append(
+            {
+                (str(key) if key is not None else "unnamed"): _sanitize_value(value)
+                for key, value in record.items()
+            }
+        )
+    return rows
+
+
 def read_rows(path: str | Path) -> list[dict[str, Any]]:
-    """把 CSV/JSON/JSONL 读成行字典数组。"""
+    """把 CSV/JSON/JSONL/DTA 读成行字典数组。"""
     source = Path(path)
     suffix = source.suffix.lower()
     if suffix == ".csv":
@@ -48,7 +86,9 @@ def read_rows(path: str | Path) -> list[dict[str, Any]]:
         if isinstance(data, dict) and isinstance(data.get("rows"), list):
             return [dict(row) for row in data["rows"]]
         raise ValueError(f"JSON 材料需为行数组或含 rows 字段: {source}")
-    raise ValueError(f"不支持的表格格式: {source}（支持 .csv/.json/.jsonl）")
+    if suffix == ".dta":
+        return _read_dta(source)
+    raise ValueError(f"不支持的表格格式: {source}（支持 .csv/.json/.jsonl/.dta）")
 
 
 def _maybe_number(value: Any) -> Any:

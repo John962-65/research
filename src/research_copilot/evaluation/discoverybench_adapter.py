@@ -247,7 +247,8 @@ def select_dev_tasks(bench_root: str | Path, subset: str, n: int, split: str | N
 def load_task_tables(task: DiscoveryTask) -> list[dict[str, Any]]:
     """按表加载任务数据集，**保留表结构**（禁止盲目合并）。
 
-    返回 [{"name": 表名(csv stem), "path": str, "rows": [行字典]}]。
+    支持 .csv 与 .dta（.dta 需 pandas，见 pyproject [eval] extra）。
+    返回 [{"name": 表名(file stem), "path": str, "rows": [行字典]}]。
     每行附 __dataset_file 标记来源（不合并不同 schema 的表）。
     """
     from ..integrations.material_importer import read_rows
@@ -256,14 +257,15 @@ def load_task_tables(task: DiscoveryTask) -> list[dict[str, Any]]:
         return []
     tables: list[dict[str, Any]] = []
     dataset_dir = Path(task.dataset_dir)
-    for csv_path in sorted(dataset_dir.rglob("*.csv")):
+    paths = sorted(dataset_dir.rglob("*.csv")) + sorted(dataset_dir.rglob("*.dta"))
+    for data_path in paths:
         try:
-            rows = read_rows(csv_path)
+            rows = read_rows(data_path)
         except (ValueError, OSError):
             continue
         for row in rows:
-            row["__dataset_file"] = csv_path.name
-        tables.append({"name": csv_path.stem, "path": str(csv_path), "rows": rows})
+            row["__dataset_file"] = data_path.name
+        tables.append({"name": data_path.stem, "path": str(data_path), "rows": rows})
     return tables
 
 

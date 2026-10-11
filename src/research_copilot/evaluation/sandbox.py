@@ -104,7 +104,9 @@ class ToolSandbox:
             if self.network_isolation:
                 unshare = shutil.which("unshare")
                 command += [unshare, "-Urn"]
-            command += [sys.executable, "-I", str(script)]
+            # 不用 -I：env 已白名单清洗（PYTHONPATH 不会传入），保留默认 site-packages
+            # 使可选分析依赖（pandas 等）在沙箱内同样可用——与宿主一致的公平工具面
+            command += [sys.executable, str(script)]
             try:
                 completed = subprocess.run(
                     command,

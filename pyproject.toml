@@ -14,6 +14,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+eval = ["pandas>=1.5"]  # .dta 数据集支持（DiscoveryBench 部分任务）
 
 [project.scripts]
 research-copilot = "research_copilot.cli:main"
