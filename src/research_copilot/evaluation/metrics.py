@@ -12,8 +12,6 @@ import math
 import re
 from typing import Any
 
-import math
-
 from ..analysis.statistics import compare_metric, describe, mean, numeric, regress, split_by_status
 from ..analysis.evidence_validator import CAUSAL_MARKERS
 
@@ -92,10 +90,19 @@ def check_numeric_assertions(answer: dict[str, Any], rows: list[dict[str, Any]])
         except (TypeError, ValueError):
             results.append({"metric": metric, "check": check, "status": "unverifiable", "note": "值不可解析"})
             continue
+        if not math.isfinite(claimed_value):
+            results.append({"metric": metric, "check": check, "status": "fail", "note": "断言必须为有限数值"})
+            continue
+        table = assertion.get("table") or (assertion.get("analysis") or {}).get("table")
+        available_tables = {r.get("__dataset_file") for r in rows if r.get("__dataset_file")}
+        selected_rows = [r for r in rows if r.get("__dataset_file") == table] if table else rows
+        if (len(available_tables) > 1 and not table) or (table and not selected_rows):
+            results.append({"metric": metric, "check": check, "status": "unverifiable", "note": "多表分析必须声明 table，且表名必须存在"})
+            continue
         # 结构化分析声明优先（P0-2）：验证器按声明重算全过程
         analysis = assertion.get("analysis")
         if isinstance(analysis, dict) and analysis.get("analysis_type"):
-            verdict = _verify_analysis(rows, analysis)
+            verdict = _verify_analysis(selected_rows, analysis)
             if verdict.get("status") == "unverifiable":
                 results.append({"metric": metric, "check": f"analysis:{analysis.get('analysis_type')}", "status": "unverifiable", "note": verdict.get("note")})
             else:
@@ -116,7 +123,7 @@ def check_numeric_assertions(answer: dict[str, Any], rows: list[dict[str, Any]])
             if not y_col or not x_cols:
                 results.append({"metric": metric, "check": check, "status": "unverifiable", "note": "缺少回归设定 y/x"})
                 continue
-            result = regress(rows, y_col, x_cols + controls, filters)
+            result = regress(selected_rows, y_col, x_cols + controls, filters)
             if result is None or target_var not in result["betas"]:
                 results.append({"metric": metric, "check": check, "status": "unverifiable", "note": "回归不可解（样本不足/奇异/过滤后为空）"})
                 continue
@@ -140,7 +147,7 @@ def check_numeric_assertions(answer: dict[str, Any], rows: list[dict[str, Any]])
             if not candidate_group or not baseline_group:
                 results.append({**{"metric": metric, "check": check}, "status": "unverifiable", "note": "缺组名"})
                 continue
-            comparison = compare_metric(rows, metric, candidate_group, baseline_group)
+            comparison = compare_metric(selected_rows, metric, candidate_group, baseline_group)
             expected = None
             cand_mean = (comparison.get("candidate") or {}).get("mean")
             base_mean = (comparison.get("baseline") or {}).get("mean")
@@ -151,7 +158,7 @@ def check_numeric_assertions(answer: dict[str, Any], rows: list[dict[str, Any]])
                     expected = (cand_mean - base_mean) / abs(base_mean) * 100
         else:
             group_name = str(assertion.get("group") or "")
-            subset = [r for r in rows if not group_name or str(r.get(group_field) or "") == group_name]
+            subset = [r for r in selected_rows if not group_name or str(r.get(group_field) or "") == group_name]
             success_rows, _ = split_by_status(subset)
             values = numeric(success_rows, metric)
             if not values:
@@ -256,8 +263,8 @@ def _judge_model(judge_llm: Any) -> str:
     return getattr(config, "model", "unknown") if config else "unknown"
 
 
-def _bootstrap_cluster_ci(by_dataset: dict[str, list[float]], n_boot: int = 1000, seed: int = 0) -> tuple[float, float] | None:
-    """按数据集分层 bootstrap 百分位 CI，钳位 [0,1]（确定性 seed=0）。"""
+def _bootstrap_cluster_ci(by_dataset: dict[str, list[float]], n_boot: int = 1000, seed: int = 0, bounds: tuple[float, float] = (0.0, 1.0)) -> tuple[float, float] | None:
+    """整簇重采样的数据集 cluster bootstrap；得分/配对差分别指定合法边界。"""
     keys = sorted(by_dataset)
     if len(keys) < 2:
         return None
@@ -268,8 +275,8 @@ def _bootstrap_cluster_ci(by_dataset: dict[str, list[float]], n_boot: int = 1000
         flat = [v for group in sample for v in group]
         means.append(sum(flat) / len(flat))
     means.sort()
-    lo = max(0.0, means[int(0.025 * n_boot)])
-    hi = min(1.0, means[min(n_boot - 1, int(0.975 * n_boot))])
+    lo = max(bounds[0], means[int(0.025 * n_boot)])
+    hi = min(bounds[1], means[min(n_boot - 1, int(0.975 * n_boot))])
     return (round(lo, 4), round(hi, 4))
 
 
@@ -337,6 +344,18 @@ def _dataset_of(task_id: str) -> str:
     return parts[-2] if len(parts) >= 2 else task_id
 
 
+def _task_score(record: dict[str, Any] | None) -> float | None:
+    if record is None:
+        return None  # 缺失记录不等于任务执行失败。
+    score = (record.get("official") or {}).get("accuracy")
+    if score is not None:
+        return float(score)
+    hypothesis = (record.get("answer") or {}).get("hypothesis")
+    if isinstance(hypothesis, str) and hypothesis.strip() and not record.get("error"):
+        return None  # judge 故障不能伪装成被测模型得 0 分。
+    return 0.0
+
+
 def aggregate_group(records: list[dict[str, Any]]) -> dict[str, Any]:
     """组级汇总：完成率、官方协议 accuracy 均值±95%CI（跨任务）、无依据结论比例、成本。
 
@@ -345,7 +364,7 @@ def aggregate_group(records: list[dict[str, Any]]) -> dict[str, Any]:
     - official = 官方单子假设协议（context × var_F1 × rel，judge LLM）；hms_custom 为
       自定义 0/1/2 辅助分。
     """
-    valid = [r for r in records if not r.get("error") and (r.get("answer") or {}).get("hypothesis")]
+    valid = [r for r in records if not r.get("error") and isinstance((r.get("answer") or {}).get("hypothesis"), str) and r["answer"]["hypothesis"].strip()]
     hms_values = [r["hms_custom"] for r in records if r.get("hms_custom") is not None]
     accuracy_values = [
         float(r["official"]["accuracy"]) for r in records if (r.get("official") or {}).get("accuracy") is not None
@@ -380,18 +399,18 @@ def aggregate_group(records: list[dict[str, Any]]) -> dict[str, Any]:
     dataset_means = [sum(vs) / len(vs) for vs in by_dataset.values()]
     cluster_interval = _bootstrap_cluster_ci(by_dataset)
     # 全任务得分（审查 P1-2）：未完成任务统一记 0，与"成功任务平均"分开报告
-    full_task_scores = [
-        float((r.get("official") or {}).get("accuracy") or 0.0) for r in records
-    ]
-    full_task_score_mean = round(sum(full_task_scores) / len(full_task_scores), 4) if full_task_scores else None
+    scores = [_task_score(r) for r in records]
+    n_score_missing = sum(v is None for v in scores)
+    full_task_scores = [v for v in scores if v is not None]
+    full_task_score_mean = round(sum(full_task_scores) / len(full_task_scores), 4) if full_task_scores and not n_score_missing else None
     # 全任务 bootstrap 必须按真实数据集 ID 分组（失败记 0 保留在组内）——
     # 修复审查 P1：任务级抽样丢失同数据集相关性
     by_dataset_full: dict[str, list[float]] = {}
     for record in records:
-        by_dataset_full.setdefault(_dataset_of(record["task_id"]), []).append(
-            float((record.get("official") or {}).get("accuracy") or 0.0)
-        )
-    full_task_interval = _bootstrap_cluster_ci(by_dataset_full) if by_dataset_full else None
+        score = _task_score(record)
+        if score is not None:
+            by_dataset_full.setdefault(_dataset_of(record["task_id"]), []).append(score)
+    full_task_interval = _bootstrap_cluster_ci(by_dataset_full) if by_dataset_full and not n_score_missing else None
     failure_breakdown: dict[str, int] = {}
     for record in records:
         fc = record.get("failure_class") or ("" if (record.get("answer") or {}).get("hypothesis") else "unknown")
@@ -407,10 +426,12 @@ def aggregate_group(records: list[dict[str, Any]]) -> dict[str, Any]:
         "official_accuracy_mean": _mean(accuracy_values),
         "official_accuracy_ci95": interval,
         "official_accuracy_cluster_ci95": cluster_interval,
-        "cluster_ci_method": "dataset-stratified bootstrap (1000, seed=0), clamped [0,1]",
+        "cluster_ci_method": "dataset cluster bootstrap (1000, seed=0), bounds [0,1]",
         "n_datasets": len(by_dataset),
         "full_task_score_mean": full_task_score_mean,
         "full_task_score_ci95": full_task_interval,
+        "n_score_missing": n_score_missing,
+        "n_datasets_full": len(by_dataset_full),
         "full_task_note": "全任务分母：未完成任务记 0 分（与成功任务平均分开报告，审查 P1-2）",
         "failure_breakdown": failure_breakdown,
         "n_official_scored": len(accuracy_values),
@@ -426,6 +447,8 @@ def aggregate_group(records: list[dict[str, Any]]) -> dict[str, Any]:
         "total_prompt_tokens": sum(r.get("prompt_tokens", 0) for r in records),
         "total_completion_tokens": sum(r.get("completion_tokens", 0) for r in records),
         "total_judge_calls": sum(r.get("judge_calls", 0) for r in records),
+        "diagnostics": {name: sum((r.get("diagnostics") or {}).get(name, 0) for r in records)
+                        for name in ("parse_failures", "tool_execution_failures", "tool_budget_exhaustions", "transport_failures")},
     }
 
 
@@ -433,11 +456,11 @@ def paired_delta(records_x: list[dict[str, Any]], records_y: list[dict[str, Any]
     """全任务口径的组间配对差（审查 P1-2）：未完成任务记 0 分参与配对，
     差值按数据集分层 bootstrap 重采样（与主指标同一统计假设）。"""
 
-    def _value(record: dict[str, Any] | None) -> float:
+    def _value(record: dict[str, Any] | None) -> float | None:
         if record is None:
-            return 0.0
+            return None
         if value_key == "official_accuracy":
-            return float((record.get("official") or {}).get("accuracy") or 0.0)
+            return _task_score(record)
         return float(record.get(value_key) or 0.0)
 
     y_by_task = {r[key]: r for r in records_y}
@@ -445,12 +468,17 @@ def paired_delta(records_x: list[dict[str, Any]], records_y: list[dict[str, Any]
     all_task_ids = sorted(set(x_by_task) | set(y_by_task))
     deltas: list[float] = []
     deltas_by_dataset: dict[str, list[float]] = {}
+    missing = []
     for task_id in all_task_ids:
-        delta = _value(x_by_task.get(task_id)) - _value(y_by_task.get(task_id))
+        x, y = _value(x_by_task.get(task_id)), _value(y_by_task.get(task_id))
+        if x is None or y is None:
+            missing.append(task_id)
+            continue
+        delta = x - y
         deltas.append(delta)
         deltas_by_dataset.setdefault(_dataset_of(task_id), []).append(delta)
-    mean_delta = round(sum(deltas) / len(deltas), 4) if deltas else None
-    cluster_ci = _bootstrap_cluster_ci(deltas_by_dataset) if deltas_by_dataset else None
+    mean_delta = round(sum(deltas) / len(deltas), 4) if deltas and not missing else None
+    cluster_ci = _bootstrap_cluster_ci(deltas_by_dataset, bounds=(-1.0, 1.0)) if deltas_by_dataset and not missing else None
     # 钳位到合法差值范围（accuracy ∈ [0,1] → delta ∈ [-1,1]）
     if cluster_ci is not None:
         cluster_ci = (max(-1.0, cluster_ci[0]), min(1.0, cluster_ci[1]))
@@ -458,6 +486,7 @@ def paired_delta(records_x: list[dict[str, Any]], records_y: list[dict[str, Any]
         "value_key": value_key,
         "denominator": "all_tasks (unfinished=0)",
         "n_tasks": len(all_task_ids),
+        "missing_task_ids": missing,
         "delta_mean": mean_delta,
         "delta_ci95": cluster_ci,
         "note": "全任务分母：未完成记 0；CI=按数据集分层 bootstrap（钳位 [-1,1]）；delta>0 表示 x 组更优。",

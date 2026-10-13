@@ -1,0 +1,270 @@
+[
+  {
+    "source": "eval-runs/20261010-194139-A-B-C",
+    "model": "session-agent",
+    "n_tasks": 6,
+    "scores": {
+      "A": 0.3476,
+      "B": 0.3476,
+      "C": 0.3476
+    },
+    "comparisons": {
+      "C_vs_A": {
+        "value_key": "official_accuracy",
+        "denominator": "all_tasks (unfinished=0)",
+        "n_tasks": 6,
+        "missing_task_ids": [],
+        "delta_mean": 0.0,
+        "delta_ci95": [
+          0.0,
+          0.0
+        ],
+        "note": "全任务分母：未完成记 0；CI=按数据集分层 bootstrap（钳位 [-1,1]）；delta>0 表示 x 组更优。"
+      },
+      "C_vs_B": {
+        "value_key": "official_accuracy",
+        "denominator": "all_tasks (unfinished=0)",
+        "n_tasks": 6,
+        "missing_task_ids": [],
+        "delta_mean": 0.0,
+        "delta_ci95": [
+          0.0,
+          0.0
+        ],
+        "note": "全任务分母：未完成记 0；CI=按数据集分层 bootstrap（钳位 [-1,1]）；delta>0 表示 x 组更优。"
+      }
+    }
+  },
+  {
+    "source": "eval-runs/20261011-060505-A-B-C",
+    "model": "session-agent",
+    "n_tasks": 20,
+    "scores": {
+      "A": 0.6821,
+      "B": 0.6821,
+      "C": 0.6821
+    },
+    "comparisons": {
+      "C_vs_A": {
+        "value_key": "official_accuracy",
+        "denominator": "all_tasks (unfinished=0)",
+        "n_tasks": 20,
+        "missing_task_ids": [],
+        "delta_mean": 0.0,
+        "delta_ci95": [
+          0.0,
+          0.0
+        ],
+        "note": "全任务分母：未完成记 0；CI=按数据集分层 bootstrap（钳位 [-1,1]）；delta>0 表示 x 组更优。"
+      },
+      "C_vs_B": {
+        "value_key": "official_accuracy",
+        "denominator": "all_tasks (unfinished=0)",
+        "n_tasks": 20,
+        "missing_task_ids": [],
+        "delta_mean": 0.0,
+        "delta_ci95": [
+          0.0,
+          0.0
+        ],
+        "note": "全任务分母：未完成记 0；CI=按数据集分层 bootstrap（钳位 [-1,1]）；delta>0 表示 x 组更优。"
+      }
+    }
+  },
+  {
+    "source": "eval-runs/20261011-064747-A-B-C1-C2",
+    "model": "session-agent",
+    "n_tasks": 12,
+    "scores": {
+      "A": 0.4153,
+      "B": 0.4236,
+      "C1": 0.4153,
+      "C2": 0.4236
+    },
+    "comparisons": {
+      "C1_vs_A": {
+        "value_key": "official_accuracy",
+        "denominator": "all_tasks (unfinished=0)",
+        "n_tasks": 12,
+        "missing_task_ids": [],
+        "delta_mean": 0.0,
+        "delta_ci95": [
+          0.0,
+          0.0
+        ],
+        "note": "全任务分母：未完成记 0；CI=按数据集分层 bootstrap（钳位 [-1,1]）；delta>0 表示 x 组更优。"
+      },
+      "C1_vs_B": {
+        "value_key": "official_accuracy",
+        "denominator": "all_tasks (unfinished=0)",
+        "n_tasks": 12,
+        "missing_task_ids": [],
+        "delta_mean": -0.0083,
+        "delta_ci95": [
+          -0.0273,
+          0.0
+        ],
+        "note": "全任务分母：未完成记 0；CI=按数据集分层 bootstrap（钳位 [-1,1]）；delta>0 表示 x 组更优。"
+      },
+      "C2_vs_C1": {
+        "value_key": "official_accuracy",
+        "denominator": "all_tasks (unfinished=0)",
+        "n_tasks": 12,
+        "missing_task_ids": [],
+        "delta_mean": 0.0083,
+        "delta_ci95": [
+          0.0,
+          0.0273
+        ],
+        "note": "全任务分母：未完成记 0；CI=按数据集分层 bootstrap（钳位 [-1,1]）；delta>0 表示 x 组更优。"
+      }
+    }
+  },
+  {
+    "source": "eval-runs/20261011-101906-A-B-C1-C2",
+    "model": "deepseek-flash",
+    "n_tasks": 12,
+    "scores": {
+      "A": null,
+      "B": null,
+      "C1": null,
+      "C2": null
+    },
+    "comparisons": {
+      "C1_vs_A": {
+        "value_key": "official_accuracy",
+        "denominator": "all_tasks (unfinished=0)",
+        "n_tasks": 12,
+        "missing_task_ids": [
+          "discoverybench/real/test/requirements_engineering_for_ML_enabled_systems/metadata_1",
+          "discoverybench/real/test/worldbank_education_gdp/metadata_1"
+        ],
+        "delta_mean": null,
+        "delta_ci95": null,
+        "note": "全任务分母：未完成记 0；CI=按数据集分层 bootstrap（钳位 [-1,1]）；delta>0 表示 x 组更优。"
+      },
+      "C1_vs_B": {
+        "value_key": "official_accuracy",
+        "denominator": "all_tasks (unfinished=0)",
+        "n_tasks": 12,
+        "missing_task_ids": [
+          "discoverybench/real/test/nls_incarceration/metadata_1",
+          "discoverybench/real/test/worldbank_education_gdp/metadata_1"
+        ],
+        "delta_mean": null,
+        "delta_ci95": null,
+        "note": "全任务分母：未完成记 0；CI=按数据集分层 bootstrap（钳位 [-1,1]）；delta>0 表示 x 组更优。"
+      },
+      "C2_vs_C1": {
+        "value_key": "official_accuracy",
+        "denominator": "all_tasks (unfinished=0)",
+        "n_tasks": 12,
+        "missing_task_ids": [
+          "discoverybench/real/test/nls_raw/metadata_3",
+          "discoverybench/real/test/worldbank_education_gdp/metadata_1"
+        ],
+        "delta_mean": null,
+        "delta_ci95": null,
+        "note": "全任务分母：未完成记 0；CI=按数据集分层 bootstrap（钳位 [-1,1]）；delta>0 表示 x 组更优。"
+      }
+    }
+  },
+  {
+    "source": "eval-runs/20261011-112604-A-B-C1-C2",
+    "model": "deepseek-flash",
+    "n_tasks": 12,
+    "scores": {
+      "A": 0.2381,
+      "B": 0.0,
+      "C1": 0.2083,
+      "C2": 0.1917
+    },
+    "comparisons": {
+      "C1_vs_A": {
+        "value_key": "official_accuracy",
+        "denominator": "all_tasks (unfinished=0)",
+        "n_tasks": 12,
+        "missing_task_ids": [],
+        "delta_mean": -0.0298,
+        "delta_ci95": [
+          -0.3571,
+          0.3766
+        ],
+        "note": "全任务分母：未完成记 0；CI=按数据集分层 bootstrap（钳位 [-1,1]）；delta>0 表示 x 组更优。"
+      },
+      "C1_vs_B": {
+        "value_key": "official_accuracy",
+        "denominator": "all_tasks (unfinished=0)",
+        "n_tasks": 12,
+        "missing_task_ids": [],
+        "delta_mean": 0.2083,
+        "delta_ci95": [
+          0.0,
+          0.4583
+        ],
+        "note": "全任务分母：未完成记 0；CI=按数据集分层 bootstrap（钳位 [-1,1]）；delta>0 表示 x 组更优。"
+      },
+      "C2_vs_C1": {
+        "value_key": "official_accuracy",
+        "denominator": "all_tasks (unfinished=0)",
+        "n_tasks": 12,
+        "missing_task_ids": [],
+        "delta_mean": -0.0167,
+        "delta_ci95": [
+          -0.3636,
+          0.2727
+        ],
+        "note": "全任务分母：未完成记 0；CI=按数据集分层 bootstrap（钳位 [-1,1]）；delta>0 表示 x 组更优。"
+      }
+    }
+  },
+  {
+    "source": "eval-runs/20261011-155447-A-B-C1-C2",
+    "model": "deepseek-flash",
+    "n_tasks": 4,
+    "scores": {
+      "A": 0.25,
+      "B": 0.0,
+      "C1": 0.0833,
+      "C2": 0.0
+    },
+    "comparisons": {
+      "C1_vs_A": {
+        "value_key": "official_accuracy",
+        "denominator": "all_tasks (unfinished=0)",
+        "n_tasks": 4,
+        "missing_task_ids": [],
+        "delta_mean": -0.1667,
+        "delta_ci95": [
+          -0.75,
+          0.1667
+        ],
+        "note": "全任务分母：未完成记 0；CI=按数据集分层 bootstrap（钳位 [-1,1]）；delta>0 表示 x 组更优。"
+      },
+      "C1_vs_B": {
+        "value_key": "official_accuracy",
+        "denominator": "all_tasks (unfinished=0)",
+        "n_tasks": 4,
+        "missing_task_ids": [],
+        "delta_mean": 0.0833,
+        "delta_ci95": [
+          0.0,
+          0.25
+        ],
+        "note": "全任务分母：未完成记 0；CI=按数据集分层 bootstrap（钳位 [-1,1]）；delta>0 表示 x 组更优。"
+      },
+      "C2_vs_C1": {
+        "value_key": "official_accuracy",
+        "denominator": "all_tasks (unfinished=0)",
+        "n_tasks": 4,
+        "missing_task_ids": [],
+        "delta_mean": -0.0833,
+        "delta_ci95": [
+          -0.25,
+          0.0
+        ],
+        "note": "全任务分母：未完成记 0；CI=按数据集分层 bootstrap（钳位 [-1,1]）；delta>0 表示 x 组更优。"
+      }
+    }
+  }
+]

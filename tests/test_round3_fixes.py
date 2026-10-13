@@ -39,7 +39,7 @@ def test_regress_filters_and_missing_values(tmp_path: Path):
     assert regress(rows, "y", ["x"], filters={"g": "B"}) is None
 
 
-def test_bwrap_blocks_host_file_read(tmp_path: Path):
+def test_bwrap_blocks_host_file_read(tmp_path: Path, require_sandbox):
     """容器级隔离实测：绑定集之外的宿主文件不可读（bwrap 可用时）。"""
     if not shutil.which("bwrap"):
         pytest.skip("bwrap 不可用")
@@ -51,7 +51,7 @@ def test_bwrap_blocks_host_file_read(tmp_path: Path):
     assert "TOP-SECRET" not in outcome["stdout"]
 
 
-def test_bwrap_data_readonly_output_writable(tmp_path: Path):
+def test_bwrap_data_readonly_output_writable(tmp_path: Path, require_sandbox):
     """v3 语义：数据只读（写同名被拒）+ 输出可写 + 隔离记录。"""
     if not shutil.which("bwrap"):
         pytest.skip("bwrap 不可用")

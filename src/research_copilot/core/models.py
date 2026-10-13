@@ -98,26 +98,31 @@ class NumericAssertion:
     """LLM 发现中可程序复核的数值断言。L2 校验据此重算。"""
 
     metric: str
-    value: float
+    value: float | str
     unit: str = ""  # 例 percent_improvement / seconds / ratio
     basis_observation: str = ""  # 依据的观测 ID（OBS-001）
     check: str = ""  # 期望的复核方式：percent_change_from_baseline / mean / median / percentile_p95 / direction
+    value_path: str = ""  # lookup 的精确字段路径，例如 delta_mean / delta_ci95.0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "NumericAssertion":
-        try:
-            value = float(data.get("value"))
-        except (TypeError, ValueError):
-            value = float("nan")
+        if data.get("check") == "direction":
+            value = str(data.get("value") or "")
+        else:
+            try:
+                value = float(data.get("value"))
+            except (TypeError, ValueError):
+                value = float("nan")
         return cls(
             metric=str(data.get("metric") or ""),
             value=value,
             unit=str(data.get("unit") or ""),
             basis_observation=str(data.get("basis_observation") or ""),
             check=str(data.get("check") or ""),
+            value_path=str(data.get("value_path") or ""),
         )
 
 

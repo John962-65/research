@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import math
 import re
 from pathlib import Path
 from typing import Any
@@ -24,11 +25,22 @@ CAUSAL_MARKERS = re.compile(
     re.IGNORECASE,
 )
 
-_NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?%?")
+_NUMBER_RE = re.compile(r"(?<![A-Za-z0-9_.])-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?%?")
 
 
-def _close(value: float, expected: float, rel_tol: float = 0.05, abs_tol: float = 0.1) -> bool:
-    return abs(value - expected) <= max(abs(expected) * rel_tol, abs_tol)
+def _close(value: float, expected: float, rel_tol: float = 0.05, abs_tol: float = 1e-8) -> bool:
+    return math.isfinite(value) and math.isfinite(expected) and abs(value - expected) <= max(abs(expected) * rel_tol, abs_tol)
+
+
+def _path_value(payload: Any, path: str) -> Any:
+    for part in path.split("."):
+        if isinstance(payload, dict):
+            payload = payload.get(part)
+        elif isinstance(payload, (list, tuple)) and part.isdigit() and int(part) < len(payload):
+            payload = payload[int(part)]
+        else:
+            return None
+    return payload
 
 
 def _observation_value(observation: Observation) -> dict[str, Any]:
@@ -45,11 +57,19 @@ def _check_numeric_assertion(
     expected: float | None = None
     note = ""
 
+    observed_metric = value.get("metric")
+    if check != "lookup" and observed_metric and assertion.metric != observed_metric:
+        return {"metric": assertion.metric, "check": check, "status": "unverifiable", "note": "断言指标与观测指标不一致"}
+    if check != "direction" and (not isinstance(assertion.value, (int, float)) or not math.isfinite(assertion.value)):
+        return {"metric": assertion.metric, "check": check, "status": "fail", "claimed": assertion.value, "note": "断言必须是有限数值"}
+
     if check == "percent_change_from_baseline":
         baseline = value.get("baseline_mean", value.get("baseline"))
         candidate = value.get("candidate_mean", value.get("candidate"))
         if baseline is None or candidate is None:
             note = "观测缺少 baseline/candidate 均值，无法复核百分比"
+        elif value.get("lower_is_better") not in (True, False):
+            note = "缺少明确的指标方向，无法复核改善百分比"
         elif float(baseline) == 0:
             note = "baseline 均值为 0，百分比无定义"
         else:
@@ -87,32 +107,38 @@ def _check_numeric_assertion(
                 "status": "pass" if str(assertion.value) == interp else "fail",
                 "note": note,
             }
-    else:  # lookup：断言值应直接出现在观测 value 的某个字段里
-        flat = _flatten_numbers(value)
-        expected = None
-        if flat and _close(assertion.value, min(flat, key=lambda x: abs(x - assertion.value))):
-            return {"metric": assertion.metric, "check": "lookup", "claimed": assertion.value, "status": "pass", "note": ""}
-        return {
-            "metric": assertion.metric,
-            "check": "lookup",
-            "claimed": assertion.value,
-            "status": "fail",
-            "note": "断言数值无法在所引观测中找到",
-        }
+    elif check == "lookup":
+        # 只读取指定字段，绝不在样本量/别的指标中寻找相同数字。
+        path = assertion.value_path or assertion.metric
+        if assertion.metric in value and isinstance(value[assertion.metric], (int, float)) and path != assertion.metric:
+            return {"metric": assertion.metric, "check": check, "status": "fail", "claimed": assertion.value, "note": "lookup 字段与断言指标不一致"}
+        expected = _path_value(value, path)
+        if not isinstance(expected, (int, float)) or isinstance(expected, bool):
+            expected = None
+            note = f"缺少有限数值字段 {path}，lookup 必须声明精确 value_path"
+    else:
+        note = f"不支持的复核方式 {check}"
 
     if expected is None:
         return {
             "metric": assertion.metric,
             "check": check,
             "claimed": assertion.value,
-            "status": "not_applicable",
+            "status": "unverifiable",
             "note": note,
         }
+    try:
+        expected = float(expected)
+    except (TypeError, ValueError):
+        return {"metric": assertion.metric, "check": check, "status": "unverifiable", "note": "观测值不是有限数值"}
+    if not math.isfinite(expected):
+        return {"metric": assertion.metric, "check": check, "status": "unverifiable", "note": "观测值不是有限数值"}
     return {
         "metric": assertion.metric,
         "check": check,
         "claimed": assertion.value,
         "expected": expected,
+        "value_path": assertion.value_path or (assertion.metric if check == "lookup" else check),
         "status": "pass" if _close(assertion.value, expected) else "fail",
         "note": note,
     }
@@ -138,11 +164,15 @@ def _unverified_numbers_in_text(statement: str, assertions: list[NumericAssertio
 
     带百分号的数字按 value/100 与观测值匹配（如"3.3%"对应 tail_share=0.033）。
     """
-    allowed = {a.value for a in assertions if a.value == a.value}
-    if observation is not None:
+    allowed = {float(a.value) for a in assertions if isinstance(a.value, (int, float)) and math.isfinite(a.value)}
+    # 完整照录确定性观测时可使用其字段；生成的新陈述只能使用通过复核的断言。
+    if observation is not None and statement.strip() == observation.statement.strip():
         allowed.update(_flatten_numbers(observation.value))
     suspicious = []
-    for raw in _NUMBER_RE.findall(statement):
+    text = re.sub(r"\b[Pp]\d+\b", "", statement)  # P95 是指标名，不是断言数值。
+    if observation is not None and observation.value.get("delta_ci95") is not None:
+        text = re.sub(r"95\s*%\s*(?:CI|置信区间)", "CI", text, flags=re.IGNORECASE)
+    for raw in _NUMBER_RE.findall(text):
         is_percent = raw.endswith("%")
         number = float(raw.rstrip("%"))
         candidates = (number, number / 100.0) if is_percent else (number,)
@@ -162,7 +192,7 @@ def _has_controlled_experiment_evidence(
             continue
         interventions = [str(v).lower() for v in (material.meta.get("intervention_variables") or [])]
         if not interventions or not claim_variables:
-            return True  # 未声明干预变量时保守放行（仍需人工复核整体合理性）
+            continue  # 缺少变量关联不构成因果依据。
         claim_vars = {v.lower() for v in claim_variables if v}
         if claim_vars & set(interventions):
             return True
@@ -183,12 +213,12 @@ def _check_relation_claims(
     for claim in finding.claims or []:
         relation = claim.relation
         if relation not in ("positive", "negative", "none"):
+            checks.append({"claim": f"{claim.variable_a}~{claim.variable_b}", "status": "unverifiable", "note": "缺少可核对的关系方向"})
             continue
         candidates = [observations_by_id[cid] for cid in finding.observation_ids if cid in observations_by_id]
         if claim.basis_observation:
             target = observations_by_id.get(claim.basis_observation)
-            if target is not None and target.id in finding.observation_ids:
-                candidates = [target]
+            candidates = [target] if target is not None and target.id in finding.observation_ids else []
         matched = None
         for observation in candidates:
             for rel in (observation.value or {}).get("relations") or []:
@@ -303,7 +333,8 @@ def validate_finding(
                 f"数值断言不符：{result['metric']} 声称 {result['claimed']}，"
                 f"按 {result['check']} 重算为 {result.get('expected')}"
             )
-    for number in _unverified_numbers_in_text(finding.statement, finding.numeric_assertions, primary_obs):
+    passing_assertions = [a for a, c in zip(finding.numeric_assertions, l2_checks) if c.get("status") == "pass"] if len(l2_checks) == len(finding.numeric_assertions) else []
+    for number in _unverified_numbers_in_text(finding.statement, passing_assertions, primary_obs):
         l2_issues.append(f"陈述含无依据数字 {number}（未在数值断言或被引观测中出现）")
 
     # ---- L2b 关系主张方向核对 ----
@@ -312,7 +343,20 @@ def validate_finding(
     relation_unverifiable = any(c["status"] == "unverifiable" for c in relation_checks)
     relation_failed = any(c["status"] == "fail" for c in relation_checks)
 
-    l2_status = "fail" if l2_issues else ("pass" if (l2_checks or relation_checks) else "not_applicable")
+    exact_observation = any(finding.statement.strip() == o.statement.strip() for o in cited_observations)
+    incomplete = any(c["status"] == "unverifiable" for c in l2_checks + relation_checks)
+    incomplete = incomplete or (not l2_checks and not relation_checks and not exact_observation)
+    if not exact_observation and re.search(r"相关|优于|低于|高于|差异|correlat|better|worse|difference", finding.statement, re.IGNORECASE):
+        if not relation_checks and not any(c.get("check") == "direction" and c["status"] == "pass" for c in l2_checks):
+            incomplete = True
+    # 显著性或比较方向不得仅靠散落的数字验证。
+    significance = re.search(r"显著|significan", finding.statement, re.IGNORECASE)
+    interval = primary_obs.value.get("delta_ci95") if primary_obs else None
+    if significance and not exact_observation:
+        complete_ci = isinstance(interval, (list, tuple)) and len(interval) == 2 and all(isinstance(v, (int, float)) and math.isfinite(v) for v in interval)
+        if not complete_ci or interval[0] <= 0 <= interval[1]:
+            incomplete = True
+    l2_status = "fail" if l2_issues else ("unverifiable" if incomplete else "pass")
 
     # ---- L3 解释有效性 ----
     l3_note = "无因果标记"
@@ -339,10 +383,10 @@ def validate_finding(
 
     # ---- 不可程序核对的关系主张：阻止自动升级，转人工复核 ----
     final_status = "verified" if claim_type in ("observation", "statistical_finding") else "downgraded"
-    if final_status == "verified" and relation_unverifiable:
+    if final_status == "verified" and incomplete:
         final_status = "needs_human_review"
         downgrades.append(
-            "L2b: 关系主张方向无法由程序核对（无计算依据），不自动升级为已证实结果，转人工复核"
+            "L2: 主张缺少完整的程序复核依据，不自动升级为已证实结果，转人工复核"
         )
 
     validation = {
@@ -361,6 +405,25 @@ def validate_finding(
         "status": final_status,
         "resolved_refs": [ref.to_dict() for ref in resolved_refs],
     }
+    if final_status == "verified":
+        if exact_observation and not l2_checks and not relation_checks:
+            statement = finding.statement
+        else:
+            # 任意自然语言是否被计算支持不能仅靠数字匹配证明。
+            # 已证实结果只使用通过检查的结构化事实生成的陈述。
+            facts = []
+            for check in l2_checks:
+                if check["status"] == "pass":
+                    field = check.get("value_path") or check["check"]
+                    facts.append(f"{check['metric']}（{field}）={check.get('expected', check.get('claimed'))}")
+            for check in relation_checks:
+                if check["status"] == "pass":
+                    facts.append(f"{check['claim']} 的计算相关方向为 {check['computed_relation']}")
+            scopes = [str(o.value.get("segment")) for o in cited_observations if o.value.get("segment")]
+            statement = "在所引数据与计算范围内" + (f"（{'；'.join(scopes)}）" if scopes else "") + "：" + "；".join(facts)
+        validation["verified_statement"] = statement
+        validation["draft_statement"] = finding.statement
+        validation["verified_scope"] = "确定性观测或结构化检查的程序生成陈述；原始自由文本不自动认证"
     return validation
 
 
@@ -368,4 +431,6 @@ def apply_validation(finding: Finding, validation: dict[str, Any]) -> Finding:
     """把校验结果写回发现对象。"""
     finding.validation = validation
     finding.claim_type = validation["final_claim_type"]
+    if validation.get("status") == "verified" and validation.get("verified_statement"):
+        finding.statement = validation["verified_statement"]
     return finding

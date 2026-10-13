@@ -40,7 +40,7 @@ FINDING_JSON_SHAPE = """{
       "numeric_assertions": [
         {"metric": "...", "value": 20.0, "unit": "percent_improvement",
          "check": "percent_change_from_baseline|mean|median|percentile_p95|direction|ratio|lookup",
-         "basis_observation": "OBS-001"}
+         "basis_observation": "OBS-001", "value_path": "lookup 时必须给出精确字段路径，例如 delta_mean"}
       ],
       "claims": [
         {"variable_a": "...", "variable_b": "...", "relation": "positive|negative|none|unspecified",
@@ -270,9 +270,11 @@ def _offline_findings(
                     value=comparison.get("delta_mean") or 0.0,
                     unit="delta",
                     check="lookup",
+                    value_path="delta_mean",
                     basis_observation="",
                 )
-            ],
+            ] + [NumericAssertion(metric=spec["metric"], value=comparison["interpretation"], check="direction")]
+            + ([NumericAssertion(metric=spec["metric"], value=ci[i], check="lookup", value_path=f"delta_ci95.{i}") for i in (0, 1)] if ci else []),
             alternative_explanations=[
                 "样本量不足导致的偶发差异（需重复实验确认）",
                 "组间实现差异真实存在（由独立重复实验区分）",

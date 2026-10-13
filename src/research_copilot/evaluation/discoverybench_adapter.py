@@ -264,8 +264,8 @@ def load_task_tables(task: DiscoveryTask) -> list[dict[str, Any]]:
         except (ValueError, OSError):
             continue
         for row in rows:
-            row["__dataset_file"] = data_path.name
-        tables.append({"name": data_path.stem, "path": str(data_path), "rows": rows})
+            row["__dataset_file"] = str(data_path.relative_to(dataset_dir))
+        tables.append({"name": data_path.stem, "file": str(data_path.relative_to(dataset_dir)), "path": str(data_path), "rows": rows})
     return tables
 
 
@@ -283,7 +283,7 @@ def load_task_rows(task: DiscoveryTask) -> list[dict[str, Any]]:
     for csv_path in sorted(dataset_dir.rglob("*.csv")):
         try:
             for row in read_rows(csv_path):
-                row["__dataset_file"] = csv_path.name
+                row["__dataset_file"] = str(csv_path.relative_to(dataset_dir))
                 rows.append(row)
         except (ValueError, OSError):
             continue

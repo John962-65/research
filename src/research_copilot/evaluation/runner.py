@@ -20,7 +20,7 @@ from typing import Any
 
 from concurrent.futures import ThreadPoolExecutor
 
-from .baselines import GROUP_RUNNERS, GroupBudget, ToolSandbox
+from .baselines import GROUP_RUNNERS, GroupBudget, ToolSandbox, trace_diagnostics, valid_final_answer
 from .discoverybench_adapter import DiscoveryTask, load_tasks
 from .metrics import (
     aggregate_group,
@@ -30,7 +30,7 @@ from .metrics import (
     var_precision_heuristic,
 )
 
-EVAL_CODE_VERSION = "eval/2.0"
+EVAL_CODE_VERSION = "eval/2.1"
 
 
 def _write_json(path: Path, payload: Any) -> None:
@@ -111,7 +111,7 @@ def run_evaluation(
 
     # 金标-数据分歧诊断（每任务一次，诊断性、不影响评分）
     divergence_checks: dict[str, Any] = {}
-    if not dry_run or True:  # dry-run 也走 stub，保持管道覆盖
+    if tasks:  # dry-run 也走 stub，保持管道覆盖
         from ..analysis.statistics import relation_signs
 
         def _divergence(task):
@@ -153,10 +153,9 @@ def run_evaluation(
             try:
                 result = runner(llm, task, budget=budget, sandbox=sandbox)
             except Exception as exc:  # 单任务失败不拖垮整场评测
-                sandbox.close()
                 # 审查 P1：按异常来源分类，不再统一 transport_failure
                 failure_class = (
-                    "transport_failure" if isinstance(exc, (ConnectionError, TimeoutError, OSError)) else "executor_error"
+                    "transport_failure" if isinstance(exc, (ConnectionError, TimeoutError, LLMUnavailable)) else "executor_error"
                 )
                 error_record = {
                     "group": group,
@@ -166,11 +165,16 @@ def run_evaluation(
                     "answer": {},
                     "unsupported": {"evaluable": False, "not_evaluable_reason": "task_error"},
                     "official": {},
-                    "llm_calls": 0,
-                    "tool_calls": 0,
+                    "llm_calls": _usage_delta(usage_before, llm.usage_summary())["total_calls"],
+                    "tool_calls": len(sandbox.executions),
+                    "duration_s": round(time.time() - started, 3),
+                    "sandbox_isolation": sandbox.isolation_record,
+                    "prompt_tokens": _usage_delta(usage_before, llm.usage_summary())["prompt_tokens"],
+                    "completion_tokens": _usage_delta(usage_before, llm.usage_summary())["completion_tokens"],
                 }
                 records_by_group[group].append(error_record)
                 _write_json(run_dir / group / task.task_id / "error.json", error_record)
+                _write_json(run_dir / group / task.task_id / "trace.json", [{"kind": "executor_error", "error": error_record["error"], "executions": sandbox.executions}])
                 continue
             finally:
                 sandbox.close()
@@ -181,6 +185,8 @@ def run_evaluation(
                 "group": result.group,
                 "task_id": result.task_id,
                 "failure_class": result.failure_class,
+                "diagnostics": trace_diagnostics(result.trace),
+                "sandbox_isolation": sandbox.isolation_record,
                 "answer": result.answer,
                 "raw_answer": result.raw_answer[:2000],
                 "llm_calls": result.llm_calls,
@@ -213,7 +219,7 @@ def run_evaluation(
 
     def _score_one(group: str, record: dict[str, Any]) -> None:
         nonlocal hms_error
-        if record.get("error") and not record.get("answer"):
+        if not valid_final_answer(record.get("answer") or {}):
             return
         try:
             task = next(t for t in tasks if t.task_id == record["task_id"])
@@ -229,6 +235,7 @@ def run_evaluation(
         except Exception as exc:
             hms_error = f"{type(exc).__name__}: {exc}"
             record["official_accuracy"] = None
+            record["scoring_error"] = hms_error
 
     scoring_pairs = [(group, record) for group in groups for record in records_by_group[group]]
     with ThreadPoolExecutor(max_workers=4) as pool:
@@ -241,6 +248,13 @@ def run_evaluation(
                 handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
 
     summaries = {group: aggregate_group(records_by_group[group]) for group in groups}
+    actual_isolation = [r["sandbox_isolation"] for rs in records_by_group.values() for r in rs if r.get("sandbox_isolation", {}).get("execution_verified")]
+    config["sandbox_execution_summary"] = {
+        "n_tasks_executed_code": len(actual_isolation),
+        "all_fs_isolated": all(r.get("fs_isolated") for r in actual_isolation) if actual_isolation else None,
+        "all_network_isolated": all(r.get("network_isolated") for r in actual_isolation) if actual_isolation else None,
+    }
+    _write_json(run_dir / "config.json", config)
     comparisons = {}
     if "A" in records_by_group and "C1" in records_by_group:
         comparisons["C1_vs_A"] = paired_delta(records_by_group["C1"], records_by_group["A"])
@@ -294,11 +308,11 @@ def render_summary_markdown(summary: dict[str, Any]) -> str:
         f"- 沙箱: env 白名单 + rlimits；网络隔离: {sandbox.get('network_isolated')}（{sandbox.get('honesty_note', '')}）",
         f"- {summary['honesty_note']}",
         "",
-        "| 组 | 完成率 | 成功任务acc | **全任务得分** | 95% CI | context | var_F1 | rel | 无依据(可评) | 不可评 | LLM调用 |",
+        "| 组 | 完成率 | 已评分任务acc | **全任务得分** | 全任务95% CI（数据集聚类） | context | var_F1 | rel | 无依据(可评) | 不可评 | LLM调用 |",
         "|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for group, agg in summary["group_summaries"].items():
-        ci = agg.get("official_accuracy_ci95")
+        ci = agg.get("full_task_score_ci95")
         lines.append(
             f"| {group} | {agg['completion_rate']:.0%} | {agg['official_accuracy_mean'] if agg['official_accuracy_mean'] is not None else '-'} "
         f"| {agg['full_task_score_mean'] if agg.get('full_task_score_mean') is not None else '-'} "
@@ -308,6 +322,13 @@ def render_summary_markdown(summary: dict[str, Any]) -> str:
             f"| {agg.get('unsupported_rate_mean_evaluable') if agg.get('unsupported_rate_mean_evaluable') is not None else '-'} "
             f"| {agg.get('n_not_evaluable', 0)} | {agg['total_llm_calls']} |"
         )
+    lines.append("")
+    lines += ["证据验证仅覆盖显式声明的断言；未声明断言不代表结论无风险。", ""]
+    for group, agg in summary["group_summaries"].items():
+        evidence = agg.get("evidence") or {}
+        lines.append(f"- {group}：已复核断言 {evidence.get('n_assertions', 0)}；验证通过/矛盾/不可验证比例 = "
+                     f"{evidence.get('verified_rate')}/{evidence.get('contradicted_rate')}/{evidence.get('unverifiable_rate')}；"
+                     f"评分缺失 {agg.get('n_score_missing', 0)}；逐步异常计数 {agg.get('diagnostics', {})}")
     lines.append("")
     for name, delta in summary.get("comparisons", {}).items():
         lines.append(

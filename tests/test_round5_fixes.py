@@ -108,8 +108,7 @@ def test_aggregate_full_task_score_and_failures():
     assert agg["failure_breakdown"] == {"tool_loop_exhausted": 1}
 
 
-@pytest.mark.skipif(not __import__("shutil").which("bwrap"), reason="bwrap 不可用：安全集成测试跳过（CI 明确报告，不冒充通过）")
-def test_sandbox_snapshot_protects_original(tmp_path: Path):
+def test_sandbox_snapshot_protects_original(tmp_path: Path, require_sandbox):
     """审查 P0-3 v3：数据只读绑定——写同名被内核拒绝，原数据完整性保持；
     快照保留相对结构与哈希清单。"""
     data = tmp_path / "data"

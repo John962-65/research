@@ -1,29 +1,46 @@
 {
-  "generated_at": "2026-10-11T14:56:52Z",
-  "commit": "2abc2cd597d6c363c4d2e63bef40529837277072",
-  "python": "Python 3.10",
-  "runner": "pytest (offline, stub LLM)",
+  "generated_at": "2026-10-13T03:50:02.283612+00:00",
+  "commit": "e96cf78034417837ea7ee17c3358510e1f2829cc",
+  "working_tree_dirty": true,
+  "source_sha256": "7ac3796e3710c5cc351859ed521aa8be0f5636d319059bdaad2e2295e914799c",
+  "python": "3.12.14",
+  "ci": false,
+  "runner": "pytest (offline; actual sandbox integration when available)",
   "totals": {
-    "tests": 127,
-    "passed": 127,
+    "tests": 149,
+    "passed": 142,
     "failed": 0,
     "errors": 0,
-    "skipped": 0
+    "skipped": 7
   },
-  "history": [
+  "skips": [
     {
-      "commit": "2ff7b3098db0efd3a17dde626c7006b37cc6d868",
-      "totals": {
-        "tests": 118,
-        "passed": 118,
-        "failed": 0,
-        "errors": 0,
-        "skipped": 0
-      },
-      "at": "2026-10-11T14:35:52Z"
+      "name": "test_sandbox_nested_data_readonly_and_session_persistence",
+      "reason": "bwrap 不存在或命名空间实际启动失败：未验证沙箱集成"
+    },
+    {
+      "name": "test_bwrap_blocks_host_file_read",
+      "reason": "bwrap 不存在或命名空间实际启动失败：未验证沙箱集成"
+    },
+    {
+      "name": "test_bwrap_data_readonly_output_writable",
+      "reason": "bwrap 不存在或命名空间实际启动失败：未验证沙箱集成"
+    },
+    {
+      "name": "test_sandbox_snapshot_protects_original",
+      "reason": "bwrap 不存在或命名空间实际启动失败：未验证沙箱集成"
+    },
+    {
+      "name": "test_sandboxed_code_cannot_read_env_secrets",
+      "reason": "bwrap 不存在或命名空间实际启动失败：未验证沙箱集成"
+    },
+    {
+      "name": "test_sandbox_rlimits_block_big_memory",
+      "reason": "bwrap 不存在或命名空间实际启动失败：未验证沙箱集成"
+    },
+    {
+      "name": "test_sandbox_can_read_dataset_dir",
+      "reason": "bwrap 不存在或命名空间实际启动失败：未验证沙箱集成"
     }
-  ],
-  "notes": [
-    "第五轮：+9 测试（C1 标签/失败五分类/结构化分析声明/bootstrap CI/快照只读/fail-closed）"
   ]
 }

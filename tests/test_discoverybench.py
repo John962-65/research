@@ -143,7 +143,10 @@ def test_aggregate_and_paired_delta():
     delta = paired_delta(records_c, records_a)
     assert delta["value_key"] == "official_accuracy"
     assert delta["denominator"] == "all_tasks (unfinished=0)"
-    assert delta["n_tasks"] == 3 and delta["delta_mean"] == 0.1667  # (0.5+0+0)/3：未完成记 0
+    assert delta["n_tasks"] == 3 and delta["delta_mean"] is None
+    assert delta["missing_task_ids"] == ["t3"]  # 未运行的记录不能冒充失败 0 分。
+    records_a.append(_record("t3", None, 0.0, evaluable=False))
+    assert paired_delta(records_c, records_a)["delta_mean"] == 0.1667
 
 
 def test_runner_dry_run_end_to_end(bench_root: Path, tmp_path: Path):

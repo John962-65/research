@@ -1,0 +1,404 @@
+{
+  "eval_code_version": "eval/2.0",
+  "schema_version": "rc/1.0",
+  "bench_root": "benchmarks/discoverybench/discoverybench",
+  "subset": "main",
+  "selection": {
+    "rule": "显式 task_ids",
+    "task_ids": [
+      "discoverybench/real/test/archaeology/metadata_14",
+      "discoverybench/real/test/introduction_pathways_non-native_plants/metadata_0",
+      "discoverybench/real/test/meta_regression/metadata_0",
+      "discoverybench/real/test/meta_regression_raw/metadata_0",
+      "discoverybench/real/test/nls_incarceration/metadata_0",
+      "discoverybench/real/test/nls_raw/metadata_2",
+      "discoverybench/real/test/nls_ses/metadata_0",
+      "discoverybench/real/test/requirements_engineering_for_ML_enabled_systems/metadata_0",
+      "discoverybench/real/test/worldbank_education_gdp/metadata_0",
+      "discoverybench/real/test/worldbank_education_gdp_indicators/metadata_0",
+      "discoverybench/real/test/archaeology/metadata_15",
+      "discoverybench/real/test/introduction_pathways_non-native_plants/metadata_1"
+    ],
+    "note": ""
+  },
+  "task_ids": [
+    "discoverybench/real/test/archaeology/metadata_14",
+    "discoverybench/real/test/archaeology/metadata_15",
+    "discoverybench/real/test/introduction_pathways_non-native_plants/metadata_0",
+    "discoverybench/real/test/introduction_pathways_non-native_plants/metadata_1",
+    "discoverybench/real/test/meta_regression/metadata_0",
+    "discoverybench/real/test/meta_regression_raw/metadata_0",
+    "discoverybench/real/test/nls_incarceration/metadata_0",
+    "discoverybench/real/test/nls_raw/metadata_2",
+    "discoverybench/real/test/nls_ses/metadata_0",
+    "discoverybench/real/test/requirements_engineering_for_ML_enabled_systems/metadata_0",
+    "discoverybench/real/test/worldbank_education_gdp/metadata_0",
+    "discoverybench/real/test/worldbank_education_gdp_indicators/metadata_0"
+  ],
+  "groups": [
+    "A",
+    "B",
+    "C1",
+    "C2"
+  ],
+  "model": "session-agent",
+  "judge_model": "session-agent",
+  "budget": {
+    "max_steps": 6,
+    "max_tool_calls": 8,
+    "timeout_s": 60.0
+  },
+  "fairness": "三组共用同一 ReAct 循环 / 同一工具沙箱配置 / 同一预算；差异仅在注入上下文（Copilot 模块输出）",
+  "sandbox_isolation": {
+    "env_whitelist": [
+      "PATH",
+      "LANG",
+      "LC_ALL",
+      "LC_CTYPE",
+      "TMPDIR",
+      "PYTHONHASHSEED"
+    ],
+    "rlimits": {
+      "cpu_seconds": 60,
+      "address_space_bytes": 2147483648,
+      "file_size_bytes": 16777216,
+      "max_processes": 64,
+      "open_files": 128
+    },
+    "network_isolated": true,
+    "container_runtime": true,
+    "honesty_note": "网络已通过 user+net namespace 隔离；文件系统未隔离（用户权限内可读）；容器运行时可用但尚未接入"
+  },
+  "scorer": {
+    "kind": "official-protocol/single-subhypothesis",
+    "official_eval_sha256": "83406ddbe6894429cc5012b17cb82a209d5397aa7863b0aba1bb51edf1dd6c65",
+    "judge_model": "session-agent"
+  },
+  "dry_run": false,
+  "note": "judge 模型仅用于评分并单独计量；dry_run 为 stub 管道冒烟，不构成评测结论。",
+  "started_at": "2026-10-11T06:47:47.459692+00:00",
+  "divergence_checks": {
+    "discoverybench/real/test/archaeology/metadata_14": {
+      "divergence": false,
+      "reason": "关系图仅含时间列，增长阶段主张无法据此核对",
+      "raw": "{\"divergence\": false, \"reason\": \"关系图仅含时间列，增长阶段主张无法据此核对\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/archaeology/metadata_15": {
+      "divergence": false,
+      "reason": "关系图仅含时间列（calBP/CE），PCA 主张无法据此核对，无矛盾证据",
+      "raw": "{\"divergence\": false, \"reason\": \"关系图仅含时间列（calBP/CE），PCA 主张无法据此核对，无矛盾证据\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/introduction_pathways_non-native_plants/metadata_0": {
+      "divergence": false,
+      "reason": "关系图为空（该任务以时间期段为主），无数据矛盾证据",
+      "raw": "{\"divergence\": false, \"reason\": \"关系图为空（该任务以时间期段为主），无数据矛盾证据\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/introduction_pathways_non-native_plants/metadata_1": {
+      "divergence": false,
+      "reason": "关系图为空，无法核对系数 0.22 的方向主张",
+      "raw": "{\"divergence\": false, \"reason\": \"关系图为空，无法核对系数 0.22 的方向主张\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/meta_regression/metadata_0": {
+      "divergence": false,
+      "reason": "同上，无直接矛盾证据",
+      "raw": "{\"divergence\": false, \"reason\": \"同上，无直接矛盾证据\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/meta_regression_raw/metadata_0": {
+      "divergence": false,
+      "reason": "top 关系对为功效/效应量内部相关，original vs replication 对比无法据此核对",
+      "raw": "{\"divergence\": false, \"reason\": \"top 关系对为功效/效应量内部相关，original vs replication 对比无法据此核对\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/nls_incarceration/metadata_0": {
+      "divergence": false,
+      "reason": "top 关系对为财富年份间相关，性别差异主张无矛盾证据",
+      "raw": "{\"divergence\": false, \"reason\": \"top 关系对为财富年份间相关，性别差异主张无矛盾证据\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/nls_raw/metadata_2": {
+      "divergence": false,
+      "reason": "top 关系对未含种族/BA 完成变量对，无矛盾证据",
+      "raw": "{\"divergence\": false, \"reason\": \"top 关系对未含种族/BA 完成变量对，无矛盾证据\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/nls_ses/metadata_0": {
+      "divergence": false,
+      "reason": "SES 与能力分正相关（r=0.46），与 gold 的 SES 正向主张方向相容，无矛盾",
+      "raw": "{\"divergence\": false, \"reason\": \"SES 与能力分正相关（r=0.46），与 gold 的 SES 正向主张方向相容，无矛盾\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/requirements_engineering_for_ML_enabled_systems/metadata_0": {
+      "divergence": false,
+      "reason": "top 关系对为项目经验变量相关，角色比例主张无法据此核对",
+      "raw": "{\"divergence\": false, \"reason\": \"top 关系对为项目经验变量相关，角色比例主张无法据此核对\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/worldbank_education_gdp/metadata_0": {
+      "divergence": false,
+      "reason": "top 关系对为年份列间相关（n=8 面板），教育支出-GDP 主张无矛盾证据",
+      "raw": "{\"divergence\": false, \"reason\": \"top 关系对为年份列间相关（n=8 面板），教育支出-GDP 主张无矛盾证据\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/worldbank_education_gdp_indicators/metadata_0": {
+      "divergence": false,
+      "reason": "同 4924d0，年份列相关，无矛盾证据",
+      "raw": "{\"divergence\": false, \"reason\": \"同 4924d0，年份列相关，无矛盾证据\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    }
+  },
+  "divergence_note": "divergence=true 的任务：金标与数据实测方向矛盾，其官方分数应解读为分歧而非模型错误（诊断性标注，不参与评分）",
+  "finished_at": "2026-10-11T07:32:07.835233+00:00",
+  "group_summaries": {
+    "A": {
+      "n_tasks": 12,
+      "completion_rate": 1.0,
+      "official_accuracy_mean": 0.4153,
+      "official_accuracy_ci95": [
+        0.1586,
+        0.672
+      ],
+      "official_accuracy_cluster_ci95": [
+        0.1944,
+        0.6653
+      ],
+      "cluster_ci_method": "dataset cluster bootstrap (1000, seed=0), bounds [0,1]",
+      "n_datasets": 10,
+      "full_task_score_mean": 0.4153,
+      "full_task_score_ci95": [
+        0.1944,
+        0.6653
+      ],
+      "n_score_missing": 0,
+      "n_datasets_full": 10,
+      "full_task_note": "全任务分母：未完成任务记 0 分（与成功任务平均分开报告，审查 P1-2）",
+      "failure_breakdown": {},
+      "n_official_scored": 12,
+      "context_match_rate": 0.8333,
+      "var_f1_mean": 0.7046,
+      "rel_score_mean": 0.4583,
+      "hms_custom_mean": null,
+      "unsupported_rate_mean_evaluable": 0.0278,
+      "n_not_evaluable": 0,
+      "evidence": {
+        "n_assertions": 20,
+        "verified_rate": 0.0,
+        "contradicted_rate": 0.0,
+        "unverifiable_rate": 1.0,
+        "note": "unverifiable 高说明断言未被验证（不是无风险）；应通过更完整的验证器（如 ols_beta）降低"
+      },
+      "total_llm_calls": 32,
+      "total_tool_calls": 20,
+      "total_prompt_tokens": 196639,
+      "total_completion_tokens": 8858,
+      "total_judge_calls": 36,
+      "diagnostics": {
+        "parse_failures": 0,
+        "tool_execution_failures": 0,
+        "tool_budget_exhaustions": 0,
+        "transport_failures": 0
+      }
+    },
+    "B": {
+      "n_tasks": 12,
+      "completion_rate": 1.0,
+      "official_accuracy_mean": 0.4236,
+      "official_accuracy_ci95": [
+        0.1666,
+        0.6807
+      ],
+      "official_accuracy_cluster_ci95": [
+        0.2,
+        0.675
+      ],
+      "cluster_ci_method": "dataset cluster bootstrap (1000, seed=0), bounds [0,1]",
+      "n_datasets": 10,
+      "full_task_score_mean": 0.4236,
+      "full_task_score_ci95": [
+        0.2,
+        0.675
+      ],
+      "n_score_missing": 0,
+      "n_datasets_full": 10,
+      "full_task_note": "全任务分母：未完成任务记 0 分（与成功任务平均分开报告，审查 P1-2）",
+      "failure_breakdown": {},
+      "n_official_scored": 12,
+      "context_match_rate": 0.8333,
+      "var_f1_mean": 0.7212,
+      "rel_score_mean": 0.4583,
+      "hms_custom_mean": null,
+      "unsupported_rate_mean_evaluable": 0.0,
+      "n_not_evaluable": 0,
+      "evidence": {
+        "n_assertions": 13,
+        "verified_rate": 0.0,
+        "contradicted_rate": 0.0,
+        "unverifiable_rate": 1.0,
+        "note": "unverifiable 高说明断言未被验证（不是无风险）；应通过更完整的验证器（如 ols_beta）降低"
+      },
+      "total_llm_calls": 25,
+      "total_tool_calls": 13,
+      "total_prompt_tokens": 65224,
+      "total_completion_tokens": 5592,
+      "total_judge_calls": 36,
+      "diagnostics": {
+        "parse_failures": 0,
+        "tool_execution_failures": 0,
+        "tool_budget_exhaustions": 0,
+        "transport_failures": 0
+      }
+    },
+    "C1": {
+      "n_tasks": 12,
+      "completion_rate": 1.0,
+      "official_accuracy_mean": 0.4153,
+      "official_accuracy_ci95": [
+        0.1586,
+        0.672
+      ],
+      "official_accuracy_cluster_ci95": [
+        0.1944,
+        0.6653
+      ],
+      "cluster_ci_method": "dataset cluster bootstrap (1000, seed=0), bounds [0,1]",
+      "n_datasets": 10,
+      "full_task_score_mean": 0.4153,
+      "full_task_score_ci95": [
+        0.1944,
+        0.6653
+      ],
+      "n_score_missing": 0,
+      "n_datasets_full": 10,
+      "full_task_note": "全任务分母：未完成任务记 0 分（与成功任务平均分开报告，审查 P1-2）",
+      "failure_breakdown": {},
+      "n_official_scored": 12,
+      "context_match_rate": 0.8333,
+      "var_f1_mean": 0.6907,
+      "rel_score_mean": 0.4583,
+      "hms_custom_mean": null,
+      "unsupported_rate_mean_evaluable": 0.0,
+      "n_not_evaluable": 0,
+      "evidence": {
+        "n_assertions": 12,
+        "verified_rate": 0.0,
+        "contradicted_rate": 0.0,
+        "unverifiable_rate": 1.0,
+        "note": "unverifiable 高说明断言未被验证（不是无风险）；应通过更完整的验证器（如 ols_beta）降低"
+      },
+      "total_llm_calls": 21,
+      "total_tool_calls": 9,
+      "total_prompt_tokens": 99424,
+      "total_completion_tokens": 4421,
+      "total_judge_calls": 36,
+      "diagnostics": {
+        "parse_failures": 0,
+        "tool_execution_failures": 0,
+        "tool_budget_exhaustions": 0,
+        "transport_failures": 0
+      }
+    },
+    "C2": {
+      "n_tasks": 12,
+      "completion_rate": 1.0,
+      "official_accuracy_mean": 0.4236,
+      "official_accuracy_ci95": [
+        0.1666,
+        0.6807
+      ],
+      "official_accuracy_cluster_ci95": [
+        0.2,
+        0.675
+      ],
+      "cluster_ci_method": "dataset cluster bootstrap (1000, seed=0), bounds [0,1]",
+      "n_datasets": 10,
+      "full_task_score_mean": 0.4236,
+      "full_task_score_ci95": [
+        0.2,
+        0.675
+      ],
+      "n_score_missing": 0,
+      "n_datasets_full": 10,
+      "full_task_note": "全任务分母：未完成任务记 0 分（与成功任务平均分开报告，审查 P1-2）",
+      "failure_breakdown": {},
+      "n_official_scored": 12,
+      "context_match_rate": 0.8333,
+      "var_f1_mean": 0.7212,
+      "rel_score_mean": 0.4583,
+      "hms_custom_mean": null,
+      "unsupported_rate_mean_evaluable": 0.0,
+      "n_not_evaluable": 0,
+      "evidence": {
+        "n_assertions": 11,
+        "verified_rate": 0.0,
+        "contradicted_rate": 0.0,
+        "unverifiable_rate": 1.0,
+        "note": "unverifiable 高说明断言未被验证（不是无风险）；应通过更完整的验证器（如 ols_beta）降低"
+      },
+      "total_llm_calls": 26,
+      "total_tool_calls": 14,
+      "total_prompt_tokens": 82176,
+      "total_completion_tokens": 4614,
+      "total_judge_calls": 36,
+      "diagnostics": {
+        "parse_failures": 0,
+        "tool_execution_failures": 0,
+        "tool_budget_exhaustions": 0,
+        "transport_failures": 0
+      }
+    }
+  },
+  "comparisons": {
+    "C1_vs_A": {
+      "value_key": "official_accuracy",
+      "denominator": "all_tasks (unfinished=0)",
+      "n_tasks": 12,
+      "missing_task_ids": [],
+      "delta_mean": 0.0,
+      "delta_ci95": [
+        0.0,
+        0.0
+      ],
+      "note": "全任务分母：未完成记 0；CI=按数据集分层 bootstrap（钳位 [-1,1]）；delta>0 表示 x 组更优。"
+    },
+    "C1_vs_B": {
+      "value_key": "official_accuracy",
+      "denominator": "all_tasks (unfinished=0)",
+      "n_tasks": 12,
+      "missing_task_ids": [],
+      "delta_mean": -0.0083,
+      "delta_ci95": [
+        -0.0273,
+        0.0
+      ],
+      "note": "全任务分母：未完成记 0；CI=按数据集分层 bootstrap（钳位 [-1,1]）；delta>0 表示 x 组更优。"
+    },
+    "C2_vs_C1": {
+      "value_key": "official_accuracy",
+      "denominator": "all_tasks (unfinished=0)",
+      "n_tasks": 12,
+      "missing_task_ids": [],
+      "delta_mean": 0.0083,
+      "delta_ci95": [
+        0.0,
+        0.0273
+      ],
+      "note": "全任务分母：未完成记 0；CI=按数据集分层 bootstrap（钳位 [-1,1]）；delta>0 表示 x 组更优。"
+    }
+  },
+  "hms_error": "",
+  "divergent_tasks": [],
+  "honesty_note": "历史归档离线重算；不是修复后的新模型评测。任务子集小且已用于开发，不外推能力收益。",
+  "reanalysis": {
+    "source_directory": "eval-runs/20261011-064747-A-B-C1-C2",
+    "source_sha256": "a883da8720769020f421998535146d4b8fb21e9bc6559cbbf612608c99c39268",
+    "generated_at": "2026-10-13T03:41:33.174088+00:00",
+    "metric_code_version": "eval/2.1",
+    "scope": "仅重算汇总、置信区间与已保存轨迹异常；原始答案和官方评分未改，未重新运行模型或judge。",
+    "missing_traces": [],
+    "execution_note": "旧运行使用原执行器，不能视为修复后能力评测；终态失败标签不是经实验确认的根因。"
+  }
+}

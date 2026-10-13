@@ -1,0 +1,41 @@
+{
+  "base_commit": "e96cf78034417837ea7ee17c3358510e1f2829cc",
+  "modified_existing_files": [
+    ".github/workflows/copilot-ci.yml",
+    "README.md",
+    "docs/eval-results/20261011-round6-budget-baseline/FINDINGS.md",
+    "docs/evaluation-protocol.md",
+    "docs/roadmap.md",
+    "docs/test-evidence.json",
+    "src/research_copilot/agents/diagnosis_agent.py",
+    "src/research_copilot/analysis/evidence_validator.py",
+    "src/research_copilot/core/models.py",
+    "src/research_copilot/core/research_state.py",
+    "src/research_copilot/evaluation/baselines.py",
+    "src/research_copilot/evaluation/discoverybench_adapter.py",
+    "src/research_copilot/evaluation/metrics.py",
+    "src/research_copilot/evaluation/official_scoring.py",
+    "src/research_copilot/evaluation/runner.py",
+    "src/research_copilot/evaluation/sandbox.py",
+    "tests/conftest.py",
+    "tests/test_discoverybench.py",
+    "tests/test_evidence_validator.py",
+    "tests/test_round3_fixes.py",
+    "tests/test_round5_fixes.py",
+    "tests/test_sandbox.py"
+  ],
+  "original_raw_jsonl_preserved": 40,
+  "archive_exclusions": [
+    ".git",
+    "__pycache__",
+    ".pytest_cache",
+    "*.pyc"
+  ],
+  "tests": {
+    "tests": 149,
+    "passed": 142,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 7
+  }
+}

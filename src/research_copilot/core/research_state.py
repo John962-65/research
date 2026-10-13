@@ -96,7 +96,7 @@ def _claim_entry(finding: Finding) -> dict[str, Any]:
                 }
             )
     return {
-        "statement": finding.statement,
+        "statement": finding.validation.get("verified_statement", finding.statement) if finding.validation.get("status") == "verified" else finding.statement,
         "claim_type": finding.claim_type,
         "finding_id": finding.id,
         "confidence": finding.confidence,

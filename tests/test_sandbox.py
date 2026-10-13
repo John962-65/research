@@ -22,7 +22,7 @@ def test_env_scrubbed_no_secrets():
         os.environ.pop("SOME_OTHER_SECRET_TOKEN", None)
 
 
-def test_sandboxed_code_cannot_read_env_secrets(tmp_path: Path):
+def test_sandboxed_code_cannot_read_env_secrets(tmp_path: Path, require_sandbox):
     import os
 
     os.environ["RESEARCH_COPILOT_LLM_API_KEY"] = "sk-test-secret-value"
@@ -40,13 +40,13 @@ def test_sandboxed_code_cannot_read_env_secrets(tmp_path: Path):
         os.environ.pop("RESEARCH_COPILOT_LLM_API_KEY", None)
 
 
-def test_sandbox_rlimits_block_big_memory(tmp_path: Path):
+def test_sandbox_rlimits_block_big_memory(tmp_path: Path, require_sandbox):
     sandbox = ToolSandbox(tmp_path, timeout_s=30, limits={"address_space_bytes": 128 * 1024 * 1024})
     outcome = sandbox.run_python("x = bytearray(512 * 1024 * 1024)\nprint('allocated')\n")
     assert not outcome["ok"], "超出地址空间限额的分配必须失败"
 
 
-def test_sandbox_can_read_dataset_dir(tmp_path: Path):
+def test_sandbox_can_read_dataset_dir(tmp_path: Path, require_sandbox):
     (tmp_path / "data.csv").write_text("a,b\n1,2\n", encoding="utf-8")
     sandbox = ToolSandbox(tmp_path, timeout_s=30)
     outcome = sandbox.run_python("print(open('data.csv').read().strip())")
@@ -55,7 +55,8 @@ def test_sandbox_can_read_dataset_dir(tmp_path: Path):
 
 def test_isolation_record_is_honest():
     sandbox2 = ToolSandbox(None, network_isolation=True)
-    assert sandbox2.isolation_record["network_isolated"] is True
+    assert sandbox2.isolation_record["network_isolated"] is False
+    assert sandbox2.isolation_record["execution_verified"] is False
 
 
 def test_isolation_record_degraded_without_runtimes(monkeypatch):

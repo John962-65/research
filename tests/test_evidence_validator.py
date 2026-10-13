@@ -51,7 +51,7 @@ def _finding(env, statement: str, assertions: list[NumericAssertion] | None = No
 
 
 def test_l1_valid_refs_pass(env):
-    finding = _finding(env, "候选均值低于基线")
+    finding = _finding(env, "候选均值低于基线", [NumericAssertion(metric="time", value="candidate_better", check="direction")])
     validation = validate_finding(finding, env["observations_by_id"], env["materials_by_id"])
     assert validation["l1"]["status"] == "pass"
     assert validation["status"] == "verified"
@@ -120,12 +120,12 @@ def test_l3_causal_statement_downgraded_to_hypothesis(env):
     assert any("L3" in d for d in validation["downgrades"])
 
 
-def test_l3_causal_allowed_with_controlled_experiment(env):
+def test_l3_controlled_metadata_without_variables_is_insufficient(env):
     env["material"].meta["experiment_kind"] = "controlled"
     finding = _finding(env, "受控实验显示更好的采样策略导致更快")
     validation = validate_finding(finding, env["observations_by_id"], env["materials_by_id"])
-    assert validation["final_claim_type"] == "statistical_finding"
-    assert validation["status"] == "verified"
+    assert validation["final_claim_type"] == "hypothesis"
+    assert validation["status"] == "downgraded"
 
 
 def test_apply_validation_mutates(env):

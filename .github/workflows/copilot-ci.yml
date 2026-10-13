@@ -10,46 +10,40 @@ on:
 jobs:
   pytest:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
-      - name: Install pytest
-        run: python -m pip install --quiet pytest
+      - name: Install test dependencies and sandbox runtime
+        run: |
+          python -m pip install --quiet pytest pandas
+          sudo apt-get update -qq
+          sudo apt-get install -y bubblewrap
       - name: Run unit tests (offline, no LLM)
         env:
           PYTHONPATH: src
         run: |
-          python -m pytest tests/ -q --junitxml=/tmp/junit.xml
-          python - <<'PY'
-          import json, os, xml.etree.ElementTree as ET
-          suite = ET.parse("/tmp/junit.xml").getroot()[0]
-          total = int(suite.get("tests")); f = int(suite.get("failures") or 0); e = int(suite.get("errors") or 0)
-          skipped = int(suite.get("skipped") or 0)
-          evidence = {
-              "generated_at": os.environ.get("GITHUB_SHA", "local"),
-              "commit": os.environ.get("GITHUB_SHA", "unknown"),
-              "ci": True,
-              "totals": {"tests": total, "passed": total - f - e, "failed": f, "errors": e, "skipped": skipped},
-              "skip_note": "bwrap 安全集成测试在 CI 无容器运行时时明确跳过（不冒充通过）",
-          }
-          json.dump(evidence, open("docs/test-evidence.json", "w"), ensure_ascii=False, indent=2)
-          print("test-evidence 已由 CI 生成（commit", evidence["commit"][:8], "）")
-          PY
-      - name: Commit test evidence
-        run: |
-          git config user.name "research-copilot-ci"
-          git config user.email "ci@noreply.github.com"
-          git add docs/test-evidence.json
-          git diff --cached --quiet || git commit -m "CI: 更新测试证据（$GITHUB_SHA）"
-          git push origin HEAD:research-copilot
+          python -m pytest tests/ -q --junitxml=test-results/junit.xml
+      - name: Generate evidence even when tests fail
+        if: always()
+        run: python scripts/write_test_evidence.py --junit test-results/junit.xml --out test-results/test-evidence.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-evidence-${{ github.sha }}
+          path: test-results/
+          if-no-files-found: error
       - name: Guard — no legacy package dependency
+        if: always()
         run: |
           if grep -rn "research_agent" src/ tests/ --include="*.py"; then
             echo "::error 发现对旧包 research_agent 的依赖"; exit 1
           fi
       - name: Guard — no committed credentials
+        if: always()
         run: |
           if git grep -I -nE "sk-[A-Za-z0-9_-]{20,}" -- .; then
             echo "::error 检测到疑似 API Key"; exit 1

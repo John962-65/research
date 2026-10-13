@@ -1,0 +1,59 @@
+{
+  "mode": "offline; deterministic diagnostics + stub evaluation only; no new model capability scores",
+  "paco_data_sha256": "d90f16d29f2bcc31c8ac35358bcddd202b1bbf033fafc609e0ce8d3144870050",
+  "n_observations": 15,
+  "claim_counts": {
+    "established": 1,
+    "current": 0,
+    "insufficient": 0
+  },
+  "n_hypotheses": 2,
+  "n_experiments": 2,
+  "benchmark_tables": {
+    "discoverybench/real/test/archaeology/metadata_18": [
+      {
+        "name": "capital",
+        "n_rows": 39
+      },
+      {
+        "name": "pollen_openness_score_Belau_Woserin_Feeser_et_al_2019",
+        "n_rows": 4084
+      },
+      {
+        "name": "time_series_data",
+        "n_rows": 3601
+      }
+    ],
+    "discoverybench/real/test/introduction_pathways_non-native_plants/metadata_4": [
+      {
+        "name": "invaded_niche_pathways",
+        "n_rows": 632
+      },
+      {
+        "name": "invasion_success_pathways",
+        "n_rows": 81
+      },
+      {
+        "name": "temporal_trends_contingency_table",
+        "n_rows": 12
+      }
+    ],
+    "discoverybench/real/test/meta_regression/metadata_10": [
+      {
+        "name": "meta-regression_joined_data_heterogeneity_in_replication_projects",
+        "n_rows": 86
+      }
+    ],
+    "discoverybench/real/test/meta_regression_raw/metadata_10": [
+      {
+        "name": "meta-regression_replication_success_data_heterogeneity_in_replication_projects",
+        "n_rows": 143
+      },
+      {
+        "name": "meta-regression_study_data_heterogeneity_in_replication_projects",
+        "n_rows": 927
+      }
+    ]
+  },
+  "stub_four_groups_complete": true
+}

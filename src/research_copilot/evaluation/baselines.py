@@ -25,6 +25,12 @@ from typing import Any
 
 from .sandbox import ToolSandbox
 
+
+def _exception_failure_class(exc: Exception) -> str:
+    from urllib.error import URLError
+    from ..integrations.llm import LLMUnavailable
+    return "transport_failure" if isinstance(exc, (ConnectionError, TimeoutError, URLError, LLMUnavailable)) else "executor_error"
+
 ANSWER_SCHEMA = {
     "hypothesis": "一句话主假设陈述",
     "variables": ["涉及变量"],
@@ -33,6 +39,7 @@ ANSWER_SCHEMA = {
     "numeric_assertions": [
         {
             "metric": "断言名",
+            "table": "数据表相对文件名（多表任务必填；须与概要或画像中的 file 字段一致）",
             "value": 0.0,
             "check": "mean|median|percentile_p95|percent_change_from_baseline|ols_beta",
             "group": "组名（mean/median/p95 时）",
@@ -81,19 +88,20 @@ class GroupResult:
 
 
 _DSML_INVOKE_RE = re.compile(r'invoke name="([\w.-]+)"')
-_DSML_PARAM_RE = re.compile(r'<\uFF5C?\uFF5C?DSML.*?parameter name="(\w+)"[^>]*>(.*?)</\uFF5C?\uFF5C?DSML.*?parameter>', re.DOTALL)
+_DSML_INVOKE_BLOCK = re.compile(r'<(?:[｜|]*DSML[｜|]*)?invoke\s+name="([\w.-]+)"[^>]*>(.*?)</(?:[｜|]*DSML[｜|]*)?invoke\s*>', re.DOTALL)
+_DSML_PARAM_RE = re.compile(r'<(?:[｜|]*DSML[｜|]*)?parameter\s+name="(\w+)"[^>]*>(.*?)</(?:[｜|]*DSML[｜|]*)?parameter\s*>', re.DOTALL)
 _DSML_MARK_RE = re.compile(r"<\uFF5C?\uFF5C?DSML[^>]*>")
 
 
 def _parse_dsml_tool_call(text: str) -> dict[str, Any] | None:
     """DeepSeek DSML 工具调用格式提取（invoke name="python" + parameter code）。"""
-    invoke = _DSML_INVOKE_RE.search(text)
-    if not invoke:
+    blocks = _DSML_INVOKE_BLOCK.findall(text)
+    if len(blocks) != 1:
         return None
-    tool = invoke.group(1)
+    tool, body = blocks[0]
     params: dict[str, str] = {}
-    for name, body in _DSML_PARAM_RE.findall(text):
-        params[name] = body
+    for name, parameter in _DSML_PARAM_RE.findall(body):
+        params[name] = parameter
     if tool == "python" and params.get("code"):
         return {"tool": "python", "code": params["code"]}
     if tool == "diagnose":
@@ -103,23 +111,42 @@ def _parse_dsml_tool_call(text: str) -> dict[str, Any] | None:
 
 def _parse_answer(text: str) -> dict[str, Any]:
     text = text.strip()
+    if text.startswith("["):
+        return {}
     # DeepSeek DSML 工具调用优先（第三方模型 agent 格式兼容）
     dsml_tool = _parse_dsml_tool_call(text)
     if dsml_tool:
         return dsml_tool
-    fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
-    if fenced:
-        text = fenced.group(1).strip()
-    # 剥除 DSML/专有标记行后再提取 JSON（最终答案可能被包裹）
-    stripped = _DSML_MARK_RE.sub("", text).strip()
-    for candidate in (stripped, text):
-        match = re.search(r"\{.*\}", candidate, re.DOTALL)
-        if match:
-            try:
-                return json.loads(match.group(0))
-            except json.JSONDecodeError:
-                continue
-    return {}
+    # raw_decode 正确处理字符串里的大括号；多个动作绝不猜选或批量执行。
+    decoder = json.JSONDecoder()
+    found = []
+    position = 0
+    while position < len(text):
+        start = text.find("{", position)
+        if start < 0:
+            break
+        try:
+            parsed, end = decoder.raw_decode(text, start)
+        except json.JSONDecodeError:
+            # 不从损坏的外层 JSON 中捞出嵌套对象冒充完整答案。
+            return {}
+        if isinstance(parsed, dict):
+            found.append(parsed)
+        position = end
+    return found[0] if len(found) == 1 else {}
+
+
+def valid_final_answer(answer: dict[str, Any]) -> bool:
+    return isinstance(answer.get("hypothesis"), str) and bool(answer["hypothesis"].strip()) and not answer.get("tool")
+
+
+def trace_diagnostics(trace: list[dict[str, Any]]) -> dict[str, int]:
+    return {
+        "parse_failures": sum(t.get("kind") == "unparseable" for t in trace),
+        "tool_execution_failures": sum(t.get("kind") == "tool" and not t.get("outcome", {}).get("ok", False) for t in trace),
+        "tool_budget_exhaustions": sum(t.get("kind") == "tool_budget_exhausted" for t in trace),
+        "transport_failures": sum(t.get("kind") in ("llm_error", "selfcheck_error") and t.get("failure_class", "transport_failure") == "transport_failure" for t in trace),
+    }
 
 
 # ---------- 共享上下文构建 ----------
@@ -129,6 +156,7 @@ def _dataset_brief(tables: list[dict[str, Any]], head_n: int = 5) -> str:
     brief = [
         {
             "table": table["name"],
+            "file": table.get("file") or (table["rows"][0].get("__dataset_file") if table["rows"] else table["name"]),
             "n_rows": len(table["rows"]),
             "columns": _columns(table["rows"]),
             "head": table["rows"][:head_n],
@@ -156,7 +184,7 @@ def _data_profile(tables: list[dict[str, Any]]) -> str:
     out = {"tables": []}
     for table in tables:
         rows = table["rows"]
-        profile: dict[str, Any] = {"table": table["name"], "n_rows": len(rows), "column_stats": {}}
+        profile: dict[str, Any] = {"table": table["name"], "file": table.get("file") or (rows[0].get("__dataset_file") if rows else table["name"]), "n_rows": len(rows), "column_stats": {}}
         for column in _columns(rows):
             values = numeric(rows, column)
             if values and len(values) >= max(2, int(0.3 * len(rows))):
@@ -278,21 +306,30 @@ def _react_loop(
     llm_calls = 0
     tool_calls = 0
     for step in range(budget.max_steps):
-        raw = llm.complete(ANSWER_SYSTEM_PROMPT, context, purpose=f"{purpose_prefix}_step_{step}")
         llm_calls += 1
+        request = context + f"\n\n本任务还剩 {budget.max_steps-step} 次模型调用。每次只输出一个工具动作或最终答案；不得编造工具结果。"
+        try:
+            raw = llm.complete(ANSWER_SYSTEM_PROMPT, request, purpose=f"{purpose_prefix}_step_{step}")
+        except Exception as exc:
+            trace.append({"step": step, "kind": "llm_error", "request": request, "error": f"{type(exc).__name__}: {exc}", "failure_class": _exception_failure_class(exc)})
+            break
         parsed = _parse_answer(raw) or {}
+        trace.append({"step": step, "kind": "model_response", "request": request, "raw": raw})
+        context += f"\n\n助手上一条响应：\n{raw}"
         if parsed.get("tool") == "python" and isinstance(parsed.get("code"), str):
             if tool_calls >= budget.max_tool_calls:
                 trace.append({"step": step, "kind": "tool_budget_exhausted"})
+                context += "\n\n工具调用预算已耗尽，请只给出基于现有结果的最终答案；无法判断时如实说明。"
                 continue
             outcome = sandbox.run_python(parsed["code"])
             tool_calls += 1
-            trace.append({"step": step, "kind": "tool", "code": parsed["code"], "outcome": {k: outcome.get(k) for k in ("ok", "stdout", "stderr")}})
+            trace.append({"step": step, "kind": "tool", "code": parsed["code"], "outcome": outcome})
             context += f"\n\n工具结果（第 {step + 1} 步）：{json.dumps({'ok': outcome.get('ok'), 'stdout': outcome.get('stdout', '')[:3000], 'stderr': outcome.get('stderr', '')[:800]}, ensure_ascii=False)}"
             continue
         if parsed.get("tool") == "diagnose" and diagnose_fn is not None:
             if tool_calls >= budget.max_tool_calls:
                 trace.append({"step": step, "kind": "tool_budget_exhausted"})
+                context += "\n\n工具调用预算已耗尽，请只给出基于现有结果的最终答案；无法判断时如实说明。"
                 continue
             observations = diagnose_fn()
             tool_calls += 1
@@ -302,11 +339,12 @@ def _react_loop(
                 f"{pack_observations(observations)}\n\n（可继续用 python 或直接给最终 JSON 答案）"
             )
             continue
-        if parsed:
+        if parsed and not parsed.get("tool"):
             answer = parsed
             trace.append({"step": step, "kind": "answer"})
             break
-        trace.append({"step": step, "kind": "unparseable", "raw": raw[:400]})
+        trace.append({"step": step, "kind": "unparseable", "raw": raw})
+        context += '\n\n协议错误：响应无法解析或包含多个动作。下一次只返回一个完整 JSON 对象；工具动作须为 {"tool":"python","code":"..."}，不得自填工具结果。'
     return answer, raw, llm_calls, tool_calls, trace
 
 
@@ -319,9 +357,9 @@ def run_group_a(llm: Any, task, budget: GroupBudget | None = None, sandbox: Tool
     tables = load_task_tables(task)
     context = f"研究问题：{task.query}\n\n数据集概要：{_dataset_brief(tables)}\n\n{TOOL_INSTRUCTION}"
     answer, raw, llm_calls, tool_calls, trace = _react_loop(llm, context, sandbox, budget, "A", task.task_id, "react_a")
-    return GroupResult("A", task.task_id, answer, raw, llm_calls, tool_calls, bool(answer.get("hypothesis")),
+    return GroupResult("A", task.task_id, answer, raw, llm_calls, tool_calls, valid_final_answer(answer),
                        failure_class=classify_failure("", answer, trace, llm_calls, budget.max_steps),
-                       error="" if answer.get("hypothesis") else "未在步数预算内产出有效答案", trace=trace)
+                       error="" if valid_final_answer(answer) else "未在步数预算内产出有效答案", trace=trace)
 
 
 def run_group_b(llm: Any, task, budget: GroupBudget | None = None, sandbox: ToolSandbox | None = None) -> GroupResult:
@@ -333,9 +371,9 @@ def run_group_b(llm: Any, task, budget: GroupBudget | None = None, sandbox: Tool
     tables = load_task_tables(task)
     context = f"研究问题：{task.query}\n\n数据画像（无诊断/证据模块）：{_data_profile(tables)}\n\n{TOOL_INSTRUCTION}"
     answer, raw, llm_calls, tool_calls, trace = _react_loop(llm, context, sandbox, budget, "B", task.task_id, "react_b")
-    return GroupResult("B", task.task_id, answer, raw, llm_calls, tool_calls, bool(answer.get("hypothesis")),
+    return GroupResult("B", task.task_id, answer, raw, llm_calls, tool_calls, valid_final_answer(answer),
                        failure_class=classify_failure("", answer, trace, llm_calls, budget.max_steps),
-                       error="" if answer.get("hypothesis") else "未在步数预算内产出有效答案", trace=trace)
+                       error="" if valid_final_answer(answer) else "未在步数预算内产出有效答案", trace=trace)
 
 
 def run_group_c1(llm: Any, task, budget: GroupBudget | None = None, sandbox: ToolSandbox | None = None) -> GroupResult:
@@ -371,13 +409,20 @@ def run_group_c1(llm: Any, task, budget: GroupBudget | None = None, sandbox: Too
     # 预算内自检重答（C 组专属能力：证据约束闭环）
     if failed and llm_calls < budget.max_steps:
         error_report = json.dumps({"numeric_assertion_failures": failed}, ensure_ascii=False)
+        context = next((t["request"] for t in reversed(trace) if t.get("kind") == "model_response"), context)
+        context += f"\n\n待修正答案：{json.dumps(answer, ensure_ascii=False)}"
         context += (
             f"\n\n[证据自检未通过——数值断言与数据重算不一致，请修正后重新输出最终 JSON 答案]\n{error_report}"
         )
-        raw2 = llm.complete(ANSWER_SYSTEM_PROMPT, context, purpose="react_c1_selfcheck")
         llm_calls += 1
+        try:
+            raw2 = llm.complete(ANSWER_SYSTEM_PROMPT, context, purpose="react_c1_selfcheck")
+        except Exception as exc:
+            trace.append({"step": llm_calls - 1, "kind": "selfcheck_error", "request": context, "error": f"{type(exc).__name__}: {exc}", "failure_class": _exception_failure_class(exc)})
+            raw2 = ""
         parsed = _parse_answer(raw2) or {}
-        if parsed.get("hypothesis"):
+        trace.append({"step": llm_calls - 1, "kind": "model_response", "request": context, "raw": raw2})
+        if valid_final_answer(parsed):
             answer = parsed
             raw = raw2
             trace.append({"step": llm_calls - 1, "kind": "selfcheck_answer"})
@@ -386,9 +431,9 @@ def run_group_c1(llm: Any, task, budget: GroupBudget | None = None, sandbox: Too
             self_check["n_fail"] = len([c for c in rechecks if c.get("status") == "fail"])
             self_check["causal_without_basis"] = causal_claims_without_basis(answer)
             self_check["corrective_round"] = True
-    return GroupResult("C1", task.task_id, answer, raw, llm_calls, tool_calls, bool(answer.get("hypothesis")),
+    return GroupResult("C1", task.task_id, answer, raw, llm_calls, tool_calls, valid_final_answer(answer),
                        failure_class=classify_failure("", answer, trace, llm_calls, budget.max_steps),
-                       error="" if answer.get("hypothesis") else "未在步数预算内产出有效答案",
+                       error="" if valid_final_answer(answer) else "未在步数预算内产出有效答案",
                        self_check=self_check, trace=trace)
 
 
@@ -426,13 +471,20 @@ def run_group_c2(llm: Any, task, budget: GroupBudget | None = None, sandbox: Too
     }
     if failed and llm_calls < budget.max_steps:
         error_report = json.dumps({"numeric_assertion_failures": failed}, ensure_ascii=False)
+        context = next((t["request"] for t in reversed(trace) if t.get("kind") == "model_response"), context)
+        context += f"\n\n待修正答案：{json.dumps(answer, ensure_ascii=False)}"
         context += (
             f"\n\n[证据自检未通过——数值断言与数据重算不一致，请修正后重新输出最终 JSON 答案]\n{error_report}"
         )
-        raw2 = llm.complete(ANSWER_SYSTEM_PROMPT, context, purpose="react_c2_selfcheck")
         llm_calls += 1
+        try:
+            raw2 = llm.complete(ANSWER_SYSTEM_PROMPT, context, purpose="react_c2_selfcheck")
+        except Exception as exc:
+            trace.append({"step": llm_calls - 1, "kind": "selfcheck_error", "request": context, "error": f"{type(exc).__name__}: {exc}", "failure_class": _exception_failure_class(exc)})
+            raw2 = ""
         parsed = _parse_answer(raw2) or {}
-        if parsed.get("hypothesis"):
+        trace.append({"step": llm_calls - 1, "kind": "model_response", "request": context, "raw": raw2})
+        if valid_final_answer(parsed):
             answer = parsed
             raw = raw2
             trace.append({"step": llm_calls - 1, "kind": "selfcheck_answer"})
@@ -441,9 +493,9 @@ def run_group_c2(llm: Any, task, budget: GroupBudget | None = None, sandbox: Too
             self_check["n_fail"] = len([c for c in rechecks if c.get("status") == "fail"])
             self_check["causal_without_basis"] = causal_claims_without_basis(answer)
             self_check["corrective_round"] = True
-    return GroupResult("C2", task.task_id, answer, raw, llm_calls, tool_calls, bool(answer.get("hypothesis")),
+    return GroupResult("C2", task.task_id, answer, raw, llm_calls, tool_calls, valid_final_answer(answer),
                        failure_class=classify_failure("", answer, trace, llm_calls, budget.max_steps),
-                       error="" if answer.get("hypothesis") else "未在步数预算内产出有效答案",
+                       error="" if valid_final_answer(answer) else "未在步数预算内产出有效答案",
                        self_check=self_check, trace=trace)
 
 
@@ -451,15 +503,18 @@ def classify_failure(
     error: str, answer: dict[str, Any], trace: list[dict[str, Any]], llm_calls: int, max_steps: int
 ) -> str:
     """Agent 交互失败五分类（审查 P0-1）：定位完成率损失的机制。"""
-    if answer and not answer.get("hypothesis"):
+    for entry in reversed(trace):
+        if entry.get("kind") == "llm_error":
+            return entry.get("failure_class", "transport_failure")
+    if answer and not valid_final_answer(answer):
         return "invalid_final_answer"
     if error and any(marker in error for marker in ("LLM 调用失败", "timed out", "HTTP", "SSL", "Connection", "launch failed")):
         return "transport_failure"
     if not answer:
         has_tool = any(t.get("kind") in ("tool", "diagnose") for t in trace)
         unparseable = any(t.get("kind") == "unparseable" for t in trace)
-        if has_tool and llm_calls >= max_steps:
-            return "tool_loop_exhausted"
+        if any(t.get("kind") == "tool" and t.get("outcome", {}).get("ok") is False for t in trace):
+            return "tool_execution_failure"
         if unparseable:
             return "output_parse_failure"
         if has_tool:

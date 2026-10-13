@@ -178,9 +178,9 @@ class OfficialProtocolScorer:
         var_answer = self._ask("var", build_judge_prompt(query, gold_hypo, gen_hypo, dataset_meta, "var"), 512, True)
         var = parse_var_answer(_extract_json_block(var_answer))
         rel_answer = self._ask("rel", build_judge_prompt(query, gold_hypo, gen_hypo, dataset_meta, "rel"), 512, True)
-        rel = parse_rel_answer(rel_answer)
+        rel = parse_rel_answer(_extract_json_block(rel_answer))
         for name, value in (("context", context), ("var_f1", var.get("f1")), ("rel", rel)):
-            if value is None or value < 0:
+            if value is None or not 0 <= value <= 1:
                 parse_errors.append(name)
         result["context"] = {"answer": str(context_answer)[:500], "score": context}
         result["var"] = {"answer": str(var_answer)[:500], "score": var}

@@ -6,6 +6,20 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
+
+@pytest.fixture
+def require_sandbox():
+    """实际探测命名空间能力；不可用明确跳过，不能用执行失败冒充安全测试通过。"""
+    import os
+    from research_copilot.evaluation.sandbox import check_bwrap_available
+    if not check_bwrap_available():
+        reason = "bwrap 不存在或命名空间实际启动失败：未验证沙箱集成"
+        if os.environ.get("RC_REQUIRE_SANDBOX") == "1":
+            pytest.fail(reason)
+        pytest.skip(reason)
+
 
 def write_csv(path: Path, rows: list[dict[str, Any]], columns: list[str] | None = None) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)

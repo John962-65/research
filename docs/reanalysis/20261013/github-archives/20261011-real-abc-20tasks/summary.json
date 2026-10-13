@@ -1,0 +1,480 @@
+{
+  "eval_code_version": "eval/2.0",
+  "schema_version": "rc/1.0",
+  "bench_root": "benchmarks/discoverybench/discoverybench",
+  "subset": "main",
+  "selection": {
+    "rule": "train 优先、其余按 task_id 排序补足，取前 20（subset=main，确定性可复现）",
+    "subset": "main",
+    "task_ids": [
+      "discoverybench/real/train/evolution_freshwater_fish/metadata_0",
+      "discoverybench/real/train/evolution_freshwater_fish/metadata_1",
+      "discoverybench/real/train/evolution_freshwater_fish/metadata_2",
+      "discoverybench/real/train/evolution_freshwater_fish/metadata_3",
+      "discoverybench/real/train/immigration_offshoring_effect_on_employment/metadata_0",
+      "discoverybench/real/train/immigration_offshoring_effect_on_employment/metadata_1",
+      "discoverybench/real/train/nls_bmi/metadata_0",
+      "discoverybench/real/train/nls_bmi/metadata_1",
+      "discoverybench/real/train/nls_bmi/metadata_2",
+      "discoverybench/real/train/nls_bmi/metadata_3",
+      "discoverybench/real/train/nls_bmi/metadata_4",
+      "discoverybench/real/train/nls_bmi/metadata_5",
+      "discoverybench/real/train/nls_bmi_raw/metadata_0",
+      "discoverybench/real/train/nls_bmi_raw/metadata_1",
+      "discoverybench/real/test/archaeology/metadata_0",
+      "discoverybench/real/test/archaeology/metadata_1",
+      "discoverybench/real/test/archaeology/metadata_10",
+      "discoverybench/real/test/archaeology/metadata_11",
+      "discoverybench/real/test/archaeology/metadata_12",
+      "discoverybench/real/test/archaeology/metadata_13"
+    ],
+    "composition": {
+      "from_train": 14,
+      "from_test_or_dev": 6
+    },
+    "gold_source": [
+      "answer_key",
+      "metadata"
+    ],
+    "note": "若包含 test 划分任务：其金标来自公开 answer key，已用于开发期评测，不得再作为留出集报告结论。main(real) 与 synth(gen) 同源样本不得重复计入。"
+  },
+  "task_ids": [
+    "discoverybench/real/test/archaeology/metadata_0",
+    "discoverybench/real/test/archaeology/metadata_1",
+    "discoverybench/real/test/archaeology/metadata_10",
+    "discoverybench/real/test/archaeology/metadata_11",
+    "discoverybench/real/test/archaeology/metadata_12",
+    "discoverybench/real/test/archaeology/metadata_13",
+    "discoverybench/real/train/evolution_freshwater_fish/metadata_0",
+    "discoverybench/real/train/evolution_freshwater_fish/metadata_1",
+    "discoverybench/real/train/evolution_freshwater_fish/metadata_2",
+    "discoverybench/real/train/evolution_freshwater_fish/metadata_3",
+    "discoverybench/real/train/immigration_offshoring_effect_on_employment/metadata_0",
+    "discoverybench/real/train/immigration_offshoring_effect_on_employment/metadata_1",
+    "discoverybench/real/train/nls_bmi/metadata_0",
+    "discoverybench/real/train/nls_bmi/metadata_1",
+    "discoverybench/real/train/nls_bmi/metadata_2",
+    "discoverybench/real/train/nls_bmi/metadata_3",
+    "discoverybench/real/train/nls_bmi/metadata_4",
+    "discoverybench/real/train/nls_bmi/metadata_5",
+    "discoverybench/real/train/nls_bmi_raw/metadata_0",
+    "discoverybench/real/train/nls_bmi_raw/metadata_1"
+  ],
+  "groups": [
+    "A",
+    "B",
+    "C"
+  ],
+  "model": "session-agent",
+  "judge_model": "session-agent",
+  "budget": {
+    "max_steps": 6,
+    "max_tool_calls": 8,
+    "timeout_s": 60.0
+  },
+  "fairness": "三组共用同一 ReAct 循环 / 同一工具沙箱配置 / 同一预算；差异仅在注入上下文（Copilot 模块输出）",
+  "sandbox_isolation": {
+    "env_whitelist": [
+      "PATH",
+      "LANG",
+      "LC_ALL",
+      "LC_CTYPE",
+      "TMPDIR",
+      "PYTHONHASHSEED"
+    ],
+    "rlimits": {
+      "cpu_seconds": 60,
+      "address_space_bytes": 2147483648,
+      "file_size_bytes": 16777216,
+      "max_processes": 64,
+      "open_files": 128
+    },
+    "network_isolated": true,
+    "honesty_note": "网络已通过 user+net namespace 隔离"
+  },
+  "scorer": {
+    "kind": "official-protocol/single-subhypothesis",
+    "official_eval_sha256": "83406ddbe6894429cc5012b17cb82a209d5397aa7863b0aba1bb51edf1dd6c65",
+    "judge_model": "session-agent"
+  },
+  "dry_run": false,
+  "note": "judge 模型仅用于评分并单独计量；dry_run 为 stub 管道冒烟，不构成评测结论。",
+  "started_at": "2026-10-11T06:05:05.165233+00:00",
+  "divergence_checks": {
+    "discoverybench/real/test/archaeology/metadata_0": {
+      "divergence": false,
+      "reason": "gold 与数据峰值世纪一致",
+      "raw": "{\"divergence\": false, \"reason\": \"gold 与数据峰值世纪一致\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/archaeology/metadata_1": {
+      "divergence": false,
+      "reason": "gold 2300/2200 BCE 与数据首个跃升窗口一致",
+      "raw": "{\"divergence\": false, \"reason\": \"gold 2300/2200 BCE 与数据首个跃升窗口一致\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/archaeology/metadata_10": {
+      "divergence": false,
+      "reason": "gold 与数据一致",
+      "raw": "{\"divergence\": false, \"reason\": \"gold 与数据一致\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/archaeology/metadata_11": {
+      "divergence": false,
+      "reason": "gold ~1800 BCE 与数据一致",
+      "raw": "{\"divergence\": false, \"reason\": \"gold ~1800 BCE 与数据一致\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/archaeology/metadata_12": {
+      "divergence": false,
+      "reason": "gold 与数据峰值一致",
+      "raw": "{\"divergence\": false, \"reason\": \"gold 与数据峰值一致\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/test/archaeology/metadata_13": {
+      "divergence": false,
+      "reason": "增长窗口与 gold 部分重叠（偏移一个世纪），非方向矛盾",
+      "raw": "{\"divergence\": false, \"reason\": \"增长窗口与 gold 部分重叠（偏移一个世纪），非方向矛盾\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/train/evolution_freshwater_fish/metadata_0": {
+      "divergence": false,
+      "reason": "gold 方向与数据一致（系数 0.82 与 r/slope 同量级）",
+      "raw": "{\"divergence\": false, \"reason\": \"gold 方向与数据一致（系数 0.82 与 r/slope 同量级）\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/train/evolution_freshwater_fish/metadata_1": {
+      "divergence": true,
+      "reason": "gold 称 oral gape position 与物种形成率负相关（-4.6），数据中 OGP_evol 与之正相关（r=0.587）",
+      "raw": "{\"divergence\": true, \"reason\": \"gold 称 oral gape position 与物种形成率负相关（-4.6），数据中 OGP_evol 与之正相关（r=0.587）\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/train/evolution_freshwater_fish/metadata_2": {
+      "divergence": true,
+      "reason": "gold 称体长延长演化与物种形成率无显著关联，数据实测 r=0.421 中等正相关",
+      "raw": "{\"divergence\": true, \"reason\": \"gold 称体长延长演化与物种形成率无显著关联，数据实测 r=0.421 中等正相关\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/train/evolution_freshwater_fish/metadata_3": {
+      "divergence": false,
+      "reason": "gold 弱正相关与数据一致",
+      "raw": "{\"divergence\": false, \"reason\": \"gold 弱正相关与数据一致\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/train/immigration_offshoring_effect_on_employment/metadata_0": {
+      "divergence": true,
+      "reason": "gold 称每单位使离岸就业份额降低 0.1059（负向），横截面 OLS 显示 fh_narrow_1 与 off_emp 正相关（β=0.667）；金标应为 IV 因果估计，与朴素相关矛盾",
+      "raw": "{\"divergence\": true, \"reason\": \"gold 称每单位使离岸就业份额降低 0.1059（负向），横截面 OLS 显示 fh_narrow_1 与 off_emp 正相关（β=0.667）；金标应为 IV 因果估计，与朴素相关矛盾\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/train/immigration_offshoring_effect_on_employment/metadata_1": {
+      "divergence": true,
+      "reason": "gold 称对本地就业无显著影响，OLS 显示 nat_emp 与 fh_narrow_1 显著负相关（t=-7.0）；金标应为因果（IV）估计",
+      "raw": "{\"divergence\": true, \"reason\": \"gold 称对本地就业无显著影响，OLS 显示 nat_emp 与 fh_narrow_1 显著负相关（t=-7.0）；金标应为因果（IV）估计\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/train/nls_bmi/metadata_0": {
+      "divergence": false,
+      "reason": "gold 系数 0.3596 与回归完全一致",
+      "raw": "{\"divergence\": false, \"reason\": \"gold 系数 0.3596 与回归完全一致\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/train/nls_bmi/metadata_1": {
+      "divergence": false,
+      "reason": "gold 1.5799 与子样本回归完全一致",
+      "raw": "{\"divergence\": false, \"reason\": \"gold 1.5799 与子样本回归完全一致\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/train/nls_bmi/metadata_2": {
+      "divergence": false,
+      "reason": "gold 1.1840 与子样本回归完全一致",
+      "raw": "{\"divergence\": false, \"reason\": \"gold 1.1840 与子样本回归完全一致\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/train/nls_bmi/metadata_3": {
+      "divergence": false,
+      "reason": "方向一致（负），量级有差异（可能源于 gold 的 logit/其他设定）",
+      "raw": "{\"divergence\": false, \"reason\": \"方向一致（负），量级有差异（可能源于 gold 的 logit/其他设定）\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/train/nls_bmi/metadata_4": {
+      "divergence": false,
+      "reason": "方向一致（负），量级差约 10 倍（单位/设定差异）",
+      "raw": "{\"divergence\": false, \"reason\": \"方向一致（负），量级差约 10 倍（单位/设定差异）\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/train/nls_bmi/metadata_5": {
+      "divergence": false,
+      "reason": "gold 男性系数与回归完全一致",
+      "raw": "{\"divergence\": false, \"reason\": \"gold 男性系数与回归完全一致\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/train/nls_bmi_raw/metadata_0": {
+      "divergence": false,
+      "reason": "gold 方向与数据一致",
+      "raw": "{\"divergence\": false, \"reason\": \"gold 方向与数据一致\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    },
+    "discoverybench/real/train/nls_bmi_raw/metadata_1": {
+      "divergence": false,
+      "reason": "DISSAVED 维度与 gold 一致；SAMESAVE 维度反向但 gold 未细分",
+      "raw": "{\"divergence\": false, \"reason\": \"DISSAVED 维度与 gold 一致；SAMESAVE 维度反向但 gold 未细分\"}",
+      "diagnostic_only": "不参与评分；仅标注该任务的金标-数据可信度"
+    }
+  },
+  "divergence_note": "divergence=true 的任务：金标与数据实测方向矛盾，其官方分数应解读为分歧而非模型错误（诊断性标注，不参与评分）",
+  "finished_at": "2026-10-11T06:08:50.024895+00:00",
+  "group_summaries": {
+    "A": {
+      "n_tasks": 20,
+      "completion_rate": 1.0,
+      "official_accuracy_mean": 0.6821,
+      "official_accuracy_ci95": [
+        0.5264,
+        0.8379
+      ],
+      "official_accuracy_cluster_ci95": [
+        0.3551,
+        0.8566
+      ],
+      "cluster_ci_method": "dataset cluster bootstrap (1000, seed=0), bounds [0,1]",
+      "n_datasets": 5,
+      "full_task_score_mean": 0.6821,
+      "full_task_score_ci95": [
+        0.3551,
+        0.8566
+      ],
+      "n_score_missing": 0,
+      "n_datasets_full": 5,
+      "full_task_note": "全任务分母：未完成任务记 0 分（与成功任务平均分开报告，审查 P1-2）",
+      "failure_breakdown": {},
+      "n_official_scored": 20,
+      "context_match_rate": 0.95,
+      "var_f1_mean": 0.8464,
+      "rel_score_mean": 0.775,
+      "hms_custom_mean": 1.45,
+      "unsupported_rate_mean_evaluable": 0.0,
+      "n_not_evaluable": 2,
+      "evidence": {
+        "n_assertions": 20,
+        "verified_rate": 0.0,
+        "contradicted_rate": 0.0,
+        "unverifiable_rate": 1.0,
+        "note": "unverifiable 高说明断言未被验证（不是无风险）；应通过更完整的验证器（如 ols_beta）降低"
+      },
+      "total_llm_calls": 40,
+      "total_tool_calls": 20,
+      "total_prompt_tokens": 103001,
+      "total_completion_tokens": 8970,
+      "total_judge_calls": 60,
+      "diagnostics": {
+        "parse_failures": 0,
+        "tool_execution_failures": 0,
+        "tool_budget_exhaustions": 0,
+        "transport_failures": 0
+      }
+    },
+    "B": {
+      "n_tasks": 20,
+      "completion_rate": 1.0,
+      "official_accuracy_mean": 0.6821,
+      "official_accuracy_ci95": [
+        0.5264,
+        0.8379
+      ],
+      "official_accuracy_cluster_ci95": [
+        0.3551,
+        0.8566
+      ],
+      "cluster_ci_method": "dataset cluster bootstrap (1000, seed=0), bounds [0,1]",
+      "n_datasets": 5,
+      "full_task_score_mean": 0.6821,
+      "full_task_score_ci95": [
+        0.3551,
+        0.8566
+      ],
+      "n_score_missing": 0,
+      "n_datasets_full": 5,
+      "full_task_note": "全任务分母：未完成任务记 0 分（与成功任务平均分开报告，审查 P1-2）",
+      "failure_breakdown": {},
+      "n_official_scored": 20,
+      "context_match_rate": 0.95,
+      "var_f1_mean": 0.8464,
+      "rel_score_mean": 0.775,
+      "hms_custom_mean": 1.45,
+      "unsupported_rate_mean_evaluable": 0.0,
+      "n_not_evaluable": 2,
+      "evidence": {
+        "n_assertions": 20,
+        "verified_rate": 0.0,
+        "contradicted_rate": 0.0,
+        "unverifiable_rate": 1.0,
+        "note": "unverifiable 高说明断言未被验证（不是无风险）；应通过更完整的验证器（如 ols_beta）降低"
+      },
+      "total_llm_calls": 40,
+      "total_tool_calls": 20,
+      "total_prompt_tokens": 58053,
+      "total_completion_tokens": 8970,
+      "total_judge_calls": 60,
+      "diagnostics": {
+        "parse_failures": 0,
+        "tool_execution_failures": 0,
+        "tool_budget_exhaustions": 0,
+        "transport_failures": 0
+      }
+    },
+    "C": {
+      "n_tasks": 20,
+      "completion_rate": 1.0,
+      "official_accuracy_mean": 0.6821,
+      "official_accuracy_ci95": [
+        0.5264,
+        0.8379
+      ],
+      "official_accuracy_cluster_ci95": [
+        0.3551,
+        0.8566
+      ],
+      "cluster_ci_method": "dataset cluster bootstrap (1000, seed=0), bounds [0,1]",
+      "n_datasets": 5,
+      "full_task_score_mean": 0.6821,
+      "full_task_score_ci95": [
+        0.3551,
+        0.8566
+      ],
+      "n_score_missing": 0,
+      "n_datasets_full": 5,
+      "full_task_note": "全任务分母：未完成任务记 0 分（与成功任务平均分开报告，审查 P1-2）",
+      "failure_breakdown": {},
+      "n_official_scored": 20,
+      "context_match_rate": 0.95,
+      "var_f1_mean": 0.8464,
+      "rel_score_mean": 0.775,
+      "hms_custom_mean": 1.45,
+      "unsupported_rate_mean_evaluable": 0.0,
+      "n_not_evaluable": 2,
+      "evidence": {
+        "n_assertions": 20,
+        "verified_rate": 0.0,
+        "contradicted_rate": 0.0,
+        "unverifiable_rate": 1.0,
+        "note": "unverifiable 高说明断言未被验证（不是无风险）；应通过更完整的验证器（如 ols_beta）降低"
+      },
+      "total_llm_calls": 40,
+      "total_tool_calls": 20,
+      "total_prompt_tokens": 159123,
+      "total_completion_tokens": 8970,
+      "total_judge_calls": 60,
+      "diagnostics": {
+        "parse_failures": 0,
+        "tool_execution_failures": 0,
+        "tool_budget_exhaustions": 0,
+        "transport_failures": 0
+      }
+    }
+  },
+  "comparisons": {
+    "C_vs_A": {
+      "value_key": "official_accuracy",
+      "denominator": "all_tasks (unfinished=0)",
+      "n_tasks": 20,
+      "missing_task_ids": [],
+      "delta_mean": 0.0,
+      "delta_ci95": [
+        0.0,
+        0.0
+      ],
+      "note": "全任务分母：未完成记 0；CI=按数据集分层 bootstrap（钳位 [-1,1]）；delta>0 表示 x 组更优。"
+    },
+    "C_vs_B": {
+      "value_key": "official_accuracy",
+      "denominator": "all_tasks (unfinished=0)",
+      "n_tasks": 20,
+      "missing_task_ids": [],
+      "delta_mean": 0.0,
+      "delta_ci95": [
+        0.0,
+        0.0
+      ],
+      "note": "全任务分母：未完成记 0；CI=按数据集分层 bootstrap（钳位 [-1,1]）；delta>0 表示 x 组更优。"
+    }
+  },
+  "hms_error": "",
+  "divergent_tasks": [
+    "discoverybench/real/train/evolution_freshwater_fish/metadata_1",
+    "discoverybench/real/train/evolution_freshwater_fish/metadata_2",
+    "discoverybench/real/train/immigration_offshoring_effect_on_employment/metadata_0",
+    "discoverybench/real/train/immigration_offshoring_effect_on_employment/metadata_1"
+  ],
+  "honesty_note": "历史归档离线重算；不是修复后的新模型评测。任务子集小且已用于开发，不外推能力收益。",
+  "reanalysis": {
+    "source_directory": "docs/eval-results/20261011-real-abc-20tasks",
+    "source_sha256": "71bab77c8f7b967c5b3ca4e32b3d950ef2c632d3113cbb0066067019b2531921",
+    "generated_at": "2026-10-13T03:45:48.060489+00:00",
+    "metric_code_version": "eval/2.1",
+    "scope": "仅重算汇总、置信区间与已保存轨迹异常；原始答案和官方评分未改，未重新运行模型或judge。",
+    "missing_traces": [
+      "A:discoverybench/real/test/archaeology/metadata_0",
+      "A:discoverybench/real/test/archaeology/metadata_1",
+      "A:discoverybench/real/test/archaeology/metadata_10",
+      "A:discoverybench/real/test/archaeology/metadata_11",
+      "A:discoverybench/real/test/archaeology/metadata_12",
+      "A:discoverybench/real/test/archaeology/metadata_13",
+      "A:discoverybench/real/train/evolution_freshwater_fish/metadata_0",
+      "A:discoverybench/real/train/evolution_freshwater_fish/metadata_1",
+      "A:discoverybench/real/train/evolution_freshwater_fish/metadata_2",
+      "A:discoverybench/real/train/evolution_freshwater_fish/metadata_3",
+      "A:discoverybench/real/train/immigration_offshoring_effect_on_employment/metadata_0",
+      "A:discoverybench/real/train/immigration_offshoring_effect_on_employment/metadata_1",
+      "A:discoverybench/real/train/nls_bmi/metadata_0",
+      "A:discoverybench/real/train/nls_bmi/metadata_1",
+      "A:discoverybench/real/train/nls_bmi/metadata_2",
+      "A:discoverybench/real/train/nls_bmi/metadata_3",
+      "A:discoverybench/real/train/nls_bmi/metadata_4",
+      "A:discoverybench/real/train/nls_bmi/metadata_5",
+      "A:discoverybench/real/train/nls_bmi_raw/metadata_0",
+      "A:discoverybench/real/train/nls_bmi_raw/metadata_1",
+      "B:discoverybench/real/test/archaeology/metadata_0",
+      "B:discoverybench/real/test/archaeology/metadata_1",
+      "B:discoverybench/real/test/archaeology/metadata_10",
+      "B:discoverybench/real/test/archaeology/metadata_11",
+      "B:discoverybench/real/test/archaeology/metadata_12",
+      "B:discoverybench/real/test/archaeology/metadata_13",
+      "B:discoverybench/real/train/evolution_freshwater_fish/metadata_0",
+      "B:discoverybench/real/train/evolution_freshwater_fish/metadata_1",
+      "B:discoverybench/real/train/evolution_freshwater_fish/metadata_2",
+      "B:discoverybench/real/train/evolution_freshwater_fish/metadata_3",
+      "B:discoverybench/real/train/immigration_offshoring_effect_on_employment/metadata_0",
+      "B:discoverybench/real/train/immigration_offshoring_effect_on_employment/metadata_1",
+      "B:discoverybench/real/train/nls_bmi/metadata_0",
+      "B:discoverybench/real/train/nls_bmi/metadata_1",
+      "B:discoverybench/real/train/nls_bmi/metadata_2",
+      "B:discoverybench/real/train/nls_bmi/metadata_3",
+      "B:discoverybench/real/train/nls_bmi/metadata_4",
+      "B:discoverybench/real/train/nls_bmi/metadata_5",
+      "B:discoverybench/real/train/nls_bmi_raw/metadata_0",
+      "B:discoverybench/real/train/nls_bmi_raw/metadata_1",
+      "C:discoverybench/real/test/archaeology/metadata_0",
+      "C:discoverybench/real/test/archaeology/metadata_1",
+      "C:discoverybench/real/test/archaeology/metadata_10",
+      "C:discoverybench/real/test/archaeology/metadata_11",
+      "C:discoverybench/real/test/archaeology/metadata_12",
+      "C:discoverybench/real/test/archaeology/metadata_13",
+      "C:discoverybench/real/train/evolution_freshwater_fish/metadata_0",
+      "C:discoverybench/real/train/evolution_freshwater_fish/metadata_1",
+      "C:discoverybench/real/train/evolution_freshwater_fish/metadata_2",
+      "C:discoverybench/real/train/evolution_freshwater_fish/metadata_3",
+      "C:discoverybench/real/train/immigration_offshoring_effect_on_employment/metadata_0",
+      "C:discoverybench/real/train/immigration_offshoring_effect_on_employment/metadata_1",
+      "C:discoverybench/real/train/nls_bmi/metadata_0",
+      "C:discoverybench/real/train/nls_bmi/metadata_1",
+      "C:discoverybench/real/train/nls_bmi/metadata_2",
+      "C:discoverybench/real/train/nls_bmi/metadata_3",
+      "C:discoverybench/real/train/nls_bmi/metadata_4",
+      "C:discoverybench/real/train/nls_bmi/metadata_5",
+      "C:discoverybench/real/train/nls_bmi_raw/metadata_0",
+      "C:discoverybench/real/train/nls_bmi_raw/metadata_1"
+    ],
+    "execution_note": "旧运行使用原执行器，不能视为修复后能力评测；终态失败标签不是经实验确认的根因。"
+  }
+}
