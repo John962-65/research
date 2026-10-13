@@ -108,9 +108,12 @@ def test_group_c_self_check_corrective_round(bench_root: Path):
     assert result.llm_calls == 2  # 初答 + 自检重答
 
 
-def test_cost_delta_per_task_not_cumulative(bench_root: Path, tmp_path: Path):
+def test_cost_delta_per_task_not_cumulative(bench_root: Path, tmp_path: Path, monkeypatch):
     """每任务成本必须为差值：累计计数会被求和重复计算（审查发现）。"""
     from research_copilot.evaluation.discoverybench_adapter import load_tasks
+    import research_copilot.evaluation.runner as runner_module
+
+    monkeypatch.setattr(runner_module, "check_bwrap_available", lambda: True)
 
     class CountingLLM(StubLLM):
         def __init__(self):

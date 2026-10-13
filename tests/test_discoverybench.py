@@ -19,7 +19,7 @@ from research_copilot.evaluation.metrics import (
     paired_delta,
     unsupported_conclusion_rate,
 )
-from research_copilot.evaluation.runner import run_evaluation
+from research_copilot.evaluation.runner import preflight_evaluation_sandbox, run_evaluation
 from research_copilot.integrations.llm import StubLLM
 
 from tests.conftest import latency_rows, write_csv
@@ -172,3 +172,34 @@ def test_runner_dry_run_end_to_end(bench_root: Path, tmp_path: Path):
     run_dirs = list((tmp_path / "eval-runs").iterdir())
     assert run_dirs and (run_dirs[0] / "summary.md").exists()
     assert (run_dirs[0] / "config.json").exists()
+
+
+def test_formal_evaluation_rejects_unavailable_sandbox_before_start(monkeypatch, tmp_path):
+    import research_copilot.evaluation.runner as runner_module
+
+    monkeypatch.setattr(runner_module, "check_bwrap_available", lambda: False)
+    llm = StubLLM(default='{"hypothesis":"should not run"}')
+    out_dir = tmp_path / "eval-runs"
+    with pytest.raises(RuntimeError, match="正式评测已拒绝启动"):
+        run_evaluation(
+            bench_root=tmp_path / "missing-benchmark",
+            out_dir=out_dir,
+            llm=llm,
+            dry_run=False,
+        )
+    assert not out_dir.exists()
+    assert llm.usage_summary()["total_calls"] == 0
+
+
+def test_dry_run_skips_sandbox_preflight(monkeypatch):
+    import research_copilot.evaluation.runner as runner_module
+
+    monkeypatch.setattr(
+        runner_module,
+        "check_bwrap_available",
+        lambda: pytest.fail("dry-run must not require bwrap"),
+    )
+    assert preflight_evaluation_sandbox(dry_run=True) == {
+        "required": False,
+        "status": "bypassed_dry_run",
+    }

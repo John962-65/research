@@ -95,8 +95,11 @@ def bench_root(tmp_path: Path) -> Path:
     return tmp_path / "discoverybench"
 
 
-def test_runner_records_divergence(bench_root: Path, tmp_path: Path):
+def test_runner_records_divergence(bench_root: Path, tmp_path: Path, monkeypatch):
     """runner 在正式模式记录每任务分歧诊断（stub judge：divergence=false）。"""
+    import research_copilot.evaluation.runner as runner_module
+
+    monkeypatch.setattr(runner_module, "check_bwrap_available", lambda: True)
     summary = run_evaluation_with_stub(bench_root, tmp_path)
     # summary 即 config 的超集（**config 展开）
     assert summary["divergence_checks"], "必须记录分歧诊断"

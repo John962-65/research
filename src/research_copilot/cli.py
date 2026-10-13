@@ -258,10 +258,11 @@ def cmd_decision_list(args: Any) -> int:
 
 # ---------- evaluation ----------
 def cmd_evaluate(args: Any) -> int:
-    from .evaluation.runner import run_evaluation
+    from .evaluation.runner import preflight_evaluation_sandbox, run_evaluation
 
     groups = [g.strip().upper() for g in (args.groups or "A,B,C1,C2").split(",") if g.strip()]
     task_ids = args.task_ids if args.task_ids else None
+    preflight_evaluation_sandbox(dry_run=args.dry_run)
     from .evaluation.baselines import GroupBudget
     from .integrations.llm import OpenAICompatibleLLM
 

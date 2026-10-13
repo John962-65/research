@@ -29,8 +29,21 @@ from .metrics import (
     unsupported_conclusion_rate,
     var_precision_heuristic,
 )
+from .sandbox import check_bwrap_available
 
-EVAL_CODE_VERSION = "eval/2.1"
+EVAL_CODE_VERSION = "eval/2.2"
+
+
+def preflight_evaluation_sandbox(dry_run: bool = False) -> dict[str, Any]:
+    """正式评测必须先验证 bwrap 命名空间可启动；stub dry-run 可离线执行。"""
+    if dry_run:
+        return {"required": False, "status": "bypassed_dry_run"}
+    if not check_bwrap_available():
+        raise RuntimeError(
+            "正式评测已拒绝启动：bwrap 命名空间预检失败；未创建评测目录，也未调用模型。"
+            "请使用支持 bwrap user/mount/network namespace 的 Runner；管道冒烟可使用 --dry-run。"
+        )
+    return {"required": True, "status": "passed", "runtime": "bwrap"}
 
 
 def _write_json(path: Path, payload: Any) -> None:
@@ -56,6 +69,7 @@ def run_evaluation(
     dry_run: bool = False,
     judge_hms_custom: bool = False,
 ) -> dict[str, Any]:
+    sandbox_preflight = preflight_evaluation_sandbox(dry_run=dry_run)
     from ..integrations.llm import LLMUnavailable, OpenAICompatibleLLM
     from .official_scoring import OFFICIAL_EVAL_SHA256, OfficialProtocolScorer
 
@@ -98,6 +112,7 @@ def run_evaluation(
         "budget": {"max_steps": budget.max_steps, "max_tool_calls": budget.max_tool_calls, "timeout_s": budget.timeout_s},
         "fairness": "三组共用同一 ReAct 循环 / 同一工具沙箱配置 / 同一预算；差异仅在注入上下文（Copilot 模块输出）",
         "sandbox_isolation": probe_sandbox.isolation_record,
+        "sandbox_preflight": sandbox_preflight,
         "scorer": {
             "kind": "official-protocol/single-subhypothesis",
             "official_eval_sha256": OFFICIAL_EVAL_SHA256,
@@ -323,10 +338,15 @@ def render_summary_markdown(summary: dict[str, Any]) -> str:
             f"| {agg.get('n_not_evaluable', 0)} | {agg['total_llm_calls']} |"
         )
     lines.append("")
-    lines += ["证据验证仅覆盖显式声明的断言；未声明断言不代表结论无风险。", ""]
+    lines += [
+        "Benchmark Evidence Verification Coverage 只统计答案中显式声明的数值断言；未声明的数字和自由文本结论不在分母中，也不代表已验证。",
+        "此指标与诊断报告中的结构化主张覆盖率使用不同输入。",
+        "",
+    ]
     for group, agg in summary["group_summaries"].items():
         evidence = agg.get("evidence") or {}
-        lines.append(f"- {group}：已复核断言 {evidence.get('n_assertions', 0)}；验证通过/矛盾/不可验证比例 = "
+        lines.append(f"- {group}：声明数值断言 {evidence.get('n_assertions', 0)}；程序复核覆盖率 {evidence.get('coverage_rate')}；"
+                     f"通过/矛盾/不可验证比例 = "
                      f"{evidence.get('verified_rate')}/{evidence.get('contradicted_rate')}/{evidence.get('unverifiable_rate')}；"
                      f"评分缺失 {agg.get('n_score_missing', 0)}；逐步异常计数 {agg.get('diagnostics', {})}")
     lines.append("")

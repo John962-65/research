@@ -312,8 +312,9 @@ def var_precision_heuristic(answer: dict[str, Any], gold_text: str) -> float | N
 
 
 def evidence_rates(records: list[dict[str, Any]]) -> dict[str, Any]:
-    """证据三指标（修复审查 #3：unverifiable 不再被 0% 无依据比例掩盖）。
+    """汇总 Benchmark 答案中显式数值断言的覆盖率与三类复核结果。
 
+    Coverage 包含 pass 和 fail；无法复核的声明仍保留在总数分母中。
     - verified_rate: 程序复算且与声称一致的断言比例；
     - contradicted_rate: 复算与声称矛盾的比例；
     - unverifiable_rate: 缺少验证方法/数据无法重算的比例。
@@ -329,8 +330,11 @@ def evidence_rates(records: list[dict[str, Any]]) -> dict[str, Any]:
             else:
                 unverifiable += 1
     total = verified + contradicted + unverifiable
+    checked = verified + contradicted
     return {
         "n_assertions": total,
+        "n_programmatically_checked": checked,
+        "coverage_rate": round(checked / total, 4) if total else None,
         "verified_rate": round(verified / total, 4) if total else None,
         "contradicted_rate": round(contradicted / total, 4) if total else None,
         "unverifiable_rate": round(unverifiable / total, 4) if total else None,

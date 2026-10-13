@@ -51,7 +51,8 @@ jobs:
 
   sandbox-security:
     name: sandbox-namespace-acceptance
-    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux, sandbox]
     permissions:
       contents: read
     steps:
@@ -59,11 +60,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
-      - name: Install test dependencies and sandbox runtime
+      - name: Install test dependencies
         run: |
           python -m pip install --quiet pytest pandas
-          sudo apt-get update -qq
-          sudo apt-get install -y bubblewrap
+      - name: Check bubblewrap runtime is installed
+        run: bwrap --version
       - name: Run sandbox integration tests (must execute)
         env:
           PYTHONPATH: src

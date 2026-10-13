@@ -48,6 +48,11 @@
 
 ## 证据三指标（替代单一"无依据比例"）
 
+- DiscoveryBench A/B/C 的指标只覆盖每条答案中显式声明的 `numeric_assertions`；
+  `evidence_verification_coverage` 覆盖诊断模块的结构化数值断言与关系主张。两者使用
+  不同输入，不能互相替代，也都不验证未结构化的自由文本结论。
+- **coverage_rate**：程序复核得到 pass 或 fail 的断言数 / 显式声明断言总数；不可复核断言
+  保留在分母中。
 - **verified_rate**：程序复算且与声称一致的断言比例；
 - **contradicted_rate**：复算矛盾的比例（真正"无依据"）；
 - **unverifiable_rate**：缺少验证方法/数据无法重算的比例（未验证 ≠ 无风险）。
@@ -60,6 +65,10 @@
 启动成功；不可用时拒绝执行。数据快照文件只读绑定，工作目录按任务保持到 `close()`，
 跨步文件可复用；超时终止整个进程组。`isolation_record` 区分运行时可用性与实际执行
 结果，并保存快照哈希。显式 `allow_unsafe_fallback` 仅为开发用途，不计作正式隔离。
+
+- 普通 GitHub 托管 Runner 执行单元测试；强制隔离集成作业要求注册专用自托管 Linux Runner，
+  标签为 `sandbox`，并设置 `RC_REQUIRE_SANDBOX=1`。该 Runner 必须支持 bwrap 命名空间，且
+  应采用隔离、短生命周期环境，不向其提供仓库密钥。
 
 - **环境变量白名单**：子进程只获得 PATH/LANG 等最小 env——API Key 等凭据不可能被
   生成代码读取（有测试断言）；
