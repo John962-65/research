@@ -59,9 +59,12 @@ python scripts/write_test_evidence.py --junit test-results/junit.xml
 PYTHONPATH=src python scripts/reanalyze_archived_runs.py --source eval-runs --out docs/reanalysis/latest
 ```
 
+仓库中的 [`docs/test-evidence.json`](docs/test-evidence.json) 是绑定到提交 `e96cf780` 的历史本地快照，记录生成时工作区有未提交改动，不能代表当前提交或最新 CI。每次提交的 CI 测试证据以对应 GitHub Actions 运行中的 `test-evidence-<commit SHA>` artifact 为准。
+
 沙箱执行依赖 Linux `bwrap`（Ubuntu/Debian 包名 `bubblewrap`）；仅检测到可执行文件并不足以
-证明命名空间可用。不可用时默认拒绝模型代码执行，集成测试明确跳过。要求隔离集成必须
-实际通过时设置 `RC_REQUIRE_SANDBOX=1`；显式开发降级不构成正式评测证据。
+证明命名空间可用。普通测试作业在运行环境不支持时会跳过隔离集成；单独的
+`sandbox-namespace-acceptance` 作业设置 `RC_REQUIRE_SANDBOX=1`，因此无法实际启动隔离时该
+验收作业会失败。显式开发降级不构成正式评测证据。
 工具工作目录按任务保留，跨步输出文件在 `close()` 前可复用，任务结束清理。
 
 离线说明：没有 LLM 时，诊断仅输出确定性统计观察与规则式待研究问题，并明确标注 `offline`；LLM 生成的发现未通过证据校验会被降级为 `unverified_conjecture`，不会被写成研究发现。

@@ -48,3 +48,29 @@ jobs:
           if git grep -I -nE "sk-[A-Za-z0-9_-]{20,}" -- .; then
             echo "::error 检测到疑似 API Key"; exit 1
           fi
+
+  sandbox-security:
+    name: sandbox-namespace-acceptance
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install test dependencies and sandbox runtime
+        run: |
+          python -m pip install --quiet pytest pandas
+          sudo apt-get update -qq
+          sudo apt-get install -y bubblewrap
+      - name: Run sandbox integration tests (must execute)
+        env:
+          PYTHONPATH: src
+          RC_REQUIRE_SANDBOX: "1"
+        run: >-
+          python -m pytest -q
+          tests/test_sandbox.py
+          tests/test_round3_fixes.py
+          tests/test_round5_fixes.py
+          tests/test_review_fixes.py

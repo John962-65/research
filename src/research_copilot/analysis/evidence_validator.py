@@ -434,3 +434,50 @@ def apply_validation(finding: Finding, validation: dict[str, Any]) -> Finding:
     if validation.get("status") == "verified" and validation.get("verified_statement"):
         finding.statement = validation["verified_statement"]
     return finding
+
+
+def evidence_verification_coverage(findings: list[Finding]) -> dict[str, Any]:
+    """汇总本次诊断结构化主张的程序复核覆盖率。
+
+    Coverage 是能得到 pass 或 fail 结果的主张比例；无法复核和缺失检查均保留在分母中。
+    自由文本中的未结构化主张不计入此指标。
+    """
+    def summarize(total: int, checks: list[dict[str, Any]]) -> dict[str, Any]:
+        statuses = [item.get("status") for item in checks[:total]]
+        verified = sum(status == "pass" for status in statuses)
+        contradicted = sum(status == "fail" for status in statuses)
+        checked = verified + contradicted
+        unverifiable = max(0, total - checked)
+
+        def rate(count: int) -> float | None:
+            return round(count / total, 4) if total else None
+
+        return {
+            "n_claims": total,
+            "n_programmatically_checked": checked,
+            "coverage_rate": rate(checked),
+            "n_verified": verified,
+            "verified_rate": rate(verified),
+            "n_contradicted": contradicted,
+            "contradicted_rate": rate(contradicted),
+            "n_unverifiable": unverifiable,
+            "unverifiable_rate": rate(unverifiable),
+        }
+
+    numeric_total = relation_total = 0
+    numeric_checks: list[dict[str, Any]] = []
+    relation_checks: list[dict[str, Any]] = []
+    for finding in findings:
+        numeric_total += len(finding.numeric_assertions or [])
+        relation_total += len(finding.claims or [])
+        l2 = (finding.validation or {}).get("l2") or {}
+        if isinstance(l2, dict):
+            numeric_checks.extend(l2.get("checks") or [])
+            relation_checks.extend(l2.get("relation_checks") or [])
+
+    return {
+        "definition": "Coverage = (程序复核为 pass 或 fail 的结构化主张数) / (声明总数)；无法复核与缺失检查保留在分母中。",
+        "scope": "本次诊断的结构化数值断言和关系主张；自由文本未结构化主张不计入。",
+        "numeric_assertions": summarize(numeric_total, numeric_checks),
+        "relation_claims": summarize(relation_total, relation_checks),
+    }

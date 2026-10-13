@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from ..analysis.anomaly_detection import compact_direction_noise, detect_anomalies, detect_anomalies_compact, tail_report
-from ..analysis.evidence_validator import apply_validation, validate_finding
+from ..analysis.evidence_validator import apply_validation, evidence_verification_coverage, validate_finding
 from ..analysis.statistics import compare_metric, group_profile, resolve_direction
 from ..core.models import EvidenceRef, Finding, Material, NumericAssertion, Observation, RelationClaim
 from ..core.storage import ProjectStore, now_iso
@@ -397,6 +397,7 @@ def run_diagnosis(
         "llm_usage": usage,
         "n_observations": len(all_observations),
         "n_findings": len(findings),
+        "evidence_verification_coverage": evidence_verification_coverage(findings),
         "findings_by_type": _count_by_type(findings),
         "n_questions_proposed": len(questions),
         "claim_counts": claim_counts,
@@ -477,6 +478,21 @@ def render_diagnosis_markdown(report: dict[str, Any], project_name: str) -> str:
         f"- {report['honesty_note']}",
         "",
     ]
+    coverage = report.get("evidence_verification_coverage") or {}
+    lines += ["## Evidence Verification Coverage（证据验证覆盖率）", "", str(coverage.get("definition") or "")]
+
+    def format_rate(value: Any) -> str:
+        return f"{value:.1%}" if isinstance(value, (int, float)) else "—"
+
+    for key, label in (("numeric_assertions", "数值断言"), ("relation_claims", "关系主张")):
+        stats = coverage.get(key) or {}
+        lines.append(
+            f"- {label}：声明 {stats.get('n_claims', 0)}；程序复核覆盖率 {format_rate(stats.get('coverage_rate'))}；"
+            f"已验证 {stats.get('n_verified', 0)}（{format_rate(stats.get('verified_rate'))}）；"
+            f"复核矛盾 {stats.get('n_contradicted', 0)}（{format_rate(stats.get('contradicted_rate'))}）；"
+            f"无法复核 {stats.get('n_unverifiable', 0)}（{format_rate(stats.get('unverifiable_rate'))}）"
+        )
+    lines.append("")
     if report["skipped_materials"]:
         lines += ["## 被跳过的材料", ""]
         for item in report["skipped_materials"]:
